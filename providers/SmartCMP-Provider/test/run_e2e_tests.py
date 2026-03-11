@@ -1,0 +1,389 @@
+#!/usr/bin/env python3
+"""
+SmartCMP-Provider End-to-End Test Script
+
+Usage:
+    python run_e2e_tests.py
+    python run_e2e_tests.py --url http://localhost/platform-api --cookie "YOUR_COOKIE"
+
+All interactive prompts default to the first option.
+"""
+import os
+import sys
+import json
+import re
+import subprocess
+import argparse
+from pathlib import Path
+
+# ============================================================================
+# Configuration
+# ============================================================================
+SCRIPT_DIR = Path(__file__).parent
+PROVIDER_ROOT = SCRIPT_DIR.parent
+
+DEFAULT_URL = "http://localhost/platform-api"
+DEFAULT_COOKIE = "JSESSIONID=BF8FE40B1F512880116C71ECA2C7C5E9; username=%E5%B9%B3%E5%8F%B0%E7%AE%A1%E7%90%86%E5%91%98; userId=d4153d41-10a7-470c-b21a-8cee6243672e; userLoginId=admin; useremail=%28AES%29qK2pKqGW5NjauE3iJehRGA%3D%3D; tenantname=%E9%BB%98%E8%AE%A4%E7%A7%9F%E6%88%B7; tenant_id=default; userLastLogin=2026-03-11+15%3A47%3A34; CloudChef-Authenticate=eyJhbGciOiJIUzI1NiJ9.eyJ0ZW5hbnRJZCI6ImRlZmF1bHQiLCJzdWIiOiJkNDE1M2Q0MS0xMGE3LTQ3MGMtYjIxYS04Y2VlNjI0MzY3MmUiLCJleHAiOjE3NzMyMTkwMjQsImlhdCI6MTc3MzIxNzIyNH0.in-ONhWQe89iRhbf9mN_KpGd8gQP91_13wSm9eK3y84; CloudChef-Authenticate-Refresh=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJkNDE1M2Q0MS0xMGE3LTQ3MGMtYjIxYS04Y2VlNjI0MzY3MmUiLCJleHAiOjE3NzMyMjQ0MjQsImlhdCI6MTc3MzIxNzIyNH0.yRwb8PfdjPJ9hVknC2Kd2lUc3_cHdW64jas2A15mWBo"
+
+# Test results
+test_results = {"passed": 0, "failed": 0, "skipped": 0, "details": []}
+
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+class Colors:
+    GREEN = "\033[92m"
+    RED = "\033[91m"
+    YELLOW = "\033[93m"
+    CYAN = "\033[96m"
+    GRAY = "\033[90m"
+    WHITE = "\033[97m"
+    RESET = "\033[0m"
+
+
+def print_header(title: str):
+    print(f"\n{Colors.CYAN}{'=' * 70}")
+    print(f"  {title}")
+    print(f"{'=' * 70}{Colors.RESET}")
+
+
+def print_result(test_name: str, success: bool, message: str = ""):
+    global test_results
+    status = "[PASS]" if success else "[FAIL]"
+    color = Colors.GREEN if success else Colors.RED
+    
+    print(f"{color}{status}{Colors.RESET} {test_name}")
+    if message:
+        print(f"       {Colors.GRAY}{message}{Colors.RESET}")
+    
+    if success:
+        test_results["passed"] += 1
+    else:
+        test_results["failed"] += 1
+    
+    test_results["details"].append({
+        "name": test_name,
+        "success": success,
+        "message": message
+    })
+
+
+def print_skip(test_name: str, reason: str = ""):
+    global test_results
+    print(f"{Colors.YELLOW}[SKIP]{Colors.RESET} {test_name}")
+    if reason:
+        print(f"       {Colors.GRAY}{reason}{Colors.RESET}")
+    test_results["skipped"] += 1
+
+
+def run_script(script_path: str, args: list = None) -> tuple:
+    """Run a Python script and return (success, output)."""
+    full_path = PROVIDER_ROOT / script_path
+    if not full_path.exists():
+        return False, f"Script not found: {script_path}"
+    
+    cmd = [sys.executable, str(full_path)]
+    if args:
+        cmd.extend(args)
+    
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env={**os.environ, "CMP_URL": os.environ.get("CMP_URL", ""), 
+                 "CMP_COOKIE": os.environ.get("CMP_COOKIE", "")}
+        )
+        output = result.stdout + result.stderr
+        return result.returncode == 0, output
+    except subprocess.TimeoutExpired:
+        return False, "Script timeout"
+    except Exception as e:
+        return False, str(e)
+
+
+def extract_meta_json(output: str, start_tag: str, end_tag: str):
+    """Extract JSON from META block in output."""
+    pattern = f"{re.escape(start_tag)}\\s*([\\s\\S]*?)\\s*{re.escape(end_tag)}"
+    match = re.search(pattern, output)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except json.JSONDecodeError:
+            return None
+    return None
+
+
+def extract_id_from_output(output: str) -> str:
+    """Extract first ID from (id: xxx) pattern."""
+    match = re.search(r"\(id:\s*([a-f0-9-]+)\)", output)
+    return match.group(1) if match else None
+
+
+def check_syntax(script_path: str) -> bool:
+    """Check Python script syntax."""
+    full_path = PROVIDER_ROOT / script_path
+    if not full_path.exists():
+        return False
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "py_compile", str(full_path)],
+            capture_output=True,
+            timeout=10
+        )
+        return result.returncode == 0
+    except:
+        return False
+
+
+# ============================================================================
+# Test Suite
+# ============================================================================
+def run_tests():
+    global test_results
+    
+    # Banner
+    print(f"""
+{Colors.YELLOW}
+  ____                       _    ____ __  __ ____  
+ / ___| _ __ ___   __ _ _ __| |_ / ___|  \\/  |  _ \\ 
+ \\___ \\| '_ ` _ \\ / _` | '__| __| |   | |\\/| | |_) |
+  ___) | | | | | | (_| | |  | |_| |___| |  | |  __/ 
+ |____/|_| |_| |_|\\__,_|_|   \\__|\\____|_|  |_|_|    
+                                                    
+  Provider E2E Test Suite (Python)
+{Colors.RESET}""")
+    
+    print(f"{Colors.WHITE}Configuration:{Colors.RESET}")
+    print(f"  {Colors.GRAY}CMP_URL:  {os.environ.get('CMP_URL', 'NOT SET')}{Colors.RESET}")
+    cookie = os.environ.get('CMP_COOKIE', '')
+    print(f"  {Colors.GRAY}Cookie:   {cookie[:50]}...{Colors.RESET}" if len(cookie) > 50 else f"  {Colors.GRAY}Cookie:   {cookie}{Colors.RESET}")
+    print(f"  {Colors.GRAY}Provider: {PROVIDER_ROOT}{Colors.RESET}")
+
+    # -------------------------------------------------------------------------
+    # Test 1: Environment & Syntax Check
+    # -------------------------------------------------------------------------
+    print_header("1. Environment & Syntax Check")
+    
+    # Check Python
+    print_result("Python Available", True, f"Python {sys.version.split()[0]}")
+    
+    # Syntax check for all scripts
+    scripts = [
+        "skills/shared/scripts/list_services.py",
+        "skills/shared/scripts/list_business_groups.py",
+        "skills/shared/scripts/list_components.py",
+        "skills/shared/scripts/list_resource_pools.py",
+        "skills/shared/scripts/list_applications.py",
+        "skills/shared/scripts/list_os_templates.py",
+        "skills/shared/scripts/list_cloud_entry_types.py",
+        "skills/shared/scripts/list_images.py",
+        "skills/approval/scripts/list_pending.py",
+        "skills/approval/scripts/approve.py",
+        "skills/approval/scripts/reject.py",
+        "skills/request/scripts/submit.py",
+    ]
+    
+    syntax_ok = all(check_syntax(s) for s in scripts)
+    print_result(f"All Scripts Syntax Check ({len(scripts)} files)", syntax_ok)
+
+    # -------------------------------------------------------------------------
+    # Test 2: Datasource Skill Tests
+    # -------------------------------------------------------------------------
+    print_header("2. Datasource Skill Tests")
+    
+    catalog_id = None
+    source_key = None
+    bg_id = None
+    node_type = None
+    resource_pool_id = None
+    
+    # list_services.py
+    success, output = run_script("skills/shared/scripts/list_services.py")
+    print_result("list_services.py", success, f"Exit code: {0 if success else 1}")
+    if success:
+        meta = extract_meta_json(output, "##CATALOG_META_START##", "##CATALOG_META_END##")
+        if meta and len(meta) > 0:
+            catalog_id = meta[0].get("id")
+            source_key = meta[0].get("sourceKey")
+            print(f"       {Colors.GRAY}Found {len(meta)} catalog(s), using first: {meta[0].get('name')}{Colors.RESET}")
+    
+    # list_business_groups.py
+    if catalog_id:
+        success, output = run_script("skills/shared/scripts/list_business_groups.py", [catalog_id])
+        print_result("list_business_groups.py", success, f"Exit code: {0 if success else 1}")
+        if success:
+            bg_id = extract_id_from_output(output)
+            if bg_id:
+                print(f"       {Colors.GRAY}Using first business group ID: {bg_id}{Colors.RESET}")
+    else:
+        print_skip("list_business_groups.py", "No catalogId available")
+    
+    # list_components.py
+    if source_key:
+        success, output = run_script("skills/shared/scripts/list_components.py", [source_key])
+        print_result("list_components.py", success, f"Exit code: {0 if success else 1}")
+        if success:
+            meta = extract_meta_json(output, "##COMPONENT_META_START##", "##COMPONENT_META_END##")
+            if meta and meta.get("typeName"):
+                node_type = meta.get("typeName")
+                print(f"       {Colors.GRAY}Component type: {node_type}{Colors.RESET}")
+    else:
+        print_skip("list_components.py", "No sourceKey available")
+    
+    # list_applications.py
+    if bg_id:
+        success, output = run_script("skills/shared/scripts/list_applications.py", [bg_id])
+        print_result("list_applications.py", success, f"Exit code: {0 if success else 1}")
+    else:
+        print_skip("list_applications.py", "No bgId available")
+    
+    # list_resource_pools.py
+    if bg_id and source_key and node_type:
+        success, output = run_script("skills/shared/scripts/list_resource_pools.py", [bg_id, source_key, node_type])
+        print_result("list_resource_pools.py", success, f"Exit code: {0 if success else 1}")
+        if success:
+            meta = extract_meta_json(output, "##RESOURCE_POOL_META_START##", "##RESOURCE_POOL_META_END##")
+            if meta and len(meta) > 0:
+                resource_pool_id = meta[0].get("id")
+                print(f"       {Colors.GRAY}Found {len(meta)} resource pool(s), using first: {meta[0].get('name')}{Colors.RESET}")
+    else:
+        print_skip("list_resource_pools.py", "Missing required params")
+    
+    # list_os_templates.py
+    if resource_pool_id:
+        success, output = run_script("skills/shared/scripts/list_os_templates.py", ["Linux", resource_pool_id])
+        print_result("list_os_templates.py", success, f"Exit code: {0 if success else 1}")
+    else:
+        print_skip("list_os_templates.py", "No resourcePoolId available")
+    
+    # list_images.py - skip (requires complete workflow chain)
+    print_skip("list_images.py", "Requires complete workflow chain")
+    
+    # list_cloud_entry_types.py
+    success, output = run_script("skills/shared/scripts/list_cloud_entry_types.py")
+    print_result("list_cloud_entry_types.py", success, f"Exit code: {0 if success else 1}")
+
+    # -------------------------------------------------------------------------
+    # Test 3: Approval Skill Tests
+    # -------------------------------------------------------------------------
+    print_header("3. Approval Skill Tests")
+    
+    success, output = run_script("skills/approval/scripts/list_pending.py")
+    print_result("list_pending.py", success, f"Exit code: {0 if success else 1}")
+    if success:
+        meta = extract_meta_json(output, "##APPROVAL_META_START##", "##APPROVAL_META_END##")
+        if meta and len(meta) > 0:
+            print(f"       {Colors.GRAY}Found {len(meta)} pending approval(s){Colors.RESET}")
+        else:
+            print(f"       {Colors.GRAY}No pending approvals found (this is OK){Colors.RESET}")
+    
+    print_skip("approve.py", "Skipped to avoid side effects")
+    print_skip("reject.py", "Skipped to avoid side effects")
+
+    # -------------------------------------------------------------------------
+    # Test 4: Request Skill Tests
+    # -------------------------------------------------------------------------
+    print_header("4. Request Skill Tests")
+    
+    success, output = run_script("skills/request/scripts/submit.py", ["--help"])
+    # --help returns exit code 0 or shows usage
+    print_result("submit.py --help", "usage:" in output.lower() or success, "Help output available")
+
+    # -------------------------------------------------------------------------
+    # Test 5: SKILL.md Definition Validation
+    # -------------------------------------------------------------------------
+    print_header("5. SKILL.md Definition Validation")
+    
+    skill_dirs = [
+        "skills/approval",
+        "skills/datasource",
+        "skills/request",
+        "skills/preapproval-agent",
+        "skills/request-decomposition-agent",
+    ]
+    
+    for skill_dir in skill_dirs:
+        skill_path = PROVIDER_ROOT / skill_dir / "SKILL.md"
+        skill_name = Path(skill_dir).name
+        
+        if skill_path.exists():
+            content = skill_path.read_text(encoding="utf-8")
+            has_name = "name:" in content
+            has_desc = "description:" in content
+            print_result(f"{skill_name}/SKILL.md", has_name and has_desc, "Valid structure" if has_name and has_desc else "Missing name or description")
+        else:
+            print_result(f"{skill_name}/SKILL.md", False, "File not found")
+
+    # -------------------------------------------------------------------------
+    # Test 6: Reference Files Validation
+    # -------------------------------------------------------------------------
+    print_header("6. Reference Files Validation")
+    
+    ref_files = [
+        "skills/approval/references/WORKFLOW.md",
+        "skills/datasource/references/WORKFLOW.md",
+        "skills/request/references/WORKFLOW.md",
+        "skills/request/references/PARAMS.md",
+        "skills/request/references/EXAMPLES.md",
+        "skills/preapproval-agent/references/review-guidelines.md",
+        "skills/request-decomposition-agent/references/decomposition-guidelines.md",
+    ]
+    
+    for ref in ref_files:
+        full_path = PROVIDER_ROOT / ref
+        print_result(ref, full_path.exists())
+
+    # -------------------------------------------------------------------------
+    # Test Summary
+    # -------------------------------------------------------------------------
+    print(f"\n{Colors.CYAN}{'=' * 70}")
+    print("  TEST SUMMARY")
+    print(f"{'=' * 70}{Colors.RESET}\n")
+    
+    total = test_results["passed"] + test_results["failed"]
+    pass_rate = (test_results["passed"] / total * 100) if total > 0 else 0
+    
+    print(f"  {Colors.GREEN}Passed:  {test_results['passed']}{Colors.RESET}")
+    print(f"  {Colors.RED}Failed:  {test_results['failed']}{Colors.RESET}")
+    print(f"  {Colors.YELLOW}Skipped: {test_results['skipped']}{Colors.RESET}")
+    print(f"  {Colors.WHITE}Total:   {total}{Colors.RESET}")
+    print()
+    
+    rate_color = Colors.GREEN if pass_rate >= 80 else (Colors.YELLOW if pass_rate >= 60 else Colors.RED)
+    print(f"  {rate_color}Pass Rate: {pass_rate:.1f}%{Colors.RESET}\n")
+    
+    # List failed tests
+    if test_results["failed"] > 0:
+        print(f"  {Colors.RED}Failed Tests:{Colors.RESET}")
+        for detail in test_results["details"]:
+            if not detail["success"]:
+                print(f"    - {detail['name']}: {detail['message']}")
+        print()
+    
+    print(f"{Colors.CYAN}{'=' * 70}{Colors.RESET}\n")
+    
+    return 0 if test_results["failed"] == 0 else 1
+
+
+# ============================================================================
+# Main
+# ============================================================================
+def main():
+    parser = argparse.ArgumentParser(description="SmartCMP-Provider E2E Test Suite")
+    parser.add_argument("--url", default=DEFAULT_URL, help="CMP API URL")
+    parser.add_argument("--cookie", default=DEFAULT_COOKIE, help="CMP Cookie string")
+    args = parser.parse_args()
+    
+    # Set environment variables
+    os.environ["CMP_URL"] = args.url
+    os.environ["CMP_COOKIE"] = args.cookie
+    
+    exit_code = run_tests()
+    sys.exit(exit_code)
+
+
+if __name__ == "__main__":
+    main()
