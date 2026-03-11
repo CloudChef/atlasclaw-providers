@@ -35,16 +35,16 @@ If `agent_identity` is not `agent-approver`, stop. This skill must run only unde
 
 This skill must not access CMP directly. It should orchestrate existing provider skills only.
 
-- `cmp/approval/get_approval_detail`
-- `cmp/approval/approve_request`
-- `cmp/approval/reject_request`
+- `approval/list_pending.py` — Fetch pending approval details (use `##APPROVAL_META##` block for structured data)
+- `approval/approve.py` — Execute approval with optional reason
+- `approval/reject.py` — Execute rejection with reason
 
 If the provider later exposes helper skills for ID resolution or enrichment, they may be used before review. Keep this skill focused on decisioning and orchestration.
 
 ## Workflow
 
 1. Validate input identifiers and provider instance.
-2. Fetch full approval context via `cmp/approval/get_approval_detail`.
+2. Fetch full approval context via `approval/list_pending.py` (filter by approval_id from META block).
 3. Build a review summary from:
    - service or request name
    - requester notes
@@ -57,8 +57,8 @@ If the provider later exposes helper skills for ID resolution or enrichment, the
    - `reject_with_guidance`: request is not reasonable or not sufficiently justified
    - `manual_review_required`: evidence is incomplete, identifier cannot be resolved, or the case is high risk
 6. Execute the decision:
-   - for `approve`, call `cmp/approval/approve_request`
-   - for `reject_with_guidance`, call `cmp/approval/reject_request`
+   - for `approve`, call `approval/approve.py <approval_id> --reason "<comment>"`
+   - for `reject_with_guidance`, call `approval/reject.py <approval_id> --reason "<comment>"`
    - for `manual_review_required`, prefer reject with a clear reason unless the surrounding workflow explicitly supports a non-terminal manual handoff
 7. Return a structured result with decision, rationale, key signals, and the provider operation outcome.
 
@@ -121,7 +121,7 @@ Return a structured summary like:
   ],
   "improvement_suggestions": [],
   "provider_action": {
-    "skill": "cmp/approval/approve_request",
+    "skill": "approval/approve.py",
     "success": true
   }
 }

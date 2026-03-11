@@ -34,10 +34,11 @@ If `agent_identity` is not `agent-request-orchestrator`, stop. This skill must r
 
 This skill must not access CMP directly. It should orchestrate existing provider skills only.
 
-- `cmp/datasource/list_services`
-- `cmp/datasource/get_service_schema`
-- other `cmp/datasource/*` operations when parameter resolution is needed
-- `cmp/request/submit_request`
+- `datasource/list_services.py` — List available service catalogs
+- `datasource/list_components.py` — Get component type information (nodeType, osType)
+- `datasource/list_business_groups.py` — List business groups for a catalog
+- `datasource/list_resource_pools.py` — List available resource pools
+- `request/submit.py` — Submit the assembled request
 
 ## Workflow
 

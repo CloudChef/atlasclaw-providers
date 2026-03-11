@@ -33,7 +33,7 @@ SmartCMP cloud management platform service for resource provisioning, approval w
         "default_business_group": "47673d8d-6b3f-41e1-8ec0-c37e082d9020"
       },
       "dev": {
-        "base_url": "https://cmp-dev.corp.com/platform-api",
+        "base_url": "https://192.168.176.150/platform-api",
         "cookie": "${CMP_DEV_COOKIE}"
       }
     }
