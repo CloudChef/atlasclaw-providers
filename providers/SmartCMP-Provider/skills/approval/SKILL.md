@@ -1,6 +1,17 @@
 ---
 name: "approval"
-description: "SmartCMP approval management. Trigger when user asks to view pending approvals, approve requests, or reject requests."
+description: "SmartCMP approval management. Use for: view pending approvals, check approval list, approve or reject requests. Keywords: approval, pending, approve, reject"
+provider_type: "smartcmp"
+instance_required: "true"
+tool_list_name: "smartcmp_list_pending"
+tool_list_description: "List pending approvals from SmartCMP. The system automatically selects and injects the provider instance configuration."
+tool_list_entrypoint: "scripts/list_pending.py"
+tool_approve_name: "smartcmp_approve"
+tool_approve_description: "Approve requests in SmartCMP. The system automatically selects and injects the provider instance configuration."
+tool_approve_entrypoint: "scripts/approve.py"
+tool_reject_name: "smartcmp_reject"
+tool_reject_description: "Reject requests in SmartCMP. The system automatically selects and injects the provider instance configuration."
+tool_reject_entrypoint: "scripts/reject.py"
 ---
 
 # approval
@@ -15,8 +26,11 @@ Manage SmartCMP approval workflows including querying pending approvals, approvi
 
 Use this skill when user intent is any of:
 - View pending approvals / list approvals / check what needs approval
+- 查看待审批单据 / 查看审批 / 有哪些需要审批的
 - Approve a request / approve all / batch approve
+- 审批通过 / 同意申请
 - Reject a request / deny request / batch reject
+- 拒绝申请 / 驳回请求
 
 ## Script Entry Points
 
@@ -26,15 +40,31 @@ All scripts are in `scripts/`:
 - `scripts/approve.py` — Approve one or more requests
 - `scripts/reject.py` — Reject one or more requests
 
-## Invocation Guidance
+## Execution Workflow (REQUIRED)
+
+**CRITICAL: Follow these steps in order:**
+
+1. **Select Provider Instance** (REQUIRED)
+   - First, check if a provider instance is already selected in the conversation context
+   - If not, use `list_provider_instances` to see available providers
+   - Then use `select_provider_instance` tool with the appropriate provider_type and instance_name
+   - This injects the provider configuration into deps.extra
+
+2. **Execute Script with Environment Variables** (REQUIRED)
+   - Change to skill directory: `cd <skill_location>`
+   - Set environment variables from the selected provider instance:
+     ```bash
+     export CMP_URL=<provider_instance.cmp_url>
+     export CMP_COOKIE=<provider_instance.cookie>
+     ```
+   - Run the script: `python scripts/list_pending.py`
 
 ### Query pending approvals
 
-When user says "show me pending approvals" or "what needs my approval":
+When user says "show me pending approvals", "what needs my approval", or "查看待审批单据":
 
-```bash
-python scripts/list_pending.py
-```
+1. Select provider instance (if not already selected): `select_provider_instance` with appropriate provider_type and instance_name
+2. Execute: `cd <skill_location> && export CMP_URL=<cmp_url> && export CMP_COOKIE=<cookie> && python scripts/list_pending.py`
 
 Output: numbered list of pending items with enhanced details:
 - Priority indicator (🔴High/🟡Medium/🟢Low) with intelligent scoring

@@ -1,6 +1,6 @@
 ---
 name: "request"
-description: "Submit cloud resource or application provisioning requests via SmartCMP. Trigger when user wants to provision, deploy, create VMs, or request cloud resources."
+description: "SmartCMP resource request. Create VM, provision cloud resources, deploy applications."
 ---
 
 # request
@@ -16,8 +16,11 @@ Submit cloud resource or application provisioning requests through SmartCMP plat
 Use this skill when user intent is any of:
 - Provision / deploy resources
 - Create virtual machine / VM
+- 创建虚拟机 / VM申请 / 申请虚拟机
 - Request cloud resources
+- 申请云资源 / 资源申请
 - Deploy application
+- 部署应用
 
 ## Script Entry Points
 
