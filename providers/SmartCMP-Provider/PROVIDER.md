@@ -37,7 +37,7 @@ SmartCMP cloud management platform service for resource provisioning, approval w
         "default_business_group": "47673d8d-6b3f-41e1-8ec0-c37e082d9020"
       },
       "dev": {
-        "base_url": "https://192.168.176.150/platform-api",
+        "base_url": "https://<your-cmp-host>/platform-api",
         "cookie": "${CMP_DEV_COOKIE}"
       }
     }
@@ -52,16 +52,16 @@ Set credentials in `.env` or shell profile:
 **PowerShell:**
 ```powershell
 # CMP_URL auto-normalizes: adds https:// and /platform-api if missing
-$env:CMP_URL = "192.168.176.150"           # → https://192.168.176.150/platform-api
-$env:CMP_URL = "cmp.corp.com"              # → https://cmp.corp.com/platform-api
-$env:CMP_URL = "https://cmp.corp.com"      # → https://cmp.corp.com/platform-api
+$env:CMP_URL = "<your-cmp-host>"           # → https://<your-cmp-host>/platform-api
+$env:CMP_URL = "cmp.example.com"           # → https://cmp.example.com/platform-api
+$env:CMP_URL = "https://cmp.example.com"   # → https://cmp.example.com/platform-api
 $env:CMP_COOKIE = "<full cookie string>"
 ```
 
 **Bash:**
 ```bash
 # Same auto-normalization applies
-export CMP_URL="192.168.176.150"
+export CMP_URL="<your-cmp-host>"
 export CMP_COOKIE="<full cookie string>"
 ```
 

@@ -54,13 +54,13 @@ Use this skill when user intent is any of:
 
 ```powershell
 # PowerShell - CMP_URL auto-normalizes (adds /platform-api if missing)
-$env:CMP_URL = "192.168.176.150"           # or "https://cmp.corp.com/platform-api"
+$env:CMP_URL = "<your-cmp-host>"           # e.g., "cmp.example.com" or "https://cmp.example.com/platform-api"
 $env:CMP_COOKIE = '<full cookie string>'
 ```
 
 ```bash
 # Bash
-export CMP_URL="192.168.176.150"
+export CMP_URL="<your-cmp-host>"
 export CMP_COOKIE="<full cookie string>"
 ```
 
