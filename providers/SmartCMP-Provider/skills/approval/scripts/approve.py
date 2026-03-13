@@ -40,26 +40,40 @@ except ImportError:
 BASE_URL, COOKIE, HEADERS = require_config()
 
 # ── Parse arguments ───────────────────────────────────────────────────────────
+# Priority: Environment variables > Command line arguments
+# Framework passes tool parameters as environment variables (IDS, REASON)
 ids = []
 reason = ""
-i = 1
-while i < len(sys.argv):
-    arg = sys.argv[i]
-    if arg == "--reason" and i + 1 < len(sys.argv):
-        reason = sys.argv[i + 1]
-        i += 2
-    elif not arg.startswith("--"):
-        ids.append(arg)
-        i += 1
-    else:
-        i += 1
+
+# Try environment variables first (from framework tool call)
+env_ids = os.environ.get("IDS", "")
+env_reason = os.environ.get("REASON", "")
+
+if env_ids:
+    # Split by space or comma
+    ids = [x.strip() for x in env_ids.replace(",", " ").split() if x.strip()]
+    reason = env_reason
+else:
+    # Fall back to command line arguments
+    i = 1
+    while i < len(sys.argv):
+        arg = sys.argv[i]
+        if arg == "--reason" and i + 1 < len(sys.argv):
+            reason = sys.argv[i + 1]
+            i += 2
+        elif not arg.startswith("--"):
+            ids.append(arg)
+            i += 1
+        else:
+            i += 1
 
 if not ids:
     print("[ERROR] At least one approval ID is required.")
     print()
     print("Usage: python approve.py <id1> [id2 ...] [--reason \"Reason\"]")
+    print("   Or: Set IDS and REASON environment variables")
     print()
-    print("Get IDs from: python list_pending.py → ##APPROVAL_META##")
+    print("Get IDs from: python list_pending.py -> ##APPROVAL_META##")
     sys.exit(1)
 
 headers = {"Content-Type": "application/json; charset=utf-8", "Cookie": COOKIE}

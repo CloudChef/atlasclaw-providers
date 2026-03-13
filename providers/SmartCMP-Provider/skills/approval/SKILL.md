@@ -39,9 +39,39 @@ tool_list_entrypoint: "scripts/list_pending.py"
 tool_approve_name: "smartcmp_approve"
 tool_approve_description: "Approve requests in SmartCMP. The system automatically selects and injects the provider instance configuration."
 tool_approve_entrypoint: "scripts/approve.py"
+tool_approve_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "ids": {
+        "type": "string",
+        "description": "Approval ID(s) to approve. For multiple IDs, separate with space: 'id1 id2 id3'"
+      },
+      "reason": {
+        "type": "string",
+        "description": "Optional approval reason"
+      }
+    },
+    "required": ["ids"]
+  }
 tool_reject_name: "smartcmp_reject"
 tool_reject_description: "Reject requests in SmartCMP. The system automatically selects and injects the provider instance configuration."
 tool_reject_entrypoint: "scripts/reject.py"
+tool_reject_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "ids": {
+        "type": "string",
+        "description": "Approval ID(s) to reject. For multiple IDs, separate with space: 'id1 id2 id3'"
+      },
+      "reason": {
+        "type": "string",
+        "description": "Rejection reason (recommended)"
+      }
+    },
+    "required": ["ids"]
+  }
 ---
 
 # approval
