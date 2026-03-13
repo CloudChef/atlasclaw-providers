@@ -44,7 +44,23 @@ _SAAS_DOMAINS = ["smartcmp.cloud", "cloudchef.io"]
 _SAAS_AUTH_URL = "https://account.smartcmp.cloud/bss-api/api/authentication"
 
 # Cookie cache configuration - store in workspace sessions directory
-_CACHE_DIR = Path.cwd() / ".atlasclaw" / "users" / "default" / "sessions"
+# Priority: ATLASCLAW_ROOT env var > current working directory
+def _get_cache_dir() -> Path:
+    """Get the cache directory path.
+    
+    Uses ATLASCLAW_ROOT environment variable if set (recommended),
+    otherwise falls back to current working directory.
+    
+    Returns:
+        Path to the cache directory
+    """
+    atlasclaw_root = os.environ.get("ATLASCLAW_ROOT", "")
+    if atlasclaw_root:
+        return Path(atlasclaw_root) / ".atlasclaw" / "users" / "default" / "sessions"
+    # Fallback to cwd (may not work correctly when script runs from provider directory)
+    return Path.cwd() / ".atlasclaw" / "users" / "default" / "sessions"
+
+_CACHE_DIR = _get_cache_dir()
 _COOKIE_CACHE_FILE = _CACHE_DIR / "smartcmp_cookie_cache.json"
 _COOKIE_TTL_SECONDS = 1800  # 30 minutes
 
@@ -192,7 +208,7 @@ def _auto_login(auth_url: str, username: str, password: str) -> str:
     Args:
         auth_url: Authentication endpoint URL
         username: Login username
-        password: Login password
+        password: Login password (plaintext or MD5 hash)
         
     Returns:
         Cookie string for subsequent requests
@@ -200,6 +216,12 @@ def _auto_login(auth_url: str, username: str, password: str) -> str:
     Raises:
         RuntimeError: If login fails
     """
+    import hashlib
+    
+    # Auto-detect: if password is not 32-char hex (MD5 format), auto-encrypt it
+    if not (len(password) == 32 and all(c in '0123456789abcdefABCDEF' for c in password)):
+        password = hashlib.md5(password.encode()).hexdigest()
+    
     try:
         resp = requests.post(
             auth_url,
