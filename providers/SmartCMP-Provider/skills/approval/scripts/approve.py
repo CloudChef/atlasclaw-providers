@@ -30,10 +30,10 @@ import json
 import requests
 
 # Import shared utilities (handles URL normalization, SSL warnings)
+import os
 try:
     from _common import require_config
 except ImportError:
-    import os
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared', 'scripts'))
     from _common import require_config
 

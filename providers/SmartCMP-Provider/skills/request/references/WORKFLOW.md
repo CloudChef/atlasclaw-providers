@@ -12,13 +12,106 @@ Set environment variables before running any script:
 # PowerShell
 $env:CMP_URL = "<your-cmp-host>"
 $env:CMP_COOKIE = '<full cookie string>'
+
+# Or use auto-login (recommended)
+$env:CMP_URL = "<your-cmp-host>"
+$env:CMP_USERNAME = "<username>"
+$env:CMP_PASSWORD = "<password>"
 ```
 
 ```bash
 # Bash
 export CMP_URL="<your-cmp-host>"
 export CMP_COOKIE="<full cookie string>"
+
+# Or use auto-login (recommended)
+export CMP_URL="<your-cmp-host>"
+export CMP_USERNAME="<username>"
+export CMP_PASSWORD="<password>"
 ```
+
+---
+
+## Dependency Chain (CRITICAL)
+
+> **Before submitting any request, you MUST gather all required IDs in order.**
+
+### Ticket Flow Dependencies
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    TICKET SUBMISSION DEPENDENCY CHAIN               │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  [1] list_services.py                                               │
+│       │                                                             │
+│       ├── Output: catalogId, catalogName, serviceCategory          │
+│       │                                                             │
+│       ▼                                                             │
+│  [2] list_business_groups.py <catalogId>    ◄── REQUIRES catalogId │
+│       │                                                             │
+│       ├── Output: businessGroupId, businessGroupName                │
+│       │                                                             │
+│       ▼                                                             │
+│  [3] submit.py --file request.json                                  │
+│       │                                                             │
+│       └── Request Body REQUIRES:                                    │
+│           • catalogName     (from step 1)                           │
+│           • userId          (UUID, NOT email)                       │
+│           • businessGroupId (from step 2)                           │
+│           • name            (user input)                            │
+│           • manualRequest.description (user input)                  │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Cloud Resource Flow Dependencies
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│               CLOUD RESOURCE SUBMISSION DEPENDENCY CHAIN            │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  [1] list_services.py                                               │
+│       │                                                             │
+│       ├── Output: catalogId, sourceKey, serviceCategory            │
+│       │                                                             │
+│       ▼                                                             │
+│  [2] list_business_groups.py <catalogId>                            │
+│       │                                                             │
+│       ├── Output: businessGroupId                                   │
+│       │                                                             │
+│       ▼                                                             │
+│  [3] list_components.py <sourceKey>                                 │
+│       │                                                             │
+│       ├── Output: typeName, osType                                  │
+│       │                                                             │
+│       ▼                                                             │
+│  [4] list_resource_pools.py <businessGroupId> <sourceKey> <type>    │
+│       │                                                             │
+│       ├── Output: resourceBundleId, resourceBundleName              │
+│       │                                                             │
+│       ▼                                                             │
+│  [5] list_os_templates.py <osType> <resourceBundleId>               │
+│       │                                                             │
+│       ├── Output: logicTemplateId, logicTemplateName                │
+│       │                                                             │
+│       ▼                                                             │
+│  [6] submit.py --file request.json                                  │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Quick Reference: Required Inputs for Each Script
+
+| Script | Required Input | Source |
+|--------|----------------|--------|
+| `list_services.py` | (none) | - |
+| `list_business_groups.py` | `catalogId` | `list_services.py` output |
+| `list_components.py` | `sourceKey` | `list_services.py` output |
+| `list_resource_pools.py` | `businessGroupId`, `sourceKey`, `nodeType` | Previous outputs |
+| `list_os_templates.py` | `osType`, `resourceBundleId` | Previous outputs |
+| `submit.py` | JSON file with all collected IDs | All above |
 
 ---
 

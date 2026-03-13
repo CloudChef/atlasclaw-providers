@@ -10,6 +10,9 @@ Arguments:
 
 Output:
   - Numbered list of OS templates with IDs and versions (user-visible)
+  - ##OS_TEMPLATE_META_START## ... ##OS_TEMPLATE_META_END##
+      JSON array: [{index, id, name}, ...]
+      Parse silently - do NOT display to user.
 
 Environment:
   CMP_URL             - Base URL (IP, hostname, or full path; auto-normalized)
@@ -23,6 +26,7 @@ Examples:
 """
 import os
 import sys
+import json
 import requests
 
 # Import shared utilities (handles URL normalization, SSL warnings)
@@ -88,3 +92,16 @@ for i, t in enumerate(templates, 1):
     print(display)
 
 print()
+
+# -- META block (agent reads silently, do NOT display to user) -----------------
+meta = [
+    {
+        "index": i + 1,
+        "id":    t.get("id", ""),
+        "name":  t.get("nameZh") or t.get("name") or t.get("templateName", ""),
+    }
+    for i, t in enumerate(templates)
+]
+print("##OS_TEMPLATE_META_START##")
+print(json.dumps(meta, ensure_ascii=False))
+print("##OS_TEMPLATE_META_END##")

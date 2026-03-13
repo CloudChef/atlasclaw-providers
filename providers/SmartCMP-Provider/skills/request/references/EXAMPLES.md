@@ -1,5 +1,25 @@
 # Request Body Examples
 
+## User Identification (userId vs userLoginId)
+
+> **CRITICAL:** Ticket and Cloud Resource requests use DIFFERENT user fields!
+
+| Request Type | Field | Format | Example |
+|--------------|-------|--------|---------|
+| **Ticket (GENERIC_SERVICE)** | `userId` | UUID | `"afe5251b-1d72-49ce-babe-5b8563b7b947"` |
+| **Cloud Resource (VM, etc.)** | `userLoginId` | Email/Login ID | `"admin"` or `"user@example.com"` |
+
+**Why the difference?**
+- Ticket API requires internal user UUID for tracking
+- Cloud Resource API accepts login identifier for flexibility
+
+**How to get userId:**
+- From previous approval list: `applicant` field in `##APPROVAL_META##`
+- From BG_META response: often included in business group context
+- From session context: current authenticated user's UUID
+
+---
+
 ## Ticket (GENERIC_SERVICE)
 
 When `serviceCategory === "GENERIC_SERVICE"`:
@@ -16,13 +36,17 @@ When `serviceCategory === "GENERIC_SERVICE"`:
 }
 ```
 
-| Field | Source |
-|-------|--------|
-| catalogName | CATALOG_META → name |
-| userId | Current session user |
-| businessGroupId | list_business_groups.py → user selection |
-| name | User input |
-| manualRequest.description | User input |
+| Field | Source | Required |
+|-------|--------|----------|
+| catalogName | CATALOG_META → name | Yes |
+| **userId** | **UUID format** (NOT email) | **Yes** |
+| businessGroupId | list_business_groups.py → user selection | Yes |
+| name | User input | Yes |
+| manualRequest.description | User input | Yes |
+
+> **WARNING:** Using `userLoginId` instead of `userId` will fail with error:  
+> `"Missing argument:userId or userLoginId"`  
+> Despite the error message, only `userId` (UUID) works for tickets!
 
 ---
 

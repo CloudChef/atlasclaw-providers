@@ -9,6 +9,9 @@ Arguments:
 
 Output:
   - Numbered list of business groups with IDs (user-visible)
+  - ##BG_META_START## ... ##BG_META_END##
+      JSON array: [{index, id, name}, ...]
+      Parse silently - do NOT display to user.
 
 Environment:
   CMP_URL       - Base URL (IP, hostname, or full path; auto-normalized)
@@ -20,6 +23,7 @@ Examples:
 """
 import os
 import sys
+import json
 import requests
 
 # Import shared utilities (handles URL normalization, SSL warnings)
@@ -54,8 +58,24 @@ if resp.status_code != 200:
 
 result = resp.json()
 items = result if isinstance(result, list) else result.get("content", [])
+
+# -- User-visible list ---------------------------------------------------------
 print(f"Found {len(items)} business group(s):\n")
 for i, bg in enumerate(items):
     name = bg.get("name", "N/A")
     bid = bg.get("id", "N/A")
     print(f"  [{i+1}] {name} (id: {bid})")
+print()
+
+# -- META block (agent reads silently, do NOT display to user) -----------------
+meta = [
+    {
+        "index": i + 1,
+        "id":    bg.get("id", ""),
+        "name":  bg.get("name", ""),
+    }
+    for i, bg in enumerate(items)
+]
+print("##BG_META_START##")
+print(json.dumps(meta, ensure_ascii=False))
+print("##BG_META_END##")

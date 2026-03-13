@@ -304,6 +304,79 @@ If `description` field is empty or invalid JSON:
 
 ---
 
+## PowerShell Environment Notes
+
+> **IMPORTANT:** PowerShell has encoding and parameter passing quirks that can cause request failures.
+
+### Problem 1: UTF-8 BOM in JSON Files
+
+PowerShell's `Out-File` and `>` operators add a UTF-8 BOM (Byte Order Mark) by default, which causes JSON parsing errors:
+
+```
+[ERROR] Invalid JSON: Unexpected UTF-8 BOM (decode using utf-8-sig): line 1 column 1 (char 0)
+```
+
+**Solution:** Use Python to write JSON files (BOM-free):
+
+```powershell
+# [WRONG] PowerShell adds BOM
+$body | ConvertTo-Json | Out-File -FilePath request.json -Encoding utf8
+
+# [OK] Use Python to write JSON
+python -c "import json; data = {'catalogName': '...', ...}; open('request.json', 'w', encoding='utf-8').write(json.dumps(data, ensure_ascii=False, indent=2))"
+```
+
+### Problem 2: Complex JSON in Command Line
+
+PowerShell mangles JSON strings with special characters when passed via `-j` argument.
+
+**Solution:** Always use `--file` argument with `submit.py`:
+
+```powershell
+# [WRONG] JSON gets corrupted
+python submit.py --json '{"name": "test", "description": "special chars"}'
+
+# [OK] Use file input
+python submit.py --file request.json
+```
+
+### Problem 3: Environment Variable Encoding
+
+Chinese characters in environment variables may cause issues.
+
+**Solution:** Set UTF-8 output encoding before running scripts:
+
+```powershell
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$env:CMP_URL = "https://console.smartcmp.cloud"
+```
+
+### Best Practice: Complete PowerShell Workflow
+
+```powershell
+# 1. Set encoding
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+# 2. Set environment
+$env:CMP_URL = "https://console.smartcmp.cloud"
+$env:CMP_USERNAME = "user@example.com"
+$env:CMP_PASSWORD = "password"
+
+# 3. Use Python to create JSON file (avoids BOM)
+python -c "import json; data = {
+    'catalogName': '问题工单',
+    'userId': 'afe5251b-1d72-49ce-babe-5b8563b7b947',
+    'businessGroupId': 'f3ecaf5f-d86c-46fc-89d4-3636a169d5d5',
+    'name': '工单名称',
+    'manualRequest': {'description': '工单描述'}
+}; open('request.json', 'w', encoding='utf-8').write(json.dumps(data, ensure_ascii=False, indent=2))"
+
+# 4. Submit using file
+python scripts/submit.py --file request.json
+```
+
+---
+
 ## References
 
 - [WORKFLOW.md](references/WORKFLOW.md) — Detailed step-by-step workflow

@@ -75,6 +75,8 @@ All scripts are located in `../shared/scripts/`:
 
 ## Environment Setup
 
+### Option 1: Direct Cookie
+
 ```powershell
 # PowerShell - CMP_URL auto-normalizes (adds /platform-api if missing)
 $env:CMP_URL = "<your-cmp-host>"           # e.g., "cmp.example.com" or "https://cmp.example.com/platform-api"
@@ -85,6 +87,24 @@ $env:CMP_COOKIE = '<full cookie string>'
 # Bash
 export CMP_URL="<your-cmp-host>"
 export CMP_COOKIE="<full cookie string>"
+```
+
+### Option 2: Auto-Login (Recommended)
+
+Automatically obtains and caches cookies (30-minute TTL). Auth URL is auto-inferred.
+
+```powershell
+# PowerShell
+$env:CMP_URL = "<your-cmp-host>"
+$env:CMP_USERNAME = "<username>"
+$env:CMP_PASSWORD = "<password>"
+```
+
+```bash
+# Bash
+export CMP_URL="<your-cmp-host>"
+export CMP_USERNAME="<username>"
+export CMP_PASSWORD="<password>"
 ```
 
 ## Workflow Examples
@@ -142,8 +162,10 @@ list_services.py
 | Script | Meta Block |
 |--------|------------|
 | `list_services.py` | `##CATALOG_META_START## ... ##CATALOG_META_END##` |
+| `list_business_groups.py` | `##BG_META_START## ... ##BG_META_END##` |
 | `list_components.py` | `##COMPONENT_META_START## ... ##COMPONENT_META_END##` |
 | `list_resource_pools.py` | `##RESOURCE_POOL_META_START## ... ##RESOURCE_POOL_META_END##` |
+| `list_os_templates.py` | `##OS_TEMPLATE_META_START## ... ##OS_TEMPLATE_META_END##` |
 | `list_cloud_entry_types.py` | `##CLOUD_ENTRY_TYPES_META_START## ... ##CLOUD_ENTRY_TYPES_META_END##` |
 
 ## Critical Rules
