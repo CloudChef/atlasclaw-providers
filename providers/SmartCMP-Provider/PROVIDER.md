@@ -147,7 +147,7 @@ export CMP_USERNAME="<username>"
 export CMP_PASSWORD="<password>"
 ```
 
-> **Performance Note:** Auto-login caches cookies at `~/.atlasclaw/cache/smartcmp_session.json` with 30-minute TTL. Subsequent executions reuse cached cookies, avoiding repeated login requests.
+> **Performance Note:** Auto-login caches cookies at `.atlasclaw/users/default/sessions/smartcmp_cookie_cache.json` with 30-minute TTL. Subsequent executions reuse cached cookies, avoiding repeated login requests.
 
 ### Cookie Extraction
 

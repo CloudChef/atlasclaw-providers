@@ -43,9 +43,9 @@ _API_PATH = "/platform-api"
 _SAAS_DOMAINS = ["smartcmp.cloud", "cloudchef.io"]
 _SAAS_AUTH_URL = "https://account.smartcmp.cloud/bss-api/api/authentication"
 
-# Cookie cache configuration
-_CACHE_DIR = Path.home() / ".atlasclaw" / "cache"
-_COOKIE_CACHE_FILE = _CACHE_DIR / "smartcmp_session.json"
+# Cookie cache configuration - store in workspace sessions directory
+_CACHE_DIR = Path.cwd() / ".atlasclaw" / "users" / "default" / "sessions"
+_COOKIE_CACHE_FILE = _CACHE_DIR / "smartcmp_cookie_cache.json"
 _COOKIE_TTL_SECONDS = 1800  # 30 minutes
 
 
