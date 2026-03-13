@@ -1,29 +1,37 @@
-"""
-Query component type information for a given resource type (sourceKey).
+"""Query component type information for a given resource type (sourceKey).
 
 Usage:
   python list_components.py <SOURCE_KEY>
 
-Output (printed first):
+Arguments:
+  SOURCE_KEY    Resource type key from list_services.py output (##CATALOG_META##)
+
+Output:
   ##COMPONENT_META_START## ... ##COMPONENT_META_END##
-    JSON object: {sourceKey, typeName (= model.typeName), id, name}
-    typeName is used as nodeType for list_resource_pools.py
-    and to detect osType ("windows" in typeName.lower() → Windows, else Linux)
+    JSON object: {sourceKey, typeName, id, name}
+    - typeName is used as nodeType for list_resource_pools.py
+    - Detect osType: "windows" in typeName.lower() → Windows, else Linux
 
 Environment:
-  CMP_URL    - Base URL, e.g. https://<host>/platform-api
+  CMP_URL    - Base URL (IP, hostname, or full path; auto-normalized)
   CMP_COOKIE - Session cookie string
-"""
-import requests, urllib3, sys, os, json
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-BASE_URL = os.environ.get("CMP_URL", "")
-COOKIE   = os.environ.get("CMP_COOKIE", "")
-if not BASE_URL or not COOKIE:
-    print("ERROR: Set CMP_URL and CMP_COOKIE environment variables first.")
-    print('  $env:CMP_URL = "https://<host>/platform-api"')
-    print('  $env:CMP_COOKIE = "<full cookie string>"')
-    sys.exit(1)
+Examples:
+  python list_components.py resource.iaas.machine.instance.abstract
+"""
+import sys
+import json
+import requests
+
+# Import shared utilities (handles URL normalization, SSL warnings)
+try:
+    from _common import require_config
+except ImportError:
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from _common import require_config
+
+BASE_URL, COOKIE, HEADERS = require_config()
 
 if len(sys.argv) < 2:
     print("Usage: python list_components.py <SOURCE_KEY>")

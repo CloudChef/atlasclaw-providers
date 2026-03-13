@@ -1,5 +1,4 @@
-"""
-List available images for a given resource bundle and OS template (logic template).
+"""List available images for a given resource bundle and OS template.
 
 Queries the cloud provider for images filtered by resource bundle and OS template type.
 Only supports PRIVATE_CLOUD resource bundles. For PUBLIC_CLOUD, handle manually.
@@ -7,31 +6,40 @@ Only supports PRIVATE_CLOUD resource bundles. For PUBLIC_CLOUD, handle manually.
 Usage:
   python list_images.py <RESOURCE_BUNDLE_ID> <LOGIC_TEMPLATE_ID> <CLOUD_ENTRY_TYPE_ID>
 
-  RESOURCE_BUNDLE_ID  - from list_resource_pools.py ##RESOURCE_POOL_RAW## (field: id)
-  LOGIC_TEMPLATE_ID   - from list_os_templates.py output (the template [ID: ...])
-  CLOUD_ENTRY_TYPE_ID - from list_resource_pools.py ##RESOURCE_POOL_RAW## (field: cloudEntryTypeId)
+Arguments:
+  RESOURCE_BUNDLE_ID    From list_resource_pools.py ##RESOURCE_POOL_META## (id field)
+  LOGIC_TEMPLATE_ID     From list_os_templates.py output ([ID: ...])
+  CLOUD_ENTRY_TYPE_ID   From list_resource_pools.py ##RESOURCE_POOL_META## (cloudEntryTypeId)
 
-cloudResourceType construction (done internally by this script):
-  - CLOUD_ENTRY_TYPE_ID contains "generic-cloud"
-      → cloudResourceType = "yacmp:cloudentry:type:generic-cloud::images"
-  - otherwise
-      → cloudResourceType = "<CLOUD_ENTRY_TYPE_ID>::images"
-    e.g. "yacmp:cloudentry:type:vsphere" → "yacmp:cloudentry:type:vsphere::images"
+cloudResourceType Construction:
+  - If CLOUD_ENTRY_TYPE_ID contains "generic-cloud"
+    → cloudResourceType = "yacmp:cloudentry:type:generic-cloud::images"
+  - Otherwise
+    → cloudResourceType = "<CLOUD_ENTRY_TYPE_ID>::images"
+
+Output:
+  - Numbered list of images with IDs and OS info (user-visible)
 
 Environment:
-  CMP_URL    - Base URL, e.g. https://<host>/platform-api
-  CMP_COOKIE - Session cookie string (use single quotes in PowerShell)
-"""
-import requests, urllib3, sys, os, json
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+  CMP_URL    - Base URL (IP, hostname, or full path; auto-normalized)
+  CMP_COOKIE - Session cookie string
 
-BASE_URL = os.environ.get("CMP_URL", "")
-COOKIE   = os.environ.get("CMP_COOKIE", "")
-if not BASE_URL or not COOKIE:
-    print("ERROR: Set CMP_URL and CMP_COOKIE environment variables first.")
-    print('  $env:CMP_URL = "https://<host>/platform-api"')
-    print('  $env:CMP_COOKIE = "<full cookie string>"')
-    sys.exit(1)
+Examples:
+  python list_images.py abc123 def456 yacmp:cloudentry:type:vsphere
+"""
+import sys
+import json
+import requests
+
+# Import shared utilities (handles URL normalization, SSL warnings)
+try:
+    from _common import require_config
+except ImportError:
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from _common import require_config
+
+BASE_URL, COOKIE, HEADERS = require_config()
 
 if len(sys.argv) < 4:
     print("Usage: python list_images.py <RESOURCE_BUNDLE_ID> <LOGIC_TEMPLATE_ID> <CLOUD_ENTRY_TYPE_ID>")
@@ -43,8 +51,6 @@ cloud_entry_type_id = sys.argv[3]
 headers = {"Content-Type": "application/json; charset=utf-8", "Cookie": COOKIE}
 
 # ── Construct cloudResourceType from cloudEntryTypeId ────────────────────────
-# "generic-cloud" covers 通用云 providers (e.g. FusionCompute).
-# Always normalize to the base "generic-cloud" type before appending "::images".
 if "generic-cloud" in cloud_entry_type_id.lower():
     cloud_resource_type = "yacmp:cloudentry:type:generic-cloud::images"
 else:

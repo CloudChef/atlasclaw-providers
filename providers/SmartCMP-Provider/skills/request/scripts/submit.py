@@ -1,34 +1,41 @@
-"""
-Submit a service request to SmartCMP.
+"""Submit a service request to SmartCMP.
 
 Usage:
   python submit.py --file <json_file>
   python submit.py --json '<json_string>'
 
 Arguments:
-  --file, -f    Path to JSON file containing request body
-  --json, -j    JSON string (not recommended in PowerShell due to encoding issues)
+  --file, -f    Path to JSON file containing request body (recommended)
+  --json, -j    JSON string (not recommended in PowerShell due to encoding)
 
 Output:
-  Request ID and State for each submitted request.
+  - Request ID and State for each submitted request
 
 Environment:
-  CMP_URL    - Base URL, e.g. https://<host>/platform-api
+  CMP_URL    - Base URL (IP, hostname, or full path; auto-normalized)
   CMP_COOKIE - Session cookie string
 
-Example:
+Examples:
   python submit.py --file request_body.json
-"""
-import requests, urllib3, sys, os, json, argparse
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+  python submit.py -f ./my_request.json
 
-BASE_URL = os.environ.get("CMP_URL", "")
-COOKIE   = os.environ.get("CMP_COOKIE", "")
-if not BASE_URL or not COOKIE:
-    print("ERROR: Set environment variables first:")
-    print('  $env:CMP_URL = "https://<host>/platform-api"')
-    print('  $env:CMP_COOKIE = "<full cookie string>"')
-    sys.exit(1)
+API Reference:
+  POST /generic-request/submit
+"""
+import sys
+import json
+import argparse
+import requests
+
+# Import shared utilities (handles URL normalization, SSL warnings)
+try:
+    from _common import require_config
+except ImportError:
+    import os
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared', 'scripts'))
+    from _common import require_config
+
+BASE_URL, COOKIE, HEADERS = require_config()
 
 # ── Parse arguments ───────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser(description='Submit request to SmartCMP')

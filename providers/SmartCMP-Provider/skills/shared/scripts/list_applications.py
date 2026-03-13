@@ -1,23 +1,38 @@
-"""
-List applications/projects for a business group.
+"""List applications/projects for a business group.
 
 Usage:
   python list_applications.py <BG_ID> [KEYWORD]
 
-Environment:
-  CMP_URL    - Base URL, e.g. https://<host>/platform-api
-  CMP_COOKIE - Session cookie string
-"""
-import requests, urllib3, sys, os
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+Arguments:
+  BG_ID      Business group ID from list_business_groups.py
+  KEYWORD    Optional filter keyword for application name search
 
-BASE_URL = os.environ.get("CMP_URL", "")
-COOKIE = os.environ.get("CMP_COOKIE", "")
-if not BASE_URL or not COOKIE:
-    print("ERROR: Set CMP_URL and CMP_COOKIE environment variables first.")
-    sys.exit(1)
+Output:
+  - Numbered list of applications with IDs and descriptions (user-visible)
+
+Environment:
+  CMP_URL    - Base URL (IP, hostname, or full path; auto-normalized)
+  CMP_COOKIE - Session cookie string
+
+Examples:
+  python list_applications.py 47673d8d-6b3f-...
+  python list_applications.py 47673d8d-6b3f-... "web"
+"""
+import sys
+import requests
+
+# Import shared utilities (handles URL normalization, SSL warnings)
+try:
+    from _common import require_config
+except ImportError:
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from _common import require_config
+
+BASE_URL, COOKIE, HEADERS = require_config()
+
 if len(sys.argv) < 2:
-    print("Usage: python scripts/datasource/list_applications.py <BG_ID> [KEYWORD]")
+    print("Usage: python list_applications.py <BG_ID> [KEYWORD]")
     sys.exit(1)
 
 BG_ID = sys.argv[1]

@@ -12,26 +12,31 @@ Output:
       JSON array with full structured info for agent processing
 
 Environment:
-  CMP_URL    - Base URL, e.g. https://<host>/platform-api
+  CMP_URL    - Base URL (IP, hostname, or full path; auto-normalized)
   CMP_COOKIE - Session cookie string
+
+Examples:
+  python list_pending.py              # List last 30 days
+  python list_pending.py --days 7     # List last 7 days
 
 API Reference:
   GET /generic-request/current-activity-approval
-      ?page=1&size=50&stage=pending&sort=updatedDate,desc
-      &startAtMin=<timestamp>&startAtMax=<timestamp>
-      &rangeField=updatedDate&states=
 """
-import requests, urllib3, sys, os, json, time
+import sys
+import json
+import time
+import requests
 from datetime import datetime
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-BASE_URL = os.environ.get("CMP_URL", "")
-COOKIE = os.environ.get("CMP_COOKIE", "")
-if not BASE_URL or not COOKIE:
-    print("[ERROR] Set environment variables first:")
-    print('  $env:CMP_URL = "https://<host>/platform-api"')
-    print('  $env:CMP_COOKIE = "<full cookie string>"')
-    sys.exit(1)
+# Import shared utilities (handles URL normalization, SSL warnings)
+try:
+    from _common import require_config
+except ImportError:
+    import os
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared', 'scripts'))
+    from _common import require_config
+
+BASE_URL, COOKIE, HEADERS = require_config()
 
 # ── Parse arguments ───────────────────────────────────────────────────────────
 days = 30

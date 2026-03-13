@@ -1,32 +1,37 @@
-"""
-List all cloud entry types for the current tenant.
+"""List all cloud entry types for the current tenant.
 
 Usage:
   python list_cloud_entry_types.py
 
+Arguments:
   No positional arguments required.
 
+Output:
+  - Numbered list of cloud entry types with IDs and groups (user-visible)
+  - ##CLOUD_ENTRY_TYPES_META_START## ... ##CLOUD_ENTRY_TYPES_META_END##
+      JSON array: [{id, name, group}, ...]
+      group values: "PUBLIC_CLOUD" | "PRIVATE_CLOUD"
+
 Environment:
-  CMP_URL    - Base URL, e.g. https://<host>/platform-api
-  CMP_COOKIE - Session cookie string (use single quotes in PowerShell)
+  CMP_URL    - Base URL (IP, hostname, or full path; auto-normalized)
+  CMP_COOKIE - Session cookie string
 
-Output blocks:
-  ##CLOUD_ENTRY_TYPES_META_START## ... ##CLOUD_ENTRY_TYPES_META_END##
-    JSON array of {id, name, group} for each cloud entry type.
-    group values: "PUBLIC_CLOUD" | "PRIVATE_CLOUD"
-    Use this block to determine whether a cloudEntryTypeId belongs to
-    public cloud or private cloud before querying images.
+Examples:
+  python list_cloud_entry_types.py
 """
-import requests, urllib3, sys, os, json
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+import sys
+import json
+import requests
 
-BASE_URL = os.environ.get("CMP_URL", "")
-COOKIE   = os.environ.get("CMP_COOKIE", "")
-if not BASE_URL or not COOKIE:
-    print("ERROR: Set CMP_URL and CMP_COOKIE environment variables first.")
-    print('  $env:CMP_URL = "https://<host>/platform-api"')
-    print('  $env:CMP_COOKIE = "<full cookie string>"')
-    sys.exit(1)
+# Import shared utilities (handles URL normalization, SSL warnings)
+try:
+    from _common import require_config
+except ImportError:
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from _common import require_config
+
+BASE_URL, COOKIE, HEADERS = require_config()
 
 headers = {"Cookie": COOKIE}
 url = f"{BASE_URL}/cloudentry-types/list_cloud_entry_types?queryByCurrentTenant"

@@ -4,32 +4,39 @@ Usage:
   python reject.py <id1> [id2 id3 ...] [--reason "Rejection reason"]
 
 Arguments:
-  id1, id2, ...  Approval IDs from list_pending.py output
-  --reason       Optional rejection reason (recommended)
+  id1, id2, ...    Approval IDs from list_pending.py output (##APPROVAL_META##)
+  --reason         Optional rejection reason (recommended)
+
+Output:
+  - Success/failure message with result details
+  - ##REJECT_RESULT_START## ... ##REJECT_RESULT_END##
+      JSON: {rejected_ids, reason, response}
+
+Environment:
+  CMP_URL    - Base URL (IP, hostname, or full path; auto-normalized)
+  CMP_COOKIE - Session cookie string
 
 Examples:
   python reject.py abc123
   python reject.py abc123 --reason "Budget exceeded"
   python reject.py abc123 def456 --reason "Not aligned with policy"
 
-Environment:
-  CMP_URL    - Base URL, e.g. https://<host>/platform-api
-  CMP_COOKIE - Session cookie string
-
 API Reference:
   POST /approval-activity/reject/batch?ids=<id1>,<id2>
-  Body: {"reason": "<optional reason>"}
 """
-import requests, urllib3, sys, os, json
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+import sys
+import json
+import requests
 
-BASE_URL = os.environ.get("CMP_URL", "")
-COOKIE = os.environ.get("CMP_COOKIE", "")
-if not BASE_URL or not COOKIE:
-    print("[ERROR] Set environment variables first:")
-    print('  $env:CMP_URL = "https://<host>/platform-api"')
-    print('  $env:CMP_COOKIE = "<full cookie string>"')
-    sys.exit(1)
+# Import shared utilities (handles URL normalization, SSL warnings)
+try:
+    from _common import require_config
+except ImportError:
+    import os
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared', 'scripts'))
+    from _common import require_config
+
+BASE_URL, COOKIE, HEADERS = require_config()
 
 # ── Parse arguments ───────────────────────────────────────────────────────────
 ids = []

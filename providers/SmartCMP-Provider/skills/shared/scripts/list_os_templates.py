@@ -1,26 +1,35 @@
-"""
-List available OS templates (logic templates) for a given resource bundle.
+"""List available OS templates (logic templates) for a given resource bundle.
 
 Usage:
   python list_os_templates.py <OS_TYPE> <RESOURCE_BUNDLE_ID>
 
-  OS_TYPE            - "Linux" or "Windows" (caller determines this)
-  RESOURCE_BUNDLE_ID - resource bundle ID from list_resource_pools.py
+Arguments:
+  OS_TYPE              "Linux" or "Windows" (determined by caller from typeName)
+  RESOURCE_BUNDLE_ID   Resource bundle ID from list_resource_pools.py
+
+Output:
+  - Numbered list of OS templates with IDs and versions (user-visible)
 
 Environment:
-  CMP_URL    - Base URL, e.g. https://<host>/platform-api
+  CMP_URL    - Base URL (IP, hostname, or full path; auto-normalized)
   CMP_COOKIE - Session cookie string
-"""
-import requests, urllib3, sys, os
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-BASE_URL = os.environ.get("CMP_URL", "")
-COOKIE   = os.environ.get("CMP_COOKIE", "")
-if not BASE_URL or not COOKIE:
-    print("ERROR: Set CMP_URL and CMP_COOKIE environment variables first.")
-    print('  $env:CMP_URL = "https://<host>/platform-api"')
-    print('  $env:CMP_COOKIE = "<full cookie string>"')
-    sys.exit(1)
+Examples:
+  python list_os_templates.py Linux abc123-def456
+  python list_os_templates.py Windows abc123-def456
+"""
+import sys
+import requests
+
+# Import shared utilities (handles URL normalization, SSL warnings)
+try:
+    from _common import require_config
+except ImportError:
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from _common import require_config
+
+BASE_URL, COOKIE, HEADERS = require_config()
 
 if len(sys.argv) < 3:
     print("Usage: python list_os_templates.py <OS_TYPE> <RESOURCE_BUNDLE_ID>")

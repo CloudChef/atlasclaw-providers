@@ -1,95 +1,123 @@
 ---
 name: request-decomposition-agent
 description: >
-  Use when UniClaw receives a descriptive infrastructure or application demand
-  instead of a ready-made CMP catalog request. This skill analyzes the request,
-  decomposes it into CMP-executable sub-requests, and prepares draft or
-  review-required request payloads through existing CMP Provider request and
-  datasource skills. It does not approve requests and it does not access CMP
-  APIs directly.
+  Transform descriptive infrastructure demands into structured CMP requests.
+  Analyzes requirements, decomposes into sub-requests, and prepares draft
+  payloads. Does NOT approve or auto-fulfill - orchestrates datasource/request skills.
 ---
 
-# CMP Descriptive Request Decomposition Agent
+# CMP Request Decomposition Agent
 
-Use this skill when the input is a descriptive business or infrastructure need, not a clean service catalog request.
+Orchestration agent for transforming descriptive demands into CMP request candidates.
 
-The goal is to turn vague or multi-resource demand into structured CMP request candidates that operations staff can review and adjust. This skill is an orchestration and planning skill, not an autonomous fulfillment skill.
+## Purpose
+
+When receiving free-form infrastructure/application requirements:
+1. Parse and decompose into CMP-executable sub-requests
+2. Match each sub-request to available CMP catalog services
+3. Build structured request payloads with resolved/unresolved fields
+4. Return draft requests for human review
+
+**NOT autonomous fulfillment** — produces reviewable outputs only.
+
+## Trigger Conditions
+
+This skill activates when:
+- Input is descriptive text (not a clean catalog request)
+- `agent_identity` is `agent-request-orchestrator`
+- `request_text` is provided
 
 ## Inputs
 
-Expect these inputs from the webhook payload or runtime context:
+| Input | Type | Required | Description |
+|-------|------|----------|-------------|
+| `instance` | string | Yes | CMP provider instance name (e.g., `cmp-prod`) |
+| `agent_identity` | string | Yes | Must be `agent-request-orchestrator` |
+| `request_text` | string | Yes | Free-form requirement description |
+| `request_title` | string | No | Short title for the request |
+| `requester_context` | object | No | Metadata: application, BG, environment, urgency, budget |
+| `submission_mode` | string | No | `draft` (default) or `review_required` |
 
-- `instance`: CMP provider instance name, for example `cmp-prod`
-- `agent_identity`: Must be `agent-request-orchestrator`
-- `request_text`: Free-form requirement description from user, ticket, or workflow
-- `request_title`: Optional short title
-- `requester_context`: Optional metadata such as application, business group, environment, urgency, owner, or budget hints
-- `submission_mode`: Optional mode, default `draft`
+**Validation Rules:**
+- If `request_text` is empty → **Stop immediately**
+- If `agent_identity` ≠ `agent-request-orchestrator` → **Stop immediately**
 
-If `request_text` is empty, stop and return a validation failure.
+## Orchestrated Skills
 
-If `agent_identity` is not `agent-request-orchestrator`, stop. This skill must run only under the dedicated CMP request orchestration agent account.
+This agent does NOT access CMP directly. It orchestrates:
 
-## Provider Skills This Skill May Call
-
-This skill must not access CMP directly. It should orchestrate existing provider skills only.
-
-- `datasource/list_services.py` — List available service catalogs
-- `datasource/list_components.py` — Get component type information (nodeType, osType)
-- `datasource/list_business_groups.py` — List business groups for a catalog
-- `datasource/list_resource_pools.py` — List available resource pools
-- `request/submit.py` — Submit the assembled request
+| Skill | Purpose |
+|-------|---------|
+| `datasource/list_services.py` | List available service catalogs |
+| `datasource/list_components.py` | Get component type information |
+| `datasource/list_business_groups.py` | List business groups |
+| `datasource/list_resource_pools.py` | List available resource pools |
+| `request/submit.py` | Submit assembled request (if mode allows) |
 
 ## Workflow
 
-1. Parse the descriptive demand into candidate resource intents.
-2. Extract explicit and implied constraints:
-   - environment
-   - workload type
-   - expected scale
-   - availability or compliance hints
-   - likely dependencies between resources
-3. Split the demand into CMP-executable sub-requests.
-4. Match each sub-request to the most suitable CMP service catalog entry via datasource skills.
-5. Fetch the target schema for each matched service.
-6. Build structured request payloads with:
-   - resolved parameters
-   - assumptions made by the agent
-   - fields that still require manual adjustment
-7. Execute one of the following based on `submission_mode`:
-   - `draft`: prepare request candidates and stop
-   - `review_required`: create requests intended for human adjustment if the provider supports this safely
-8. Return a decomposition plan and the generated sub-request payloads.
-
-Never auto-approve or auto-fulfill the decomposed requests.
+```
+1. Parse Descriptive Demand
+   └── Extract resource intents from request_text
+         ↓
+2. Extract Constraints
+   ├── Environment (prod/dev/test)
+   ├── Workload type
+   ├── Expected scale
+   ├── Availability/compliance hints
+   └── Dependencies between resources
+         ↓
+3. Split into Sub-Requests
+   └── One per CMP-executable unit
+         ↓
+4. Match to CMP Catalog
+   └── datasource/list_services.py → Find suitable entries
+         ↓
+5. Fetch Target Schema
+   └── datasource/list_components.py → Get required fields
+         ↓
+6. Build Request Payloads
+   ├── Resolved parameters
+   ├── Assumptions made
+   └── Fields requiring manual adjustment
+         ↓
+7. Execute Based on Mode
+   ├── draft → Return candidates, stop
+   └── review_required → Create for human adjustment
+         ↓
+8. Return Decomposition Plan
+```
 
 ## Decomposition Rules
 
-Prefer smaller, reviewable sub-requests over a single oversized request.
+**Prefer smaller, reviewable sub-requests over single oversized request.**
 
-Examples of valid decomposition:
+### Valid Decomposition Examples
 
-- application runtime compute
-- database service
-- storage capacity
-- load balancer or ingress
-- network connectivity dependencies
-- monitoring or baseline operational components if CMP models them as services
+| Component Type | Description |
+|----------------|-------------|
+| Compute | Application runtime VMs |
+| Database | Database service instances |
+| Storage | Storage capacity allocations |
+| Load Balancer | Ingress/traffic distribution |
+| Network | Connectivity dependencies |
+| Monitoring | Operational components |
 
-Do not invent components that are unsupported by the CMP catalog. If no suitable service is found, mark that part as unresolved for manual handling.
+### Handling Unsupported Components
+
+- If no suitable CMP catalog service → Mark as **unresolved** for manual handling
+- Do NOT invent components unsupported by catalog
 
 ## Decision Style
 
-Be explicit about assumptions and uncertainty.
+> Be explicit about assumptions and uncertainty.
 
-- Separate extracted facts from inferred assumptions.
-- Prefer leaving fields unresolved rather than fabricating values.
-- If the requirement is too vague, return a partial plan with clarification gaps for operations staff.
-- Optimize for operator editability, not for full automation.
+- Separate extracted facts from inferred assumptions
+- Prefer leaving fields unresolved over fabricating values
+- If requirement too vague → Return partial plan with clarification gaps
+- Optimize for operator editability, not full automation
 
 ## Output Contract
-
-Return a structured summary like:
 
 ```json
 {
@@ -113,11 +141,51 @@ Return a structured summary like:
 
 ## Failure Handling
 
-- If catalog matching fails for all sub-requests, return a structured failure with unresolved intents.
-- If schema retrieval fails for one sub-request, keep other sub-requests if they remain valid.
-- If request creation is unsupported or unsafe in the current mode, return draft payloads only.
-- Never submit final executable requests when key fields are guessed.
+| Scenario | Action |
+|----------|--------|
+| Catalog matching fails for all | Return structured failure with unresolved intents |
+| Schema retrieval fails for one | Keep other valid sub-requests |
+| Mode unsafe for execution | Return draft payloads only |
+| Key fields guessed | Do NOT submit final requests |
 
-## Invocation Notes
+## Example Decomposition
 
-This skill is intended for backend orchestration or assisted intake workflows. It should terminate in a reviewable plan or draft requests for human operations staff to adjust.
+**Input:**
+```
+We need a web application environment with 2 frontend servers (4 CPU, 8GB RAM each),
+a MySQL database with 100GB storage, and a load balancer for traffic distribution.
+Production environment, high availability preferred.
+```
+
+**Output:**
+```json
+{
+  "sub_requests": [
+    {
+      "service_name": "Linux VM",
+      "quantity": 2,
+      "resolved_fields": {"cpu": 4, "memory": 8192, "environment": "production"},
+      "assumptions": ["Frontend servers use Linux OS"]
+    },
+    {
+      "service_name": "MySQL Database",
+      "resolved_fields": {"storage": 100, "environment": "production"},
+      "unresolved_fields": ["ha_mode"],
+      "assumptions": ["HA required based on 'high availability preferred'"]
+    },
+    {
+      "service_name": "Load Balancer",
+      "status": "unresolved",
+      "reason": "No matching catalog service found"
+    }
+  ],
+  "manual_followups": [
+    "Confirm HA configuration for MySQL",
+    "Manual setup required for load balancer"
+  ]
+}
+```
+
+## References
+
+- [decomposition-guidelines.md](references/decomposition-guidelines.md) — Detailed decomposition rules

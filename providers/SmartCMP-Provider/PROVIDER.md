@@ -2,6 +2,12 @@
 
 SmartCMP cloud management platform service for resource provisioning, approval workflow management, and data source queries. Supports enterprise hybrid cloud environments.
 
+## Quick Start
+
+1. Extract session cookie from SmartCMP web console (see [Cookie Extraction](#cookie-extraction))
+2. Set environment variables (`CMP_URL`, `CMP_COOKIE`)
+3. Use skills: `datasource` → `request` → `approval`
+
 ## Connection Parameters
 
 | Parameter | Type | Required | Description |
@@ -17,11 +23,9 @@ SmartCMP cloud management platform service for resource provisioning, approval w
 |------------|-------------|------------|
 | **Enterprise** | Cookie-based Session | `cookie` (full session cookie from browser) |
 
-**Note:** SmartCMP uses session-based authentication. Obtain the cookie string by logging into the SmartCMP web console and extracting the cookie from browser developer tools.
+> **Note:** SmartCMP uses session-based authentication. Obtain the cookie by logging into the web console and extracting it from browser developer tools.
 
 ## Configuration Example
-
-### SmartCMP Enterprise
 
 ```json
 {
@@ -43,119 +47,104 @@ SmartCMP cloud management platform service for resource provisioning, approval w
 
 ## Environment Variables
 
-The SmartCMP skills read credentials from environment variables. Set these in `.env` or your shell profile:
+Set credentials in `.env` or shell profile:
 
 **PowerShell:**
 ```powershell
-$env:CMP_URL = "https://cmp.corp.com/platform-api"
+# CMP_URL auto-normalizes: adds https:// and /platform-api if missing
+$env:CMP_URL = "192.168.176.150"           # → https://192.168.176.150/platform-api
+$env:CMP_URL = "cmp.corp.com"              # → https://cmp.corp.com/platform-api
+$env:CMP_URL = "https://cmp.corp.com"      # → https://cmp.corp.com/platform-api
 $env:CMP_COOKIE = "<full cookie string>"
 ```
 
 **Bash:**
 ```bash
-export CMP_URL="https://cmp.corp.com/platform-api"
+# Same auto-normalization applies
+export CMP_URL="192.168.176.150"
 export CMP_COOKIE="<full cookie string>"
 ```
 
 ### Cookie Extraction
 
-To obtain the `CMP_COOKIE` value:
-
 1. Log into SmartCMP web console
 2. Open browser Developer Tools (F12)
-3. Go to Network tab
-4. Refresh the page
-5. Click any API request to `/platform-api/*`
-6. Copy the full `Cookie` header value
+3. Go to **Network** tab → Refresh page
+4. Click any `/platform-api/*` request
+5. Copy the full `Cookie` header value
 
 ## Provided Skills
 
-| Skill | Description | Key Scripts |
-|-------|-------------|-------------|
-| `approval` | Approval workflow management | `list_pending.py`, `approve.py`, `reject.py` |
-| `datasource` | Read-only data source queries | `list_services.py`, `list_business_groups.py`, `list_resource_pools.py` |
-| `request` | Cloud resource provisioning requests | `submit.py` + shared data scripts |
-| `preapproval-agent` | Autonomous pre-review agent for approvals | Orchestrates approval skills |
-| `request-decomposition-agent` | Decomposes descriptive demands into CMP requests | Orchestrates datasource/request skills |
+| Skill | Type | Description | Key Operations |
+|-------|------|-------------|----------------|
+| `datasource` | Data Query | Read-only reference data queries | `list_services`, `list_business_groups`, `list_resource_pools` |
+| `request` | Provisioning | Cloud resource provisioning requests | `list_components`, `submit` |
+| `approval` | Workflow | Approval workflow management | `list_pending`, `approve`, `reject` |
+| `preapproval-agent` | Agent | Autonomous approval pre-review | Webhook-triggered, policy-based decisions |
+| `request-decomposition-agent` | Agent | Transform demands into CMP requests | NL parsing, multi-skill orchestration |
 
-### Skill Details
-
-#### approval
-
-Manage SmartCMP approval workflows including querying pending approvals, approving requests, and rejecting requests.
-
-**Commands:**
-```bash
-# List pending approvals
-python scripts/list_pending.py
-
-# Approve request with reason
-python scripts/approve.py <approval_id> --reason "Approved per policy"
-
-# Reject request with reason
-python scripts/reject.py <approval_id> --reason "Budget exceeded"
-```
+### Core Skills
 
 #### datasource
 
-Query and browse SmartCMP reference data as standalone read-only operations.
+Query SmartCMP reference data (read-only). Use before `request` skill to discover available resources.
 
-**Commands:**
 ```bash
-# List available service catalogs
-python ../shared/scripts/list_services.py
-
-# List business groups for a catalog
-python ../shared/scripts/list_business_groups.py <catalogId>
-
-# List resource pools
-python ../shared/scripts/list_resource_pools.py <bgId> <sourceKey> <nodeType>
-
-# List applications
-python ../shared/scripts/list_applications.py <bgId>
-
-# List OS templates
-python ../shared/scripts/list_os_templates.py <resourcePoolId>
-
-# List images
-python ../shared/scripts/list_images.py <resourcePoolId>
+python ../shared/scripts/list_services.py                          # List service catalogs
+python ../shared/scripts/list_business_groups.py <catalogId>       # Business groups
+python ../shared/scripts/list_resource_pools.py <bgId> <key> <type>  # Resource pools
+python ../shared/scripts/list_applications.py <bgId>               # Applications
+python ../shared/scripts/list_os_templates.py <poolId>             # OS templates
+python ../shared/scripts/list_images.py <poolId>                   # Images
 ```
 
 #### request
 
-Submit cloud resource or application provisioning requests through SmartCMP platform.
+Submit cloud resource provisioning requests.
 
-**Commands:**
 ```bash
-# List services → select → collect parameters → submit
-python ../shared/scripts/list_services.py
-python ../shared/scripts/list_components.py <sourceKey>
-python scripts/submit.py --file request_body.json
+python ../shared/scripts/list_services.py          # 1. Discover services
+python ../shared/scripts/list_components.py <key>  # 2. Get component schema
+python scripts/submit.py --file request_body.json  # 3. Submit request
 ```
+
+#### approval
+
+Manage approval workflows.
+
+```bash
+python scripts/list_pending.py                              # List pending approvals
+python scripts/approve.py <id> --reason "Approved"          # Approve
+python scripts/reject.py <id> --reason "Budget exceeded"    # Reject
+```
+
+### Agent Skills
 
 #### preapproval-agent
 
-Autonomous agent for CMP approval pre-review. Triggered by webhooks, analyzes request reasonableness, and executes approve/reject decisions.
+Autonomous agent for CMP approval pre-review. Triggered by webhooks, analyzes request reasonableness, executes approve/reject decisions.
 
-**Inputs:**
-- `instance`: CMP provider instance name
-- `agent_identity`: Must be `agent-approver`
-- `approval_id`: Target approval identifier
-- `policy_mode`: Policy preset (default: `balanced`)
+| Input | Type | Required | Description |
+|-------|------|----------|-------------|
+| `instance` | string | Yes | CMP provider instance name |
+| `agent_identity` | string | Yes | Must be `agent-approver` |
+| `approval_id` | string | Yes | Target approval identifier |
+| `policy_mode` | string | No | Policy preset (default: `balanced`) |
 
 #### request-decomposition-agent
 
 Orchestration agent that transforms descriptive infrastructure demands into structured CMP request candidates.
 
-**Inputs:**
-- `instance`: CMP provider instance name
-- `agent_identity`: Must be `agent-request-orchestrator`
-- `request_text`: Free-form requirement description
-- `submission_mode`: `draft` or `review_required`
+| Input | Type | Required | Description |
+|-------|------|----------|-------------|
+| `instance` | string | Yes | CMP provider instance name |
+| `agent_identity` | string | Yes | Must be `agent-request-orchestrator` |
+| `request_text` | string | Yes | Free-form requirement description |
+| `submission_mode` | string | No | `draft` or `review_required` |
 
-## Shared Scripts
+## Shared Scripts Reference
 
-Located in `skills/shared/scripts/`, used by both `datasource` and `request` skills:
+Located in `skills/shared/scripts/`, used by `datasource` and `request` skills:
 
 | Script | Description |
 |--------|-------------|
@@ -170,6 +159,9 @@ Located in `skills/shared/scripts/`, used by both `datasource` and `request` ski
 
 ## Error Handling
 
-- On `401` / token expired: Refresh the `CMP_COOKIE` environment variable
-- On `[ERROR]` output: Report to user immediately; do NOT self-debug
-- All scripts output structured data with `##META##` blocks for programmatic parsing
+| Error | Cause | Resolution |
+|-------|-------|------------|
+| `401` / Token expired | Session cookie invalid | Refresh `CMP_COOKIE` env var |
+| `[ERROR]` output | Script execution failed | Report to user; do NOT self-debug |
+
+> All scripts output structured data with `##META##` blocks for programmatic parsing.
