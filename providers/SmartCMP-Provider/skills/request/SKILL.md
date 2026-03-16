@@ -71,85 +71,85 @@ Submit cloud resource provisioning or ticket/work order requests through SmartCM
 ## Workflow Overview
 
 ```
-[触发] 用户表达"申请资源"意图
+[Trigger] User expresses intent to "request resources"
     |
     v
-[Step 1] 执行 list_services.py -> 展示服务列表 -> STOP 等待用户选择
+[Step 1] Execute list_services.py -> Display service list -> STOP wait for user selection
     |
     v
-[Step 2] 用户选择服务 -> 检查 serviceCategory 字段
+[Step 2] User selects service -> Check serviceCategory field
     |
-    +---> serviceCategory === "GENERIC_SERVICE" ---> [工单流程]
+    +---> serviceCategory === "GENERIC_SERVICE" ---> [Ticket Flow]
     |
-    +---> serviceCategory !== "GENERIC_SERVICE" ---> [云资源流程]
+    +---> serviceCategory !== "GENERIC_SERVICE" ---> [Cloud Resource Flow]
 ```
 
 ---
 
-## Step 1: List Available Services [执行]
+## Step 1: List Available Services [Execute]
 
 ```bash
 python ../shared/scripts/list_services.py
 ```
 
-**输出示例:**
+**Output Example:**
 ```
 Found 3 published catalog(s):
 
   [1] Linux VM
-  [2] 问题工单
-  [3] 机房
+  [2] Issue Ticket
+  [3] Server Room
 
 ##CATALOG_META_START##
 [{"index":1,"id":"xxx","name":"Linux VM","sourceKey":"resource.iaas...","serviceCategory":"VM","description":"..."},
- {"index":2,"id":"yyy","name":"问题工单","sourceKey":"...","serviceCategory":"GENERIC_SERVICE","description":"..."},
- {"index":3,"id":"zzz","name":"机房","sourceKey":"resource.infra.server_room","serviceCategory":"RESOURCE","description":"..."}]
+ {"index":2,"id":"yyy","name":"Issue Ticket","sourceKey":"...","serviceCategory":"GENERIC_SERVICE","description":"..."},
+ {"index":3,"id":"zzz","name":"Server Room","sourceKey":"resource.infra.server_room","serviceCategory":"RESOURCE","description":"..."}]
 ##CATALOG_META_END##
 ```
 
-**动作:** 向用户展示编号列表，询问: "请选择您要申请的服务（输入编号）"
+**Action:** Display numbered list to user, ask: "Please select the service you want to request (enter number)"
 
-**STOP - 等待用户输入**
+**STOP - Wait for user input**
 
 ---
 
-## Step 2: Determine Service Type [判断]
+## Step 2: Determine Service Type [Decision]
 
-用户选择后，从 `##CATALOG_META##` 中找到对应项，检查 `serviceCategory` 字段:
+After user selection, find the corresponding item from `##CATALOG_META##` and check `serviceCategory` field:
 
-| serviceCategory 值 | 服务类型 | 跳转流程 |
-|-------------------|---------|---------|
-| `GENERIC_SERVICE` | 工单/手动请求 | [工单流程](#ticket-flow-generic_service) |
-| 其他任意值 | 云资源 | [云资源流程](#cloud-resource-flow) |
+| serviceCategory Value | Service Type | Flow |
+|----------------------|--------------|------|
+| `GENERIC_SERVICE` | Ticket/Manual Request | [Ticket Flow](#ticket-flow-generic_service) |
+| Any other value | Cloud Resource | [Cloud Resource Flow](#cloud-resource-flow) |
 
 ---
 
 ## Ticket Flow (GENERIC_SERVICE)
 
-当 `serviceCategory === "GENERIC_SERVICE"` 时使用此流程。
+Use this flow when `serviceCategory === "GENERIC_SERVICE"`.
 
-### T1: Get Business Groups [执行]
+### T1: Get Business Groups [Execute]
 
 ```bash
 python ../shared/scripts/list_business_groups.py <catalogId>
 ```
 
-**动作:** 展示业务组列表，询问: "请选择业务组"
+**Action:** Display business group list, ask: "Please select a business group"
 
-**STOP - 等待用户选择**
+**STOP - Wait for user selection**
 
-### T2: Collect Ticket Info [询问]
+### T2: Collect Ticket Info [Ask]
 
-向用户询问:
+Ask user:
 ```
-请提供以下信息：
-1. 工单名称：
-2. 工单描述：
+Please provide the following information:
+1. Ticket name:
+2. Ticket description:
 ```
 
-**STOP - 等待用户输入**
+**STOP - Wait for user input**
 
-### T3: Build Request Body [构建]
+### T3: Build Request Body [Build]
 
 ```json
 {
@@ -163,211 +163,344 @@ python ../shared/scripts/list_business_groups.py <catalogId>
 }
 ```
 
-**动作:** 向用户展示确认信息，询问: "请确认以上信息是否正确？(yes/no)"
+**Action:** Display confirmation to user, ask: "Please confirm if the above information is correct? (yes/no)"
 
-**STOP - 等待用户确认**
+**STOP - Wait for user confirmation**
 
-### T4: Submit [执行]
+### T4: Submit [Execute]
 
 ```bash
 python scripts/submit.py --file request.json
 ```
 
-**完成** - 向用户展示请求ID和状态。
+**Complete** - Display request ID and status to user.
 
 ---
 
 ## Cloud Resource Flow
 
-当 `serviceCategory !== "GENERIC_SERVICE"` 时使用此流程。
+Use this flow when `serviceCategory !== "GENERIC_SERVICE"`.
 
-### R1: Get Component Info [静默执行]
+### Cloud Resource Flow Decision Tree
+
+```
+[R1] Get component info (list_components.py)
+    |
+    v
+[R2] Check cloudEntryTypeIds
+    |
+    +---> cloudEntryTypeIds is empty ("") ---> Path A: No resource pool needed
+    |                                          Set useResourceBundle: false
+    |                                          Skip resource pool selection
+    |
+    +---> cloudEntryTypeIds not empty ---> [R3] Check description config
+                                               |
+                                               +---> description empty/invalid ---> Path B: Must select resource pool
+                                               |                                    Execute list_resource_pools.py
+                                               |                                    Let user select resource pool
+                                               |
+                                               +---> description valid ---> [R4] Check resource pool config
+                                                                                |
+                                                                                +---> Has default pool ---> Path C: Use default pool
+                                                                                |     (resourceBundleName/Id has defaultValue)
+                                                                                |     No user selection needed
+                                                                                |
+                                                                                +---> No default pool ---> Path D: Need to select pool
+                                                                                      (source: "list:resource_pools")
+                                                                                      Execute list_resource_pools.py
+                                                                                      Let user select resource pool
+```
+
+### Resource Pool Decision Summary
+
+| Scenario | cloudEntryTypeIds | description | Pool Config | Action |
+|----------|-------------------|-------------|-------------|--------|
+| **Path A** | Empty `""` | Any | - | `useResourceBundle: false`, no pool needed |
+| **Path B** | Not empty | Empty/Invalid | - | **Must** query pool for user selection |
+| **Path C** | Not empty | Valid | Has default | Use default pool, no user selection |
+| **Path D** | Not empty | Valid | No default | Query pool for user selection |
+
+---
+
+### R1: Get Component Info [Silent Execute]
 
 ```bash
 python ../shared/scripts/list_components.py <sourceKey>
 ```
 
-**输出示例:**
+**Output Example:**
 ```
 ##COMPONENT_META_START##
-{"sourceKey":"resource.infra.server_room","typeName":"resource.infra.server_room","id":"xxx","name":"机房","node":"server_room","cloudEntryTypeIds":""}
+{"sourceKey":"resource.infra.server_room","typeName":"resource.infra.server_room","id":"xxx","name":"Server Room","node":"server_room","cloudEntryTypeIds":""}
 ##COMPONENT_META_END##
 ```
 
-**关键字段说明:**
+**Key Fields:**
 
-| 字段 | 用途 | 示例值 |
-|-----|------|--------|
-| `typeName` | 用于请求体中的 `type` 字段 | `resource.infra.server_room` |
-| `node` | 用于请求体中的 `node` 字段 | `server_room` |
-| `cloudEntryTypeIds` | 若为空字符串，需设置 `useResourceBundle: false` | `""` |
+| Field | Purpose | Example |
+|-------|---------|---------|
+| `typeName` | For `type` field in request body | `resource.infra.server_room` |
+| `node` | For `node` field in request body | `server_room` |
+| `cloudEntryTypeIds` | **Resource pool requirement indicator** | `""` or `"yacmp:cloudentry:type:..."` |
 
-**注意:** 此步骤静默执行，不向用户展示，直接继续下一步。
+**Note:** This step executes silently, do not display to user, proceed to next step directly.
 
-### R2: Parse Service Card Description [静默分析]
+---
 
-从 `##CATALOG_META##` 中的 `description` 字段解析参数定义:
+### R2: Determine Resource Pool Requirement [Silent Decision]
+
+Determine resource pool requirement based on `cloudEntryTypeIds` value:
+
+```
+IF cloudEntryTypeIds === "" (empty string)
+    THEN needResourcePool = false
+         useResourceBundle = false
+    GOTO R4 (skip resource pool related steps)
+
+ELSE (cloudEntryTypeIds not empty)
+    THEN needResourcePool = true (preliminary)
+    GOTO R3 (continue checking description config)
+```
+
+---
+
+### R3: Parse Service Card Description [Silent Analysis]
+
+Parse parameter definitions from `description` field in `##CATALOG_META##`.
+
+#### Scenario 1: description empty or invalid JSON (Path B)
+
+```
+IF description is empty OR description is not valid JSON
+    AND cloudEntryTypeIds not empty
+THEN
+    Must execute list_resource_pools.py for user selection
+    needUserSelectResourcePool = true
+```
+
+#### Scenario 2: description is valid JSON
+
+Parse `parameters` array, look for resource pool related config:
 
 ```json
 {
   "parameters": [
     {"key": "businessGroupId", "source": "list:business_groups", "defaultValue": null, "required": true},
-    {"key": "infra_brand", "source": null, "defaultValue": null, "required": true},
-    {"key": "maintenance_phone_number", "source": null, "defaultValue": null, "required": false}
+    {"key": "resourceBundleName", "source": "list:resource_pools", "defaultValue": "Default Pool", "required": true},
+    {"key": "cpu", "source": null, "defaultValue": 2, "required": true}
   ]
 }
 ```
 
-**参数处理规则:**
+**Resource Pool Config Check Rules:**
 
-| 条件 | 动作 |
-|------|------|
-| `defaultValue` 有值 | 使用默认值，不询问用户 |
-| `source: "list:business_groups"` | 执行 `list_business_groups.py` -> 询问用户选择 |
-| `source: "list:resource_pools"` | 执行 `list_resource_pools.py` -> 询问用户选择 |
-| `source: "list:os_templates"` | 执行 `list_os_templates.py` -> 询问用户选择 |
-| `source: null` 且 `required: true` | 询问用户输入 |
-| `source: null` 且 `required: false` | 跳过（可选参数） |
+| Check | Condition | Result |
+|-------|-----------|--------|
+| Has default pool (Path C) | `key` is `resourceBundleName`/`resourceBundleId` AND `defaultValue` has value | `needUserSelectResourcePool = false` |
+| Need pool selection (Path D) | `key` is `resourceBundleName`/`resourceBundleId` AND `source: "list:resource_pools"` AND `defaultValue` is null | `needUserSelectResourcePool = true` |
+| No pool param configured | No pool related field in `parameters`, but `cloudEntryTypeIds` not empty | `needUserSelectResourcePool = true` (fallback to Path B) |
 
-### R3: Collect Parameters Step by Step
+**Other Parameter Handling Rules:**
 
-根据 R2 分析结果，逐步收集参数:
+| Condition | Action |
+|-----------|--------|
+| `defaultValue` has value | Use default, don't ask user |
+| `source: "list:business_groups"` | Execute `list_business_groups.py` -> Ask user to select |
+| `source: "list:resource_pools"` with no default | Execute `list_resource_pools.py` -> Ask user to select |
+| `source: "list:os_templates"` | Execute `list_os_templates.py` -> Ask user to select |
+| `source: null` AND `required: true` | Ask user for input |
+| `source: null` AND `required: false` | Skip (optional parameter) |
 
-**R3a: Business Group** (如需要)
+---
+
+### R4: Collect Parameters Step by Step
+
+Based on R2/R3 analysis results, collect parameters step by step:
+
+**R4a: Business Group** (always required)
 ```bash
 python ../shared/scripts/list_business_groups.py <catalogId>
 ```
-展示列表，询问用户选择。**STOP**
+Display list, ask user to select. **STOP**
 
-**R3b: Resource Pool** (如需要)
+**R4b: Resource Pool** (conditional)
+
+```
+IF needUserSelectResourcePool === true (Path B or Path D)
+THEN execute:
+```
+
 ```bash
 python ../shared/scripts/list_resource_pools.py <businessGroupId> <sourceKey> <typeName>
 ```
-展示列表，询问用户选择。**STOP**
 
-**R3c: OS Template** (如需要)
+Display list, ask user to select. **STOP**
+
+```
+ELSE IF useResourceBundle === false (Path A)
+THEN skip this step
+
+ELSE IF has default pool (Path C)
+THEN use default value, skip this step
+```
+
+**R4c: OS Template** (if needed)
 ```bash
 python ../shared/scripts/list_os_templates.py <osType> <resourceBundleId>
 ```
-展示列表，询问用户选择。**STOP**
+Display list, ask user to select. **STOP**
 
-**R3d: Other Required Fields**
-询问用户输入剩余必填字段。**STOP**
+**R4d: Other Required Fields**
+Ask user to input remaining required fields (e.g., resource name). **STOP**
 
-### R4: Build Request Body [构建]
+---
 
-**核心规则 (非常重要):**
+### R5: Build Request Body [Build]
 
-1. `type` = 完整的 `typeName` (来自 R1)
-2. `node` = `typeName` 最后一个点号后的部分 (来自 R1 的 `node` 字段)
-3. 若 `cloudEntryTypeIds` 为空字符串 -> 添加 `"useResourceBundle": false`
+**Core Rules (Very Important):**
 
-**请求体示例:**
+1. `type` = complete `typeName` (from R1)
+2. `node` = last segment after the last dot in `typeName` (from R1's `node` field)
+3. Resource pool handling:
+   - **Path A** (cloudEntryTypeIds empty): Add `"useResourceBundle": false`, no resourceBundleName
+   - **Path B/C/D** (cloudEntryTypeIds not empty): Must add `resourceBundleName`
+
+**Request Body Example - Path A (No Resource Pool):**
 
 ```json
 {
-    "catalogName": "机房",
+    "catalogName": "Server Room",
     "userLoginId": "admin",
-    "businessGroupName": "我的业务组",
-    "name": "机房222",
+    "businessGroupName": "My Business Group",
+    "name": "server-room-222",
     "resourceSpecs": [
         {
             "useResourceBundle": false,
             "node": "server_room",
             "type": "resource.infra.server_room",
             "params": {
-                "infra_brand": "111",
-                "maintenance_phone_number": "232323"
+                "infra_brand": "111"
             }
         }
     ]
 }
 ```
 
-**字段对应关系:**
+**Request Body Example - Path B/C/D (Resource Pool Required):**
 
-| 请求体字段 | 数据来源 |
-|-----------|---------|
-| `catalogName` | CATALOG_META 中的 `name` |
-| `userLoginId` | 当前用户登录ID |
-| `businessGroupName` | R3a 用户选择的业务组名称 |
-| `name` | R3d 用户输入的资源名称 |
-| `resourceSpecs[0].type` | R1 输出的 `typeName` |
-| `resourceSpecs[0].node` | R1 输出的 `node` |
-| `resourceSpecs[0].useResourceBundle` | 若 `cloudEntryTypeIds` 为空则设为 `false` |
-| `resourceSpecs[0].params` | R3d 收集的其他参数 |
+```json
+{
+    "catalogName": "VPC Service",
+    "userLoginId": "admin",
+    "businessGroupName": "My Business Group",
+    "resourceBundleName": "ResourcePool for Test",
+    "name": "vpc-001",
+    "resourceSpecs": [
+        {
+            "node": "testvpc",
+            "type": "resource.iaas.network.network.testvpc",
+            "params": {}
+        }
+    ]
+}
+```
 
-**动作:** 向用户展示确认信息，询问: "请确认以上信息是否正确？(yes/no)"
+**Field Mapping:**
 
-**STOP - 等待用户确认**
+| Request Field | Data Source | Applicable Path |
+|---------------|-------------|-----------------|
+| `catalogName` | `name` from CATALOG_META | All |
+| `userLoginId` | Current user login ID | All |
+| `businessGroupName` | Business group name from R4a | All |
+| `resourceBundleName` | User selection or default from R4b | B/C/D |
+| `name` | Resource name from R4d user input | All |
+| `resourceSpecs[0].type` | `typeName` from R1 | All |
+| `resourceSpecs[0].node` | `node` from R1 | All |
+| `resourceSpecs[0].useResourceBundle` | Only set to `false` for Path A | A |
+| `resourceSpecs[0].params` | Other params collected in R4d | All |
 
-### R5: Submit [执行]
+**Action:** Display confirmation to user, ask: "Please confirm if the above information is correct? (yes/no)"
+
+**STOP - Wait for user confirmation**
+
+---
+
+### R6: Submit [Execute]
 
 ```bash
 python scripts/submit.py --file request.json
 ```
 
-**完成** - 向用户展示请求ID和状态。
+**Complete** - Display request ID and status to user.
 
 ---
 
-## No Description Handling
+## No Description Handling (Path B Details)
 
-如果 `description` 字段为空或无效 JSON:
+When `description` field is empty or invalid JSON, but `cloudEntryTypeIds` is not empty:
 
-> 该服务「{name}」暂未配置参数说明。
->
-> 如果您了解该服务的参数要求，可以直接告诉我。否则请联系管理员配置服务卡片的 instructions 字段。
+1. **Do not stop the flow**, continue execution
+2. **Must query resource pool** for user selection:
+   ```bash
+   python ../shared/scripts/list_resource_pools.py <businessGroupId> <sourceKey> <typeName>
+   ```
+3. Collect basic required fields: business group, resource pool, resource name
+4. Build request body and submit
 
-**不要继续执行，等待用户指导。**
+> **Note:** Only prompt user to contact administrator for service card configuration when `cloudEntryTypeIds` is also empty.
 
 ---
 
 ## Scripts Reference
 
-| 脚本 | 用途 | 参数 |
-|-----|------|------|
-| `../shared/scripts/list_services.py` | 列出服务目录 | `[keyword]` |
-| `../shared/scripts/list_business_groups.py` | 列出业务组 | `<catalogId>` |
-| `../shared/scripts/list_resource_pools.py` | 列出资源池 | `<bgId> <sourceKey> <nodeType>` |
-| `../shared/scripts/list_os_templates.py` | 列出操作系统模板 | `<osType> <resourceBundleId>` |
-| `../shared/scripts/list_components.py` | 获取组件类型信息 | `<sourceKey>` |
-| `scripts/submit.py` | 提交请求 | `--file <json_file>` |
+| Script | Purpose | Parameters |
+|--------|---------|------------|
+| `../shared/scripts/list_services.py` | List service catalogs | `[keyword]` |
+| `../shared/scripts/list_business_groups.py` | List business groups | `<catalogId>` |
+| `../shared/scripts/list_resource_pools.py` | List resource pools | `<bgId> <sourceKey> <nodeType>` |
+| `../shared/scripts/list_os_templates.py` | List OS templates | `<osType> <resourceBundleId>` |
+| `../shared/scripts/list_components.py` | Get component type info | `<sourceKey>` |
+| `scripts/submit.py` | Submit request | `--file <json_file>` |
 
 ---
 
 ## Critical Rules
 
-1. **每轮只执行一个动作。** 展示输出或提问后，必须 STOP 等待用户响应。
-2. **绝不编造数据。** 只使用脚本输出或用户输入的值。
-3. **绝不跳过步骤。** 严格按照工作流执行。
-4. **绝不自动提交。** 提交前必须获得用户确认。
-5. **正确设置 node 和 type。** `type` = 完整 typeName，`node` = typeName 最后一段。
-6. **检查 cloudEntryTypeIds。** 为空时必须添加 `useResourceBundle: false`。
+1. **Execute only one action per turn.** After displaying output or asking question, MUST STOP and wait for user response.
+2. **Never fabricate data.** Only use values from script output or user input.
+3. **Never skip steps.** Strictly follow the workflow.
+4. **Never auto-submit.** Must get user confirmation before submission.
+5. **Set node and type correctly.** `type` = complete typeName, `node` = last segment of typeName.
+6. **Resource pool decision rules (Very Important):**
+   - `cloudEntryTypeIds` empty -> `useResourceBundle: false`, no pool needed
+   - `cloudEntryTypeIds` not empty + `description` empty -> **Must** query pool for user selection
+   - `cloudEntryTypeIds` not empty + has default pool config -> Use default, no user selection
+   - `cloudEntryTypeIds` not empty + no default pool -> Query pool for user selection
+7. **resourceBundleName required:** When `cloudEntryTypeIds` is not empty, request body top level **must** include `resourceBundleName` field.
 
 ---
 
 ## PowerShell Environment Notes
 
-> **重要:** PowerShell 的编码和参数传递可能导致请求失败。
+> **Important:** PowerShell encoding and parameter passing may cause request failures.
 
-### 使用 Python 写入 JSON 文件 (避免 BOM)
+### Use Python to Write JSON Files (Avoid BOM)
 
 ```powershell
-# [错误] PowerShell 会添加 BOM
+# [Wrong] PowerShell adds BOM
 $body | ConvertTo-Json | Out-File -FilePath request.json -Encoding utf8
 
-# [正确] 使用 Python 写入 JSON
+# [Correct] Use Python to write JSON
 python -c "import json; data = {...}; open('request.json', 'w', encoding='utf-8').write(json.dumps(data, ensure_ascii=False, indent=2))"
 ```
 
-### 始终使用 --file 参数
+### Always Use --file Parameter
 
 ```powershell
-# [错误] JSON 会被破坏
+# [Wrong] JSON will be corrupted
 python submit.py --json '{"name": "test"}'
 
-# [正确] 使用文件输入
+# [Correct] Use file input
 python submit.py --file request.json
 ```
 
@@ -375,6 +508,6 @@ python submit.py --file request.json
 
 ## References
 
-- [WORKFLOW.md](references/WORKFLOW.md) - 详细步骤工作流
-- [PARAMS.md](references/PARAMS.md) - 参数放置规则
-- [EXAMPLES.md](references/EXAMPLES.md) - 请求体示例
+- [WORKFLOW.md](references/WORKFLOW.md) - Detailed step-by-step workflow
+- [PARAMS.md](references/PARAMS.md) - Parameter placement rules
+- [EXAMPLES.md](references/EXAMPLES.md) - Request body examples
