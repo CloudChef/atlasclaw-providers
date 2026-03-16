@@ -69,10 +69,23 @@ type_name = model.get("typeName", comp.get("typeName", comp.get("type", "")))
 comp_id   = comp.get("id", "N/A")
 comp_name = comp.get("nameZh") or comp.get("name", "N/A")
 
+# Extract node from typeName (last segment after final dot)
+# e.g., "resource.infra.server_room" -> "server_room"
+node_name = type_name.rsplit(".", 1)[-1] if type_name else ""
+
+# Get cloudEntryTypeIds (empty string means useResourceBundle: false is required)
+cloud_entry_type_ids = model.get("cloudEntryTypeIds", comp.get("cloudEntryTypeIds", ""))
+
 # Structured block FIRST — agent reads this immediately
 print("##COMPONENT_META_START##")
-print(json.dumps({"sourceKey": source_key, "typeName": type_name,
-                  "id": comp_id, "name": comp_name}, ensure_ascii=False))
+print(json.dumps({
+    "sourceKey": source_key,
+    "typeName": type_name,
+    "id": comp_id,
+    "name": comp_name,
+    "node": node_name,
+    "cloudEntryTypeIds": cloud_entry_type_ids
+}, ensure_ascii=False))
 print("##COMPONENT_META_END##")
 
 # Human-readable summary (after the block, for reference only)

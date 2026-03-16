@@ -60,7 +60,7 @@ export CMP_PASSWORD="<password>"
 │           • userId          (UUID, NOT email)                       │
 │           • businessGroupId (from step 2)                           │
 │           • name            (user input)                            │
-│           • manualRequest.description (user input)                  │
+│           • genericRequest.description (user input)                  │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -158,7 +158,7 @@ export CMP_PASSWORD="<password>"
     ↓
 [User provides info]
     ↓
-[A3] Build manualRequest JSON → Show summary → STOP
+[A3] Build genericRequest JSON → Show summary → STOP
     ↓
 [User confirms]
     ↓
@@ -206,7 +206,7 @@ Build JSON:
     "userId": "<current user ID>",
     "businessGroupId": "<from A1>",
     "name": "<from A2>",
-    "manualRequest": {
+    "genericRequest": {
         "description": "<from A2>"
     }
 }
@@ -265,9 +265,18 @@ Status: INITIALING
 python ../shared/scripts/list_components.py <sourceKey>
 ```
 
-Parse silently:
-- `typeName` → e.g., `cloudchef.nodes.Compute`
-- `osType` → `Linux` or `Windows`
+**Output format:**
+```
+##COMPONENT_META_START##
+{"sourceKey":"resource.infra.server_room","typeName":"resource.infra.server_room","id":"xxx","name":"机房","node":"server_room","cloudEntryTypeIds":""}
+##COMPONENT_META_END##
+```
+
+Parse silently and record:
+- `typeName` → Used as `type` field in request body (e.g., `resource.infra.server_room`)
+- `node` → Used as `node` field in request body (e.g., `server_room`)
+- `cloudEntryTypeIds` → If empty string, must add `"useResourceBundle": false`
+- `osType` → `Linux` or `Windows` (detect from typeName)
 
 **Do NOT show to user. Continue immediately.**
 
@@ -344,6 +353,12 @@ Arguments:
 
 ### B4: Build and confirm
 
+**Key rules for building request body:**
+
+1. `type` = Complete `typeName` from B1 (e.g., `resource.infra.server_room`)
+2. `node` = Last segment of `typeName` from B1 (e.g., `server_room`)
+3. If `cloudEntryTypeIds` is empty string → Add `"useResourceBundle": false`
+
 Build JSON:
 ```json
 {
@@ -351,15 +366,55 @@ Build JSON:
   "catalogName": "<from CATALOG_META>",
   "businessGroupName": "<from B3a>",
   "userLoginId": "admin",
-  "resourceBundleName": "<from B3b>",
   "resourceSpecs": [
     {
+      "useResourceBundle": false,
+      "node": "<node from B1>",
       "type": "<typeName from B1>",
+      "params": {
+        "<param_key>": "<param_value from description or user>"
+      }
+    }
+  ]
+}
+```
+
+**Example (机房 service):**
+```json
+{
+  "catalogName": "机房",
+  "userLoginId": "admin",
+  "businessGroupName": "我的业务组",
+  "name": "机房222",
+  "resourceSpecs": [
+    {
+      "useResourceBundle": false,
+      "node": "server_room",
+      "type": "resource.infra.server_room",
+      "params": {
+        "infra_brand": "111",
+        "maintenance_phone_number": "232323"
+      }
+    }
+  ]
+}
+```
+
+**Example (VM with resource bundle):**
+```json
+{
+  "name": "my-linux-vm",
+  "catalogName": "Linux VM",
+  "businessGroupName": "开发组",
+  "userLoginId": "admin",
+  "resourceBundleName": "开发资源池",
+  "resourceSpecs": [
+    {
+      "type": "cloudchef.nodes.Compute",
       "node": "Compute",
-      "cpu": <from description or user>,
-      "memory": <from description or user>,
-      "logicTemplateName": "<from B3c>",
-      "networkId": "<from description>"
+      "cpu": 4,
+      "memory": 8192,
+      "logicTemplateName": "CentOS 7.9"
     }
   ]
 }

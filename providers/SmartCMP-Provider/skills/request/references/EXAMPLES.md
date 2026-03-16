@@ -1,22 +1,15 @@
 # Request Body Examples
 
-## User Identification (userId vs userLoginId)
+## User Identification
 
-> **CRITICAL:** Ticket and Cloud Resource requests use DIFFERENT user fields!
+Both Ticket and Cloud Resource requests support `userLoginId` (login ID):
 
 | Request Type | Field | Format | Example |
 |--------------|-------|--------|---------|
-| **Ticket (GENERIC_SERVICE)** | `userId` | UUID | `"afe5251b-1d72-49ce-babe-5b8563b7b947"` |
-| **Cloud Resource (VM, etc.)** | `userLoginId` | Email/Login ID | `"admin"` or `"user@example.com"` |
+| **Ticket (GENERIC_SERVICE)** | `userLoginId` | Login ID | `"admin"` |
+| **Cloud Resource (VM, etc.)** | `userLoginId` | Login ID | `"admin"` |
 
-**Why the difference?**
-- Ticket API requires internal user UUID for tracking
-- Cloud Resource API accepts login identifier for flexibility
-
-**How to get userId:**
-- From previous approval list: `applicant` field in `##APPROVAL_META##`
-- From BG_META response: often included in business group context
-- From session context: current authenticated user's UUID
+> **Note:** Both request types accept `userLoginId` parameter for simplicity.
 
 ---
 
@@ -27,10 +20,10 @@ When `serviceCategory === "GENERIC_SERVICE"`:
 ```json
 {
     "catalogName": "问题工单",
-    "userId": "afe5251b-1d72-49ce-babe-5b8563b7b947",
+    "userLoginId": "admin",
     "businessGroupId": "f3ecaf5f-d86c-46fc-89d4-3636a169d5d5",
     "name": "加急工单",
-    "manualRequest": {
+    "genericRequest": {
         "description": "工单描述内容"
     }
 }
@@ -39,14 +32,10 @@ When `serviceCategory === "GENERIC_SERVICE"`:
 | Field | Source | Required |
 |-------|--------|----------|
 | catalogName | CATALOG_META → name | Yes |
-| **userId** | **UUID format** (NOT email) | **Yes** |
+| userLoginId | Current user's login ID | Yes |
 | businessGroupId | list_business_groups.py → user selection | Yes |
 | name | User input | Yes |
-| manualRequest.description | User input | Yes |
-
-> **WARNING:** Using `userLoginId` instead of `userId` will fail with error:  
-> `"Missing argument:userId or userLoginId"`  
-> Despite the error message, only `userId` (UUID) works for tickets!
+| genericRequest.description | User input | Yes |
 
 ---
 
