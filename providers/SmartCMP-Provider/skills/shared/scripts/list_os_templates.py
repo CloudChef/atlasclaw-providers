@@ -36,7 +36,7 @@ except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from _common import require_config
 
-BASE_URL, COOKIE, HEADERS = require_config()
+BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()
 
 # Priority: Environment variable > Command line argument
 os_type = os.environ.get("OS_TYPE", "")
@@ -57,7 +57,7 @@ if not os_type or not resource_bundle_id:
     print("   Or: Set OS_TYPE and RESOURCE_BUNDLE_ID environment variables")
     sys.exit(1)
 
-headers = {"Cookie": COOKIE}
+headers = {"CloudChef-Authenticate": AUTH_TOKEN}
 
 # ── Query logic templates ─────────────────────────────────────────────────────
 url = f"{BASE_URL}/logic-templates/search?expand&osType={os_type}&resourceBundleId={resource_bundle_id}"

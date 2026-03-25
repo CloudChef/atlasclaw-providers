@@ -40,7 +40,7 @@ except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from _common import require_config
 
-BASE_URL, COOKIE, HEADERS = require_config()
+BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()
 
 if len(sys.argv) < 4:
     print("Usage: python list_images.py <RESOURCE_BUNDLE_ID> <LOGIC_TEMPLATE_ID> <CLOUD_ENTRY_TYPE_ID>")
@@ -49,7 +49,7 @@ if len(sys.argv) < 4:
 resource_bundle_id  = sys.argv[1]
 logic_template_id   = sys.argv[2]
 cloud_entry_type_id = sys.argv[3]
-headers = {"Content-Type": "application/json; charset=utf-8", "Cookie": COOKIE}
+headers = {"Content-Type": "application/json; charset=utf-8", "CloudChef-Authenticate": AUTH_TOKEN}
 
 # ── Construct cloudResourceType from cloudEntryTypeId ────────────────────────
 if "generic-cloud" in cloud_entry_type_id.lower():

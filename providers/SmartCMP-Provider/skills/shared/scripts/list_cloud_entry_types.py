@@ -32,9 +32,9 @@ except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from _common import require_config
 
-BASE_URL, COOKIE, HEADERS = require_config()
+BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()
 
-headers = {"Cookie": COOKIE}
+headers = {"CloudChef-Authenticate": AUTH_TOKEN}
 url = f"{BASE_URL}/cloudentry-types/list_cloud_entry_types?queryByCurrentTenant"
 
 try:

@@ -37,7 +37,7 @@ except ImportError:
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared', 'scripts'))
     from _common import require_config
 
-BASE_URL, COOKIE, HEADERS = require_config()
+BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()
 
 # ── Parse arguments ───────────────────────────────────────────────────────────
 # Priority: Environment variables > Command line arguments
@@ -76,7 +76,7 @@ if not ids:
     print("Get IDs from: python list_pending.py -> ##APPROVAL_META##")
     sys.exit(1)
 
-headers = {"Content-Type": "application/json; charset=utf-8", "Cookie": COOKIE}
+headers = {"Content-Type": "application/json; charset=utf-8", "CloudChef-Authenticate": AUTH_TOKEN}
 
 # ── Reject request ────────────────────────────────────────────────────────────
 url = f"{BASE_URL}/approval-activity/reject/batch"

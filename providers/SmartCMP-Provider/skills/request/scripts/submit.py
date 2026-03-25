@@ -36,7 +36,7 @@ except ImportError:
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared', 'scripts'))
     from _common import require_config
 
-BASE_URL, COOKIE, HEADERS = require_config()
+BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()
 
 # ── Parse arguments ───────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser(description='Submit request to SmartCMP')
@@ -63,7 +63,7 @@ except FileNotFoundError:
 url = f"{BASE_URL}/generic-request/submit"
 headers = {
     "Content-Type": "application/json; charset=utf-8",
-    "Cookie": COOKIE
+    "CloudChef-Authenticate": AUTH_TOKEN
 }
 
 try:

@@ -37,14 +37,14 @@ except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from _common import require_config
 
-BASE_URL, COOKIE, HEADERS = require_config()
+BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()
 
 keyword = sys.argv[1] if len(sys.argv) > 1 else ""
 url = f"{BASE_URL}/catalogs/published"
 params = {"query": "", "states": "PUBLISHED", "page": 1, "size": 50, "sort": "catalogIndex,asc"}
 if keyword:
     params["queryValue"] = keyword
-headers = {"Content-Type": "application/json; charset=utf-8", "Cookie": COOKIE}
+headers = {"Content-Type": "application/json; charset=utf-8", "CloudChef-Authenticate": AUTH_TOKEN}
 
 resp = requests.get(url, headers=headers, params=params, verify=False, timeout=30)
 if resp.status_code != 200:

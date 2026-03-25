@@ -39,7 +39,7 @@ except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from _common import require_config
 
-BASE_URL, COOKIE, HEADERS = require_config()
+BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()
 
 # ── Parse arguments: Environment variable > Command line ─────────────────────
 bg_id = os.environ.get("BUSINESS_GROUP_ID", "")
@@ -65,7 +65,7 @@ if not bg_id or not component_type or not node_type:
     print("   Or: Set BUSINESS_GROUP_ID, SOURCE_KEY, NODE_TYPE environment variables")
     sys.exit(1)
 
-headers = {"Content-Type": "application/json; charset=utf-8", "Cookie": COOKIE}
+headers = {"Content-Type": "application/json; charset=utf-8", "CloudChef-Authenticate": AUTH_TOKEN}
 
 # ── Query resource pools ──────────────────────────────────────────────────────
 url = f"{BASE_URL}/resource-bundles"

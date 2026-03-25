@@ -30,7 +30,7 @@ except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from _common import require_config
 
-BASE_URL, COOKIE, HEADERS = require_config()
+BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()
 
 if len(sys.argv) < 2:
     print("Usage: python list_applications.py <BG_ID> [KEYWORD]")
@@ -42,7 +42,7 @@ url = f"{BASE_URL}/groups"
 params = {"query": "", "topGroup": "true", "businessGroupIds": BG_ID, "page": 1, "size": 50, "sort": "name,asc"}
 if keyword:
     params["queryValue"] = keyword
-headers = {"Content-Type": "application/json; charset=utf-8", "Cookie": COOKIE}
+headers = {"Content-Type": "application/json; charset=utf-8", "CloudChef-Authenticate": AUTH_TOKEN}
 
 resp = requests.get(url, headers=headers, params=params, verify=False, timeout=30)
 if resp.status_code != 200:

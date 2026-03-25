@@ -1,13 +1,13 @@
-﻿# -*- coding: utf-8 -*-
-"""SmartCMP Provider Common Utilities.
+# -*- coding: utf-8 -*-
+"""SmartCMP Provider Common Utilities - Updated for SkillDeps Integration.
 
-This module provides shared utilities for all SmartCMP Provider scripts.
-Import this module to get standardized environment handling and URL normalization.
+This module now reads configuration from ATLASCLAW_PROVIDER_CONFIG and ATLASCLAW_COOKIES
+instead of individual environment variables, while maintaining backward compatibility.
 
 Features:
+  - Read configuration from SkillDeps (via environment variables)
   - Automatic URL normalization (adds /platform-api if missing)
   - Smart auth URL inference based on environment (SaaS vs Private)
-  - Standardized environment variable handling
   - Common HTTP headers generation
   - SSL warning suppression
   - Auto-login with username/password when cookie not provided
@@ -16,13 +16,16 @@ Features:
 Usage:
   from _common import get_cmp_config, create_headers, require_config
 
-Environment Variables:
+Environment Variables (from SkillDeps):
+  ATLASCLAW_COOKIES          - JSON string of all cookies from HTTP request
+  ATLASCLAW_PROVIDER_CONFIG  - JSON string of provider configuration from atlasclaw.json
+  ATLASCLAW_USER_ID          - Current user ID
+
+Legacy Environment Variables (fallback):
   CMP_URL      - Base URL (IP, hostname, or full path)
-  CMP_COOKIE   - Full session cookie string (optional if username/password provided)
-  CMP_USERNAME - Username for auto-login (fallback when no cookie)
-  CMP_PASSWORD - Password for auto-login (fallback when no cookie)
-  
-Note: CMP_AUTH_URL is no longer required - it is automatically inferred from CMP_URL.
+  CMP_COOKIE   - Full session cookie string
+  CMP_USERNAME - Username for auto-login
+  CMP_PASSWORD - Password for auto-login
 """
 import os
 import sys
@@ -43,21 +46,12 @@ _API_PATH = "/platform-api"
 _SAAS_DOMAINS = ["smartcmp.cloud", "cloudchef.io"]
 _SAAS_AUTH_URL = "https://account.smartcmp.cloud/bss-api/api/authentication"
 
-# Cookie cache configuration - store in workspace sessions directory
-# Priority: ATLASCLAW_ROOT env var > current working directory
+# Cookie cache configuration
 def _get_cache_dir() -> Path:
-    """Get the cache directory path.
-    
-    Uses ATLASCLAW_ROOT environment variable if set (recommended),
-    otherwise falls back to current working directory.
-    
-    Returns:
-        Path to the cache directory
-    """
+    """Get the cache directory path."""
     atlasclaw_root = os.environ.get("ATLASCLAW_ROOT", "")
     if atlasclaw_root:
         return Path(atlasclaw_root) / ".atlasclaw" / "users" / "default" / "sessions"
-    # Fallback to cwd (may not work correctly when script runs from provider directory)
     return Path.cwd() / ".atlasclaw" / "users" / "default" / "sessions"
 
 _CACHE_DIR = _get_cache_dir()
@@ -66,40 +60,26 @@ _COOKIE_TTL_SECONDS = 1800  # 30 minutes
 
 
 def normalize_url(url: str) -> str:
-    """Normalize CMP URL to ensure it includes the /platform-api path.
-    
-    This function handles multiple input formats:
-      - IP only: "10.0.0.1" -> "https://10.0.0.1/platform-api"
-      - Hostname only: "cmp.example.com" -> "https://cmp.example.com/platform-api"
-      - With scheme: "https://cmp.example.com" -> "https://cmp.example.com/platform-api"
-      - Already correct: "https://cmp.example.com/platform-api" -> unchanged
-      - With trailing slash: "https://cmp.example.com/" -> "https://cmp.example.com/platform-api"
-    
-    Args:
-        url: Raw URL from environment variable
-        
-    Returns:
-        Normalized URL with scheme and /platform-api path
-    """
+    """Normalize CMP URL to ensure it includes the /platform-api path."""
     if not url:
         return ""
-    
+
     url = url.strip()
-    
+
     # Add scheme if missing
     if not url.startswith(("http://", "https://")):
         url = f"https://{url}"
-    
+
     # Parse the URL
     parsed = urlparse(url)
-    
+
     # Get the path and normalize it
     path = parsed.path.rstrip("/")
-    
+
     # Check if path already ends with /platform-api
     if not path.endswith(_API_PATH):
         path = path + _API_PATH
-    
+
     # Reconstruct the URL
     normalized = urlunparse((
         parsed.scheme,
@@ -109,65 +89,40 @@ def normalize_url(url: str) -> str:
         "",  # query
         ""   # fragment
     ))
-    
+
     return normalized
 
 
 def _infer_auth_url(cmp_url: str) -> str:
-    """Infer authentication URL from CMP base URL.
-    
-    This function automatically determines the correct auth endpoint based on
-    the CMP URL pattern:
-    
-    - SaaS environment (*.smartcmp.cloud, *.cloudchef.io):
-      -> https://account.smartcmp.cloud/bss-api/api/authentication
-      
-    - Private deployment (IP address or other domain):
-      -> https://{host}/platform-api/login
-    
-    Args:
-        cmp_url: The CMP base URL (e.g., "https://console.smartcmp.cloud" or "https://192.168.1.100")
-        
-    Returns:
-        Inferred authentication endpoint URL
-    """
+    """Infer authentication URL from CMP base URL."""
     if not cmp_url:
         return ""
-    
-    # Add scheme if missing for parsing
+
     url = cmp_url.strip()
     if not url.startswith(("http://", "https://")):
         url = f"https://{url}"
-    
+
     parsed = urlparse(url)
     host = parsed.netloc.lower()
-    
+
     # Check if this is a SaaS environment
     for saas_domain in _SAAS_DOMAINS:
         if saas_domain in host:
             return _SAAS_AUTH_URL
-    
-    # Private deployment - use same host with /platform-api/login path
+
+    # Private deployment
     return f"{parsed.scheme}://{parsed.netloc}/platform-api/login"
 
 
 def _get_cached_cookie(cmp_url: str = "") -> str:
-    """Get cached cookie if still valid and URL matches.
-    
-    Args:
-        cmp_url: Current CMP URL to validate cache against.
-                 If URL changed, cache is considered invalid.
-    
-    Returns:
-        Cached cookie string if valid, empty string otherwise.
-    """
+    """Get cached cookie if still valid and URL matches."""
     try:
         if _COOKIE_CACHE_FILE.exists():
             data = json.loads(_COOKIE_CACHE_FILE.read_text(encoding="utf-8"))
             # Check expiration
             if data.get("expires_at", 0) <= time.time():
                 return ""
-            # Check URL match (environment switch detection)
+            # Check URL match
             cached_url = data.get("cmp_url", "")
             if cmp_url and cached_url and cached_url != cmp_url:
                 return ""
@@ -178,13 +133,7 @@ def _get_cached_cookie(cmp_url: str = "") -> str:
 
 
 def _cache_cookie(cookie: str, cmp_url: str = "", ttl_seconds: int = _COOKIE_TTL_SECONDS) -> None:
-    """Cache cookie to file with URL binding.
-    
-    Args:
-        cookie: The cookie string to cache
-        cmp_url: The CMP URL this cookie belongs to
-        ttl_seconds: Time-to-live in seconds
-    """
+    """Cache cookie to file with URL binding."""
     try:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
         data = {
@@ -195,33 +144,17 @@ def _cache_cookie(cookie: str, cmp_url: str = "", ttl_seconds: int = _COOKIE_TTL
         }
         _COOKIE_CACHE_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
     except Exception:
-        pass  # Silently ignore cache write failures
+        pass
 
 
 def _auto_login(auth_url: str, username: str, password: str) -> str:
-    """Auto-login to SmartCMP and get session cookie.
-    
-    POST {auth_url}
-    Content-Type: application/x-www-form-urlencoded
-    Body: username=xxx&password=xxx
-    
-    Args:
-        auth_url: Authentication endpoint URL
-        username: Login username
-        password: Login password (plaintext or MD5 hash)
-        
-    Returns:
-        Cookie string for subsequent requests
-        
-    Raises:
-        RuntimeError: If login fails
-    """
+    """Auto-login to SmartCMP and get session cookie."""
     import hashlib
-    
+
     # Auto-detect: if password is not 32-char hex (MD5 format), auto-encrypt it
     if not (len(password) == 32 and all(c in '0123456789abcdefABCDEF' for c in password)):
         password = hashlib.md5(password.encode()).hexdigest()
-    
+
     try:
         resp = requests.post(
             auth_url,
@@ -230,13 +163,13 @@ def _auto_login(auth_url: str, username: str, password: str) -> str:
             verify=False,
             timeout=30
         )
-        
+
         if resp.status_code != 200:
             raise RuntimeError(f"Login failed: HTTP {resp.status_code}")
-        
+
         # Build cookie string from response cookies
         cookies = resp.cookies.get_dict()
-        
+
         # Also try to get token from response body
         try:
             body = resp.json()
@@ -246,124 +179,210 @@ def _auto_login(auth_url: str, username: str, password: str) -> str:
                 cookies["CloudChef-Authenticate-Refresh"] = body["refreshToken"]
         except Exception:
             pass
-        
+
         if not cookies:
             raise RuntimeError("Login response contains no cookies or tokens")
-        
+
         # Build cookie string
         cookie_str = "; ".join([f"{k}={v}" for k, v in cookies.items()])
         return cookie_str
-        
+
     except requests.RequestException as e:
         raise RuntimeError(f"Login request failed: {e}")
 
 
-def get_cmp_config(exit_on_error: bool = True) -> tuple:
-    """Get SmartCMP configuration from environment variables.
-    
-    Priority:
-    1. Use CMP_COOKIE if provided
-    2. Otherwise, try to use cached cookie
-    3. Otherwise, auto-login with CMP_USERNAME/CMP_PASSWORD
-    
-    Note: CMP_AUTH_URL is automatically inferred from CMP_URL:
-      - SaaS (*.smartcmp.cloud) -> account.smartcmp.cloud/bss-api/api/authentication
-      - Private deployment -> {CMP_URL host}/platform-api/login
-    
-    Args:
-        exit_on_error: If True, print error and exit when config unavailable
-        
+def _get_config_from_skilldeps() -> tuple:
+    """Get configuration from SkillDeps-injected environment variables.
+
     Returns:
-        Tuple of (base_url, cookie) where base_url is normalized
-        
-    Raises:
-        SystemExit: When exit_on_error=True and config unavailable
+        Tuple of (base_url, auth_token, instance_config) or (None, None, None) if not available
+    """
+    # Read from SkillDeps-injected environment variables
+    cookies_json = os.environ.get('ATLASCLAW_COOKIES', '{}')
+    provider_config_json = os.environ.get('ATLASCLAW_PROVIDER_CONFIG', '{}')
+
+    cookies = {}
+    provider_config = {}
+
+    try:
+        cookies = json.loads(cookies_json)
+    except json.JSONDecodeError:
+        pass
+
+    try:
+        provider_config = json.loads(provider_config_json)
+    except json.JSONDecodeError:
+        pass
+
+    # Get SmartCMP instances from provider config
+    smartcmp_instances = provider_config.get('smartcmp', {})
+
+    if not smartcmp_instances:
+        return None, None, None
+
+    # Select instance (default to first, or use 'prod' if available)
+    instance_name = 'prod' if 'prod' in smartcmp_instances else list(smartcmp_instances.keys())[0]
+    instance = smartcmp_instances.get(instance_name, {})
+
+    # Extract configuration
+    base_url = instance.get('base_url', '')
+
+    # Authentication priority:
+    # 1. CloudChef-Authenticate from cookies (UI passed)
+    # 2. Cookie from provider config
+    # 3. Username/Password from provider config
+    cloudchef_token = cookies.get('CloudChef-Authenticate', '')
+    config_cookie = instance.get('cookie', '')
+    username = instance.get('username', '')
+    password = instance.get('password', '')
+
+    # Determine auth token
+    auth_token = cloudchef_token or config_cookie
+
+    # If no token but have credentials, try auto-login
+    if not auth_token and username and password and base_url:
+        try:
+            auth_url = _infer_auth_url(base_url)
+            auth_token = _auto_login(auth_url, username, password)
+            # Cache the cookie for future use
+            _cache_cookie(auth_token, base_url)
+        except RuntimeError:
+            pass
+
+    if not base_url:
+        return None, None, None
+
+    # Normalize URL
+    base_url = normalize_url(base_url)
+
+    return base_url, auth_token, instance
+
+
+def _get_config_from_env() -> tuple:
+    """Get configuration from legacy environment variables (backward compatibility).
+
+    Returns:
+        Tuple of (base_url, auth_token, instance_config) or (None, None, None) if not available
     """
     raw_url = os.environ.get("CMP_URL", "")
     cookie = os.environ.get("CMP_COOKIE", "")
     username = os.environ.get("CMP_USERNAME", "")
     password = os.environ.get("CMP_PASSWORD", "")
-    
-    # Support legacy CMP_AUTH_URL for backward compatibility, but prefer auto-inference
+
+    if not raw_url:
+        return None, None, None
+
+    # Support legacy CMP_AUTH_URL for backward compatibility
     auth_url = os.environ.get("CMP_AUTH_URL", "")
     if not auth_url and raw_url:
         auth_url = _infer_auth_url(raw_url)
-    
+
     # If no explicit cookie, try cache or auto-login
     if not cookie:
-        # Try cached cookie first (validate against current URL)
+        # Try cached cookie first
         cookie = _get_cached_cookie(raw_url)
-        
+
         # If still no cookie, try auto-login
         if not cookie and username and password and auth_url:
             try:
                 cookie = _auto_login(auth_url, username, password)
-                # Cache the new cookie with URL binding
                 _cache_cookie(cookie, raw_url)
-            except RuntimeError as e:
-                if exit_on_error:
-                    print(f"[ERROR] Auto-login failed: {e}")
-                    sys.exit(1)
-                return "", ""
-    
+            except RuntimeError:
+                pass
+
+    if not cookie:
+        return None, None, None
+
+    base_url = normalize_url(raw_url)
+
+    # Build a minimal instance config for compatibility
+    instance = {
+        'base_url': raw_url,
+        'cookie': cookie,
+    }
+    if username:
+        instance['username'] = username
+
+    return base_url, cookie, instance
+
+
+def get_cmp_config(exit_on_error: bool = True) -> tuple:
+    """Get SmartCMP configuration from SkillDeps or environment variables.
+
+    Priority:
+    1. ATLASCLAW_PROVIDER_CONFIG / ATLASCLAW_COOKIES (from SkillDeps)
+    2. Legacy CMP_URL / CMP_COOKIE / CMP_USERNAME / CMP_PASSWORD
+
+    Args:
+        exit_on_error: If True, print error and exit when config unavailable
+
+    Returns:
+        Tuple of (base_url, auth_token, instance_config)
+
+    Raises:
+        SystemExit: When exit_on_error=True and config unavailable
+    """
+    # Try SkillDeps first
+    base_url, auth_token, instance = _get_config_from_skilldeps()
+
+    # Fall back to legacy environment variables
+    if not base_url or not auth_token:
+        base_url, auth_token, instance = _get_config_from_env()
+
     # Final validation
-    if not raw_url or not cookie:
+    if not base_url or not auth_token:
         if exit_on_error:
             print("[ERROR] SmartCMP configuration not available.")
             print()
-            print("Configure one of the following:")
+            print("Configure one of the following in atlasclaw.json:")
             print()
-            print("  Option 1: Direct cookie")
-            print("    $env:CMP_URL = \"<your-cmp-host>\"")
-            print("    $env:CMP_COOKIE = \"<full cookie string>\"")
+            print('  "service_providers": {')
+            print('    "smartcmp": {')
+            print('      "prod": {')
+            print('        "base_url": "https://cmp.example.com/platform-api",')
+            print('        "cookie": "${CMP_COOKIE}"')
+            print('      }')
+            print('    }')
+            print('  }')
             print()
-            print("  Option 2: Auto-login credentials (recommended)")
-            print("    $env:CMP_URL = \"<your-cmp-host>\"")
-            print("    $env:CMP_USERNAME = \"<username>\"")
-            print("    $env:CMP_PASSWORD = \"<password>\"")
-            print()
-            print("  Note: Auth URL is auto-inferred from CMP_URL:")
-            print("    - SaaS (*.smartcmp.cloud) -> account.smartcmp.cloud")
-            print("    - Private deployment -> {CMP_URL}/platform-api/login")
+            print("Or pass CloudChef-Authenticate cookie in HTTP request.")
             print()
             sys.exit(1)
-        return "", ""
-    
-    base_url = normalize_url(raw_url)
-    return base_url, cookie
+        return "", "", {}
+
+    return base_url, auth_token, instance
 
 
-def create_headers(cookie: str, content_type: str = "application/json; charset=utf-8") -> dict:
+def create_headers(auth_token: str, content_type: str = "application/json; charset=utf-8") -> dict:
     """Create standard HTTP headers for SmartCMP API requests.
-    
+
     Args:
-        cookie: Session cookie string
+        auth_token: CloudChef-Authenticate token or session cookie
         content_type: Content-Type header value (default: application/json)
-        
+
     Returns:
         Dictionary of HTTP headers
     """
-    headers = {"Cookie": cookie}
+    headers = {"CloudChef-Authenticate": auth_token}
     if content_type:
         headers["Content-Type"] = content_type
     return headers
 
 
-# Convenience: Auto-configure when imported
-# Scripts can use: from _common import BASE_URL, COOKIE, HEADERS
-BASE_URL, COOKIE = get_cmp_config(exit_on_error=False)
-HEADERS = create_headers(COOKIE) if COOKIE else {}
-
-
 def require_config():
     """Validate that configuration is available, exit if not.
-    
+
     Call this at the start of scripts that require CMP connection.
-    
+
     Returns:
-        Tuple of (base_url, cookie, headers)
+        Tuple of (base_url, auth_token, headers, instance)
     """
-    global BASE_URL, COOKIE, HEADERS
-    BASE_URL, COOKIE = get_cmp_config(exit_on_error=True)
-    HEADERS = create_headers(COOKIE)
-    return BASE_URL, COOKIE, HEADERS
+    base_url, auth_token, instance = get_cmp_config(exit_on_error=True)
+    headers = create_headers(auth_token)
+    return base_url, auth_token, headers, instance
+
+
+# Convenience: Auto-configure when imported
+# Scripts can use: from _common import BASE_URL, AUTH_TOKEN, HEADERS, INSTANCE
+BASE_URL, AUTH_TOKEN, INSTANCE = get_cmp_config(exit_on_error=False)
+HEADERS = create_headers(AUTH_TOKEN) if AUTH_TOKEN else {}

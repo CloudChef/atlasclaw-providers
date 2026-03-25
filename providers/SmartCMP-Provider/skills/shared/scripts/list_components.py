@@ -32,14 +32,14 @@ except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from _common import require_config
 
-BASE_URL, COOKIE, HEADERS = require_config()
+BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()
 
 if len(sys.argv) < 2:
     print("Usage: python list_components.py <SOURCE_KEY>")
     sys.exit(1)
 
 source_key = sys.argv[1]
-headers = {"Cookie": COOKIE}
+headers = {"CloudChef-Authenticate": AUTH_TOKEN}
 
 # ── Query /components ─────────────────────────────────────────────────────────
 url = f"{BASE_URL}/components"

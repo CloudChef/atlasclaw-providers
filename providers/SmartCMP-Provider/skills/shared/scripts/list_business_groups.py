@@ -33,7 +33,7 @@ except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from _common import require_config
 
-BASE_URL, COOKIE, HEADERS = require_config()
+BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()
 
 # Priority: Environment variable > Command line argument
 CATALOG_ID = os.environ.get("CATALOG_ID", "")
@@ -49,7 +49,7 @@ if not CATALOG_ID:
     print("Get CATALOG_ID from: python list_services.py -> ##CATALOG_META##")
     sys.exit(1)
 url = f"{BASE_URL}/catalogs/{CATALOG_ID}/available-bgs"
-headers = {"Content-Type": "application/json; charset=utf-8", "Cookie": COOKIE}
+headers = {"Content-Type": "application/json; charset=utf-8", "CloudChef-Authenticate": AUTH_TOKEN}
 
 resp = requests.get(url, headers=headers, verify=False, timeout=30)
 if resp.status_code != 200:

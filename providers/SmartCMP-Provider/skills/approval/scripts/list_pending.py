@@ -37,7 +37,7 @@ except ImportError:
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared', 'scripts'))
     from _common import require_config
 
-BASE_URL, COOKIE, HEADERS = require_config()
+BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()
 
 # -- Parse arguments -----------------------------------------------------------
 days = 30
@@ -54,7 +54,7 @@ start_of_today = now_ms - (now_ms % 86400000)
 start_at_min = start_of_today - (days * 86400000)
 start_at_max = now_ms
 
-headers = {"Content-Type": "application/json; charset=utf-8", "Cookie": COOKIE}
+headers = {"Content-Type": "application/json; charset=utf-8", "CloudChef-Authenticate": AUTH_TOKEN}
 
 # -- Query pending approvals ---------------------------------------------------
 url = f"{BASE_URL}/generic-request/current-activity-approval"
