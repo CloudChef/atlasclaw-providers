@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """SmartCMP Provider Common Utilities - Updated for SkillDeps Integration.
 
 This module now reads configuration from ATLASCLAW_PROVIDER_CONFIG and ATLASCLAW_COOKIES
@@ -243,9 +243,18 @@ def _get_config_from_skilldeps() -> tuple:
     if not auth_token and username and password and base_url:
         try:
             auth_url = _infer_auth_url(base_url)
-            auth_token = _auto_login(auth_url, username, password)
-            # Cache the cookie for future use
-            _cache_cookie(auth_token, base_url)
+            cookie_str = _auto_login(auth_url, username, password)
+            # Cache the full cookie string for future use
+            _cache_cookie(cookie_str, base_url)
+            # Extract CloudChef-Authenticate JWT token from cookie string
+            for part in cookie_str.split(';'):
+                part = part.strip()
+                if part.startswith('CloudChef-Authenticate='):
+                    auth_token = part.split('=', 1)[1]
+                    break
+            # Fallback to full cookie string if token not found
+            if not auth_token:
+                auth_token = cookie_str
         except RuntimeError:
             pass
 
@@ -293,6 +302,14 @@ def _get_config_from_env() -> tuple:
     if not cookie:
         return None, None, None
 
+    # Extract CloudChef-Authenticate JWT token for API header use
+    auth_token = cookie
+    for part in cookie.split(';'):
+        part = part.strip()
+        if part.startswith('CloudChef-Authenticate='):
+            auth_token = part.split('=', 1)[1]
+            break
+
     base_url = normalize_url(raw_url)
 
     # Build a minimal instance config for compatibility
@@ -303,7 +320,7 @@ def _get_config_from_env() -> tuple:
     if username:
         instance['username'] = username
 
-    return base_url, cookie, instance
+    return base_url, auth_token, instance
 
 
 def get_cmp_config(exit_on_error: bool = True) -> tuple:
