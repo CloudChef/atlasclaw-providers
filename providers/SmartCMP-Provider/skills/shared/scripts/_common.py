@@ -43,22 +43,14 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 _API_PATH = "/platform-api"
 
 # SaaS environment detection
-_SAAS_BUSINESS_HOST = "console.smartcmp.cloud"
-_SAAS_AUTH_HOST = "account.smartcmp.cloud"
+# Domain suffix alone is not reliable because private deployments can also use
+# smartcmp.cloud subdomains.
+_SAAS_HOSTS = {
+    "console.smartcmp.cloud",
+    "account.smartcmp.cloud",
+    "console.cloudchef.io",
+}
 _SAAS_AUTH_URL = "https://account.smartcmp.cloud/bss-api/api/authentication"
-
-
-def _get_hostname(url: str) -> str:
-    """Return the lowercase hostname without port."""
-    if not url:
-        return ""
-
-    if not url.startswith(("http://", "https://")):
-        url = f"https://{url}"
-
-    parsed = urlparse(url)
-    host = parsed.netloc or parsed.path
-    return host.split(":", 1)[0].lower()
 
 # Cookie cache configuration
 def _get_cache_dir() -> Path:
@@ -117,10 +109,11 @@ def _infer_auth_url(cmp_url: str) -> str:
         url = f"https://{url}"
 
     parsed = urlparse(url)
-    host = _get_hostname(parsed.geturl())
+    hostname = (parsed.hostname or "").lower()
 
-    # Only the canonical SmartCMP SaaS hosts should route to the SaaS auth API.
-    if host in {_SAAS_BUSINESS_HOST, _SAAS_AUTH_HOST}:
+    # Only canonical SmartCMP SaaS hosts on the default HTTPS port should route
+    # to the shared SaaS authentication API.
+    if hostname in _SAAS_HOSTS and parsed.port in (None, 443):
         return _SAAS_AUTH_URL
 
     # Private deployment
@@ -131,6 +124,8 @@ def _resolve_auth_url(cmp_url: str, explicit_auth_url: str = "") -> str:
     """Resolve the auth URL using explicit configuration first, then inference."""
     explicit_auth_url = (explicit_auth_url or "").strip()
     if explicit_auth_url:
+        if not explicit_auth_url.startswith(("http://", "https://")):
+            explicit_auth_url = f"https://{explicit_auth_url}"
         return explicit_auth_url
     return _infer_auth_url(cmp_url)
 
@@ -190,6 +185,7 @@ def _auto_login(auth_url: str, username: str, password: str) -> str:
 
         # Build cookie string from response cookies
         cookies = resp.cookies.get_dict()
+        body = {}
 
         # Also try to get token from response body
         try:
@@ -202,7 +198,12 @@ def _auto_login(auth_url: str, username: str, password: str) -> str:
             pass
 
         if not cookies:
-            raise RuntimeError("Login response contains no cookies or tokens")
+            message = "Login response contains no cookies or tokens"
+            body_code = body.get("code", "")
+            body_message = body.get("message", "")
+            if body_code or body_message:
+                message = f"{message}: {body_code} {body_message}".strip()
+            raise RuntimeError(message)
 
         # Build cookie string
         cookie_str = "; ".join([f"{k}={v}" for k, v in cookies.items()])

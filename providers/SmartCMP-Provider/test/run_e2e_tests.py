@@ -240,6 +240,9 @@ def run_tests():
         "skills/approval/scripts/list_pending.py",
         "skills/approval/scripts/approve.py",
         "skills/approval/scripts/reject.py",
+        "skills/alarm/scripts/list_alerts.py",
+        "skills/alarm/scripts/analyze_alert.py",
+        "skills/alarm/scripts/operate_alert.py",
         "skills/request/scripts/submit.py",
         "skills/cost-optimization/scripts/_cost_common.py",
         "skills/cost-optimization/scripts/_analysis.py",
@@ -347,9 +350,48 @@ def run_tests():
     print_skip("reject.py", "Skipped to avoid side effects")
 
     # -------------------------------------------------------------------------
-    # Test 4: Cost Optimization Skill Tests
+    # Test 4: Alarm Skill Tests
     # -------------------------------------------------------------------------
-    print_header("4. Cost Optimization Skill Tests")
+    print_header("4. Alarm Skill Tests")
+
+    alert_id = None
+
+    if not has_live_credentials():
+        print_skip(
+            "alarm live smoke",
+            "No live credentials/config detected; syntax coverage is still enforced",
+        )
+    else:
+        success, output = run_script("skills/alarm/scripts/list_alerts.py")
+        print_result("list_alerts.py", success, f"Exit code: {0 if success else 1}")
+        if success:
+            meta = extract_meta_json(output, "##ALARM_META_START##", "##ALARM_META_END##")
+            if meta and len(meta) > 0:
+                alert_id = meta[0].get("alertId")
+                print(f"       {Colors.GRAY}Found {len(meta)} alert(s), using first: {alert_id}{Colors.RESET}")
+            else:
+                print(f"       {Colors.GRAY}No live alerts found (analysis smoke skipped){Colors.RESET}")
+
+        if alert_id:
+            success, output = run_script("skills/alarm/scripts/analyze_alert.py", [alert_id])
+            print_result("analyze_alert.py", success, f"Exit code: {0 if success else 1}")
+            if success:
+                meta = extract_meta_json(output, "##ALARM_ANALYSIS_START##", "##ALARM_ANALYSIS_END##")
+                has_payload = isinstance(meta, dict) and "alert_ids" in meta and "assessment" in meta
+                print_result(
+                    "analyze_alert.py structured output",
+                    has_payload,
+                    "Structured analysis block available" if has_payload else "Missing analysis block",
+                )
+        else:
+            print_skip("analyze_alert.py", "No live alertId available")
+
+        print_skip("operate_alert.py", "Skipped by default to avoid side effects")
+
+    # -------------------------------------------------------------------------
+    # Test 5: Cost Optimization Skill Tests
+    # -------------------------------------------------------------------------
+    print_header("5. Cost Optimization Skill Tests")
 
     cost_recommendation_id = None
     execute_fix_enabled = os.environ.get(EXECUTE_FIX_E2E_ENV, "").strip() == "1"
@@ -415,21 +457,22 @@ def run_tests():
             print_skip("execute_optimization.py", f"Set {EXECUTE_FIX_E2E_ENV}=1 to enable remediation smoke")
 
     # -------------------------------------------------------------------------
-    # Test 5: Request Skill Tests
+    # Test 6: Request Skill Tests
     # -------------------------------------------------------------------------
-    print_header("5. Request Skill Tests")
+    print_header("6. Request Skill Tests")
     
     success, output = run_script("skills/request/scripts/submit.py", ["--help"])
     # --help returns exit code 0 or shows usage
     print_result("submit.py --help", "usage:" in output.lower() or success, "Help output available")
 
     # -------------------------------------------------------------------------
-    # Test 6: SKILL.md Definition Validation
+    # Test 7: SKILL.md Definition Validation
     # -------------------------------------------------------------------------
-    print_header("6. SKILL.md Definition Validation")
+    print_header("7. SKILL.md Definition Validation")
     
     skill_dirs = [
         "skills/approval",
+        "skills/alarm",
         "skills/datasource",
         "skills/request",
         "skills/preapproval-agent",
@@ -450,12 +493,13 @@ def run_tests():
             print_result(f"{skill_name}/SKILL.md", False, "File not found")
 
     # -------------------------------------------------------------------------
-    # Test 7: Reference Files Validation
+    # Test 8: Reference Files Validation
     # -------------------------------------------------------------------------
-    print_header("7. Reference Files Validation")
+    print_header("8. Reference Files Validation")
     
     ref_files = [
         "skills/approval/references/WORKFLOW.md",
+        "skills/alarm/references/WORKFLOW.md",
         "skills/datasource/references/WORKFLOW.md",
         "skills/request/references/WORKFLOW.md",
         "skills/request/references/PARAMS.md",
@@ -509,6 +553,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="SmartCMP-Provider E2E Test Suite")
     parser.add_argument("--url", default=None, help="CMP API URL")
+    parser.add_argument("--auth-url", default="", help="Optional explicit CMP auth URL")
     parser.add_argument("--cookie", default=None, help="CMP Cookie string")
     args = parser.parse_args()
 
@@ -518,6 +563,8 @@ def main():
     # Set environment variables
     os.environ["CMP_URL"] = resolve_url(args.url)
     os.environ["CMP_COOKIE"] = resolve_cookie(args.cookie)
+    if args.auth_url:
+        os.environ["CMP_AUTH_URL"] = args.auth_url
 
     exit_code = run_tests()
     sys.exit(exit_code)

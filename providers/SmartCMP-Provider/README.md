@@ -1,11 +1,12 @@
 # SmartCMP Provider
 
-SmartCMP Provider is a service provider module for AtlasClaw, integrating with SmartCMP cloud management platform. It supports cloud resource provisioning, approval workflow management, and data source queries.
+SmartCMP Provider is a service provider module for AtlasClaw, integrating with SmartCMP cloud management platform. It supports cloud resource provisioning, approval workflow management, alarm alert handling, and data source queries.
 
 ## Features
 
 - **Resource Requests** - Submit cloud resource or application provisioning requests via SmartCMP
 - **Approval Management** - View pending approvals, approve or reject requests
+- **Alarm Management** - List alerts, analyze one alert, and run explicit alert status operations
 - **Data Queries** - Query service catalogs, business groups, resource pools, and other reference data
 - **Intelligent Agents** - Automated pre-approval and request decomposition capabilities
 - **Cost Optimization** - Review optimization recommendations, analyze savings, execute SmartCMP-native fixes, and track remediation progress
@@ -29,7 +30,8 @@ SmartCMP Provider supports two deployment modes. Configure in `.env` file at pro
 > | `account.smartcmp.cloud` | `account.smartcmp.cloud/bss-api/api/authentication` |
 > | Private deployment | `{CMP_URL}/platform-api/login` |
 >
-> If your private deployment uses a non-standard login endpoint, set `CMP_AUTH_URL` explicitly to avoid host-based inference.
+> If your private deployment uses a `smartcmp.cloud` hostname or a non-standard
+> login endpoint, set `CMP_AUTH_URL` explicitly to avoid host-based inference.
 
 ---
 
@@ -66,12 +68,12 @@ For on-premise SmartCMP installations:
 # Single IP/domain (auto-appends /platform-api)
 CMP_URL=https://your-cmp-server-ip
 
+# Optional: Override login endpoint explicitly
+# CMP_AUTH_URL=https://your-private-cmp/platform-api/login
+
 # Option A: Auto-login (Recommended)
 CMP_USERNAME=admin
 CMP_PASSWORD=your_password_md5_hash
-
-# Optional: Override login endpoint explicitly
-# CMP_AUTH_URL=https://your-private-cmp/platform-api/login
 
 # Option B: Direct Cookie (if auto-login fails)
 # CMP_COOKIE=XXL_JOB_LOGIN_IDENTITY=xxx; CloudChef-Authenticate=xxx; tenant_id=xxx; ...
@@ -82,7 +84,7 @@ CMP_PASSWORD=your_password_md5_hash
 ### Configuration Priority
 
 1. If `CMP_COOKIE` is set → Use directly
-2. If `CMP_COOKIE` is empty → Check local cache (`~/.atlasclaw/cache/smartcmp_session.json`)
+2. If `CMP_COOKIE` is empty → Check local cache (`.atlasclaw/users/default/sessions/smartcmp_cookie_cache.json`)
 3. If cache missing/expired → Auto-login using `CMP_USERNAME` + `CMP_PASSWORD`
 
 ---
@@ -106,9 +108,9 @@ Test your configuration:
 python -c "
 import sys; sys.path.insert(0, '.atlasclaw/providers/SmartCMP-Provider/skills/shared/scripts')
 from _common import get_cmp_config
-url, cookie = get_cmp_config()
+url, auth_token, _ = get_cmp_config()
 print(f'URL: {url}')
-print(f'Cookie: {cookie[:50]}...' if len(cookie) > 50 else f'Cookie: {cookie}')
+print(f'Auth: {auth_token[:50]}...' if len(auth_token) > 50 else f'Auth: {auth_token}')
 "
 ```
 
@@ -133,6 +135,28 @@ python scripts/approve.py <approval_id> --reason "Approved per policy"
 
 # Reject request
 python scripts/reject.py <approval_id> --reason "Budget exceeded"
+```
+
+### alarm - Alarm Alert Management
+
+Inspect and analyze SmartCMP alarms directly in this provider. Use
+`operate_alert.py` only when an explicit status action is intended.
+
+**Use Cases:**
+- List current alarm alerts
+- Analyze a specific alert with structured recommendations
+- Operate on alert status using English actions such as `mute`, `resolve`, or `reopen`
+
+**Examples:**
+```bash
+# List alerts
+python scripts/list_alerts.py
+
+# Analyze one alert
+python scripts/analyze_alert.py <alert_id>
+
+# Operate on one or more alerts
+python scripts/operate_alert.py <alert_id> --action mute
 ```
 
 ### datasource - Data Source Queries
@@ -242,6 +266,10 @@ SmartCMP-Provider/
 │   │   ├── scripts/        # Submit scripts
 │   │   ├── references/
 │   │   └── SKILL.md
+│   ├── alarm/              # Alarm alert skill
+│   │   ├── scripts/        # Alarm listing, analysis, and operations
+│   │   ├── references/
+│   │   └── SKILL.md
 │   ├── preapproval-agent/  # Pre-approval agent
 │   │   ├── references/
 │   │   └── SKILL.md
@@ -285,7 +313,8 @@ The `shared/scripts/` directory contains data query scripts shared across multip
 1. **Environment Variables** - All scripts read connection info from `CMP_URL`, `CMP_COOKIE`, `CMP_USERNAME`, `CMP_PASSWORD`, and `CMP_AUTH_URL` environment variables
 2. **Cookie Expiration** - If you encounter `401` errors, refresh and update the Cookie
 3. **Output Format** - Script output includes `##META##` blocks for programmatic parsing
-4. **Error Handling** - On `[ERROR]` output, report to user immediately; do NOT self-debug
+4. **Alarm Coverage** - Monitoring and alert workflows are supported directly by the `alarm` skill in this provider
+5. **Error Handling** - On `[ERROR]` output, report to user immediately; do NOT self-debug
 
 ## Related Documentation
 

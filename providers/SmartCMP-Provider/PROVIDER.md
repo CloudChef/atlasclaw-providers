@@ -12,6 +12,9 @@ keywords:
   - provisioning
   - resource
   - approval
+  - alarm
+  - alert
+  - monitoring
   - request
   - cost optimization
   - infrastructure
@@ -22,6 +25,7 @@ capabilities:
   - Query cloud service catalogs and resource pools
   - Submit cloud resource provisioning requests
   - Manage approval workflows (approve/reject)
+  - List, analyze, and operate on SmartCMP alarm alerts
   - Autonomous approval pre-review agent
   - Transform natural language demands into cloud requests
   - List and analyze cost optimization recommendations
@@ -33,6 +37,7 @@ use_when:
   - User asks about cloud service catalogs or resource pools
   - User needs to approve or reject provisioning requests
   - User wants to check pending approvals
+  - User wants to inspect, analyze, or operate on SmartCMP alarms
   - User describes infrastructure needs in natural language
   - User wants to review cost optimization recommendations or remediation progress
   - User wants to execute a SmartCMP-native day2 fix for a cost finding
@@ -40,12 +45,11 @@ use_when:
 avoid_when:
   - User is asking about issue tracking (use Jira provider)
   - User wants to manage code or repositories (use Git provider)
-  - User is asking about monitoring or alerts (use monitoring provider)
 ---
 
 # SmartCMP Service Provider
 
-SmartCMP cloud management platform service for resource provisioning, approval workflow management, and data source queries. Supports enterprise hybrid cloud environments.
+SmartCMP cloud management platform service for resource provisioning, approval workflow management, alarm alert handling, cost optimization remediation, and data source queries. Supports enterprise hybrid cloud environments.
 
 ## Quick Start
 
@@ -53,7 +57,7 @@ SmartCMP cloud management platform service for resource provisioning, approval w
    - **Option 1**: Extract session cookie from SmartCMP web console (see [Cookie Extraction](#cookie-extraction))
    - **Option 2**: Set up auto-login credentials (recommended)
 2. Set environment variables (see [Environment Variables](#environment-variables))
-3. Use skills: `datasource` → `request` → `approval` → `cost-optimization`
+3. Use skills: `datasource` → `request` → `approval` → `alarm` → `cost-optimization`
 
 ## Connection Parameters
 
@@ -71,6 +75,9 @@ SmartCMP cloud management platform service for resource provisioning, approval w
 > - `https://console.smartcmp.cloud/` → `https://account.smartcmp.cloud/bss-api/api/authentication`
 > - `https://account.smartcmp.cloud/#/login` → `https://account.smartcmp.cloud/bss-api/api/authentication`
 > - All other hosts default to `{host}/platform-api/login` unless `auth_url` is explicitly configured
+>
+> If your private deployment uses a `smartcmp.cloud` hostname or a non-standard
+> login endpoint, set `auth_url` explicitly.
 
 ### Authentication Modes
 
@@ -175,6 +182,7 @@ export CMP_AUTH_URL="<explicit-login-url>"
 | `datasource` | Data Query | Read-only reference data queries | `list_services`, `list_business_groups`, `list_resource_pools` |
 | `request` | Provisioning | Cloud resource provisioning requests | `list_components`, `submit` |
 | `approval` | Workflow | Approval workflow management | `list_pending`, `approve`, `reject` |
+| `alarm` | Monitoring | Alarm alert listing, analysis, and status operations | `list_alerts`, `analyze_alert`, `operate_alert` |
 | `preapproval-agent` | Agent | Autonomous approval pre-review | Webhook-triggered, policy-based decisions |
 | `request-decomposition-agent` | Agent | Transform demands into CMP requests | NL parsing, multi-skill orchestration |
 | `cost-optimization` | Optimization | Analyze savings opportunities and execute SmartCMP-native fixes | `list_recommendations`, `analyze_recommendation`, `execute_optimization`, `track_execution` |
@@ -212,6 +220,17 @@ Manage approval workflows.
 python scripts/list_pending.py                              # List pending approvals
 python scripts/approve.py <id> --reason "Approved"          # Approve
 python scripts/reject.py <id> --reason "Budget exceeded"    # Reject
+```
+
+#### alarm
+
+Inspect and analyze SmartCMP alarm alerts, and optionally operate on alert
+status when appropriate.
+
+```bash
+python scripts/list_alerts.py                               # List current alerts
+python scripts/analyze_alert.py <alert_id>                  # Analyze one alert
+python scripts/operate_alert.py <alert_id> --action mute    # Change alert status
 ```
 
 ### Agent Skills
