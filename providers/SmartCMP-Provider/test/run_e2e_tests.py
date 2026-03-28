@@ -511,11 +511,13 @@ def main():
     parser.add_argument("--url", default=None, help="CMP API URL")
     parser.add_argument("--cookie", default=None, help="CMP Cookie string")
     args = parser.parse_args()
-    
+
+    # Compute live-smoke eligibility before default-cookie fallback mutates env.
+    LIVE_SMOKE_AVAILABLE = compute_live_smoke_available(args.cookie)
+
     # Set environment variables
     os.environ["CMP_URL"] = resolve_url(args.url)
     os.environ["CMP_COOKIE"] = resolve_cookie(args.cookie)
-    LIVE_SMOKE_AVAILABLE = compute_live_smoke_available(args.cookie)
 
     exit_code = run_tests()
     sys.exit(exit_code)
