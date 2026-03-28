@@ -19,8 +19,11 @@ SmartCMP Provider supports two deployment modes. Configure in `.env` file at pro
 >
 > | Environment | Auth URL (auto-inferred) |
 > |-------------|--------------------------|
-> | SaaS (*.smartcmp.cloud) | `account.smartcmp.cloud/bss-api/api/authentication` |
+> | `console.smartcmp.cloud` | `account.smartcmp.cloud/bss-api/api/authentication` |
+> | `account.smartcmp.cloud` | `account.smartcmp.cloud/bss-api/api/authentication` |
 > | Private deployment | `{CMP_URL}/platform-api/login` |
+>
+> If your private deployment uses a non-standard login endpoint, set `CMP_AUTH_URL` explicitly to avoid host-based inference.
 
 ---
 
@@ -37,6 +40,9 @@ CMP_URL=https://console.smartcmp.cloud
 # Auto-login credentials (Cookie will be obtained automatically)
 CMP_USERNAME=your_email@company.com
 CMP_PASSWORD=your_password_md5_hash
+
+# Optional: Override login endpoint explicitly
+# CMP_AUTH_URL=https://cmp.example.com/platform-api/login
 
 # Optional: Skip auto-login if you have a valid Cookie
 # CMP_COOKIE=your_cookie_string
@@ -57,6 +63,9 @@ CMP_URL=https://your-cmp-server-ip
 # Option A: Auto-login (Recommended)
 CMP_USERNAME=admin
 CMP_PASSWORD=your_password_md5_hash
+
+# Optional: Override login endpoint explicitly
+# CMP_AUTH_URL=https://your-private-cmp/platform-api/login
 
 # Option B: Direct Cookie (if auto-login fails)
 # CMP_COOKIE=XXL_JOB_LOGIN_IDENTITY=xxx; CloudChef-Authenticate=xxx; tenant_id=xxx; ...

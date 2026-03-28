@@ -57,12 +57,14 @@ SmartCMP cloud management platform service for resource provisioning, approval w
 | `cookie` | string | Option 1 | Full authentication cookie string. Use `${CMP_COOKIE}` env var |
 | `username` | string | Option 2 | Username for auto-login authentication |
 | `password` | string | Option 2 | Password for auto-login authentication |
+| `auth_url` | string | No | Explicit authentication URL override. Use for private deployments that should not follow host inference |
 | `default_business_group` | string | No | Default business group ID for requests |
 | `timeout` | number | No | API request timeout in seconds (default: 30) |
 
-> **Note:** Auth URL is automatically inferred from `base_url`:
-> - SaaS (`*.smartcmp.cloud`) → `account.smartcmp.cloud/bss-api/api/authentication`
-> - Private deployment → `{host}/platform-api/login`
+> **Note:** Auth URL inference is exact-match only:
+> - `https://console.smartcmp.cloud/` → `https://account.smartcmp.cloud/bss-api/api/authentication`
+> - `https://account.smartcmp.cloud/#/login` → `https://account.smartcmp.cloud/bss-api/api/authentication`
+> - All other hosts default to `{host}/platform-api/login` unless `auth_url` is explicitly configured
 
 ### Authentication Modes
 
@@ -83,6 +85,7 @@ SmartCMP cloud management platform service for resource provisioning, approval w
     "smartcmp": {
       "prod": {
         "base_url": "https://cmp.corp.com/platform-api",
+        "auth_url": "https://cmp.corp.com/platform-api/login",
         "cookie": "${CMP_COOKIE}",
         "default_business_group": "47673d8d-6b3f-41e1-8ec0-c37e082d9020"
       }
@@ -99,6 +102,7 @@ SmartCMP cloud management platform service for resource provisioning, approval w
     "smartcmp": {
       "prod": {
         "base_url": "https://cmp.corp.com/platform-api",
+        "auth_url": "https://cmp.corp.com/platform-api/login",
         "username": "${CMP_USERNAME}",
         "password": "${CMP_PASSWORD}",
         "default_business_group": "47673d8d-6b3f-41e1-8ec0-c37e082d9020"
@@ -145,6 +149,7 @@ $env:CMP_PASSWORD = "<password>"
 export CMP_URL="<your-cmp-host>"
 export CMP_USERNAME="<username>"
 export CMP_PASSWORD="<password>"
+export CMP_AUTH_URL="<explicit-login-url>"
 ```
 
 > **Performance Note:** Auto-login caches cookies at `.atlasclaw/users/default/sessions/smartcmp_cookie_cache.json` with 30-minute TTL. Subsequent executions reuse cached cookies, avoiding repeated login requests.

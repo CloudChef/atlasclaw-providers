@@ -43,8 +43,22 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 _API_PATH = "/platform-api"
 
 # SaaS environment detection
-_SAAS_DOMAINS = ["smartcmp.cloud", "cloudchef.io"]
+_SAAS_BUSINESS_HOST = "console.smartcmp.cloud"
+_SAAS_AUTH_HOST = "account.smartcmp.cloud"
 _SAAS_AUTH_URL = "https://account.smartcmp.cloud/bss-api/api/authentication"
+
+
+def _get_hostname(url: str) -> str:
+    """Return the lowercase hostname without port."""
+    if not url:
+        return ""
+
+    if not url.startswith(("http://", "https://")):
+        url = f"https://{url}"
+
+    parsed = urlparse(url)
+    host = parsed.netloc or parsed.path
+    return host.split(":", 1)[0].lower()
 
 # Cookie cache configuration
 def _get_cache_dir() -> Path:
@@ -103,15 +117,22 @@ def _infer_auth_url(cmp_url: str) -> str:
         url = f"https://{url}"
 
     parsed = urlparse(url)
-    host = parsed.netloc.lower()
+    host = _get_hostname(parsed.geturl())
 
-    # Check if this is a SaaS environment
-    for saas_domain in _SAAS_DOMAINS:
-        if saas_domain in host:
-            return _SAAS_AUTH_URL
+    # Only the canonical SmartCMP SaaS hosts should route to the SaaS auth API.
+    if host in {_SAAS_BUSINESS_HOST, _SAAS_AUTH_HOST}:
+        return _SAAS_AUTH_URL
 
     # Private deployment
     return f"{parsed.scheme}://{parsed.netloc}/platform-api/login"
+
+
+def _resolve_auth_url(cmp_url: str, explicit_auth_url: str = "") -> str:
+    """Resolve the auth URL using explicit configuration first, then inference."""
+    explicit_auth_url = (explicit_auth_url or "").strip()
+    if explicit_auth_url:
+        return explicit_auth_url
+    return _infer_auth_url(cmp_url)
 
 
 def _get_cached_cookie(cmp_url: str = "") -> str:
@@ -226,6 +247,7 @@ def _get_config_from_skilldeps() -> tuple:
 
     # Extract configuration
     base_url = instance.get('base_url', '')
+    explicit_auth_url = instance.get('auth_url', '')
 
     # Authentication priority:
     # 1. CloudChef-Authenticate from cookies (UI passed)
@@ -242,7 +264,7 @@ def _get_config_from_skilldeps() -> tuple:
     # If no token but have credentials, try auto-login
     if not auth_token and username and password and base_url:
         try:
-            auth_url = _infer_auth_url(base_url)
+            auth_url = _resolve_auth_url(base_url, explicit_auth_url)
             cookie_str = _auto_login(auth_url, username, password)
             # Cache the full cookie string for future use
             _cache_cookie(cookie_str, base_url)
@@ -277,14 +299,12 @@ def _get_config_from_env() -> tuple:
     cookie = os.environ.get("CMP_COOKIE", "")
     username = os.environ.get("CMP_USERNAME", "")
     password = os.environ.get("CMP_PASSWORD", "")
+    explicit_auth_url = os.environ.get("CMP_AUTH_URL", "")
 
     if not raw_url:
         return None, None, None
 
-    # Support legacy CMP_AUTH_URL for backward compatibility
-    auth_url = os.environ.get("CMP_AUTH_URL", "")
-    if not auth_url and raw_url:
-        auth_url = _infer_auth_url(raw_url)
+    auth_url = _resolve_auth_url(raw_url, explicit_auth_url)
 
     # If no explicit cookie, try cache or auto-login
     if not cookie:
