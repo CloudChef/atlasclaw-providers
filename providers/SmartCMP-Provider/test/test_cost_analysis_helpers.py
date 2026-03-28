@@ -44,7 +44,8 @@ def test_normalize_analysis_facts_combines_violation_and_policy_fields():
     assert facts["violationId"] == "vio-1"
     assert facts["policyId"] == "pol-1"
     assert facts["resourceName"] == "vm-prod-01"
-    assert facts["taskDefinitionPresent"] is True
+    assert "taskDefinitionPresent" not in facts
+    assert facts["taskDefinitionName"] == "Stop VM"
     assert facts["policyDescription"] == "Stop low-utilization VM"
     assert facts["remedie"] == "Stop the instance"
 

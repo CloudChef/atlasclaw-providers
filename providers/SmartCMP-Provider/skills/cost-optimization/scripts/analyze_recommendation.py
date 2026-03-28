@@ -6,6 +6,7 @@ import json
 import sys
 
 import requests
+from requests import RequestException
 
 try:
     from _common import require_config
@@ -58,6 +59,7 @@ def build_analysis_payload(
         remedie=facts.get("remedie", ""),
     )
     readiness = determine_execution_readiness(facts)
+    task_definition_present = bool(facts.get("taskDefinitionName"))
     recommendations = build_recommendations(facts)
     suggested_next_step = recommendations[0]["action"] if recommendations else "manual_review"
     return {
@@ -67,6 +69,7 @@ def build_analysis_payload(
             "optimizationTheme": theme,
             "cloudBestPractice": BEST_PRACTICE_GUIDANCE[theme],
             "executionReadiness": readiness,
+            "taskDefinitionPresent": task_definition_present,
             "savingSummaryAvailable": bool(saving_summary),
             "operationSummaryAvailable": bool(operation_summary),
         },
@@ -98,10 +101,18 @@ def render_analysis(payload: dict) -> str:
 
 def safe_get_json(url: str, headers: dict, params: dict | None = None):
     """Return JSON from a GET request or None when enrichment is unavailable."""
-    response = requests.get(url, headers=headers, params=params, verify=False, timeout=30)
+    try:
+        response = requests.get(url, headers=headers, params=params, verify=False, timeout=30)
+    except RequestException:
+        return None
+
     if response.status_code != 200:
         return None
-    return response.json()
+
+    try:
+        return response.json()
+    except (ValueError, json.JSONDecodeError):
+        return None
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Analyze one SmartCMP cost optimization recommendation.")

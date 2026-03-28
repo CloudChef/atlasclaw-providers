@@ -64,7 +64,6 @@ def normalize_analysis_facts(violation: dict, policy: dict | None = None) -> dic
         "monthlySaving": violation.get("monthlySaving"),
         "savingOperationType": violation.get("savingOperationType", ""),
         "fixType": violation.get("fixType", ""),
-        "taskDefinitionPresent": bool(task_definition),
         "taskDefinitionName": task_definition.get("name", ""),
         "policyDescription": policy.get("description", ""),
         "remedie": violation.get("remedie") or policy_remedie or "",
@@ -82,7 +81,7 @@ def determine_execution_readiness(facts: dict) -> str:
         return "skip"
 
     has_execution_hint = bool(
-        facts.get("fixType") or facts.get("taskDefinitionPresent") or facts.get("remedie")
+        facts.get("fixType") or facts.get("taskDefinitionName") or facts.get("remedie")
     )
     if has_execution_hint:
         return "ready"
@@ -118,8 +117,8 @@ def build_recommendations(facts: dict) -> list[dict]:
         evidence.append(f"savingOperationType={facts['savingOperationType']}")
     if facts.get("fixType"):
         evidence.append(f"fixType={facts['fixType']}")
-    if facts.get("taskDefinitionPresent"):
-        evidence.append("taskDefinitionPresent=true")
+    if facts.get("taskDefinitionName"):
+        evidence.append(f"taskDefinitionName={facts['taskDefinitionName']}")
 
     return [
         {

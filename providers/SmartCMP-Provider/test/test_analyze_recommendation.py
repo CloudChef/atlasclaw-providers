@@ -15,6 +15,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import analyze_recommendation as analyzer  # noqa: E402
+from requests import RequestException
 
 
 def test_build_analysis_payload_contains_required_sections():
@@ -47,9 +48,11 @@ def test_build_analysis_payload_contains_required_sections():
     assert payload["facts"]["monthlySaving"] == 80.25
     assert payload["assessment"]["optimizationTheme"] == "idle_shutdown"
     assert payload["assessment"]["executionReadiness"] == "ready"
+    assert payload["assessment"]["taskDefinitionPresent"] is True
     assert payload["assessment"]["savingSummaryAvailable"] is True
     assert payload["assessment"]["operationSummaryAvailable"] is True
     assert payload["suggestedNextStep"] == "execute_fix"
+    assert "taskDefinitionPresent" not in payload["facts"]
 
 
 def test_render_analysis_outputs_human_summary_and_structured_block():
@@ -81,3 +84,24 @@ def test_render_analysis_outputs_human_summary_and_structured_block():
         1,
     )[0]
     assert json.loads(meta_text) == payload
+
+
+def test_safe_get_json_returns_none_on_request_exception(monkeypatch):
+    def raise_request_error(*_args, **_kwargs):
+        raise RequestException("boom")
+
+    monkeypatch.setattr(analyzer.requests, "get", raise_request_error)
+
+    assert analyzer.safe_get_json("https://cmp.example.com/test", headers={}) is None
+
+
+def test_safe_get_json_returns_none_on_invalid_json(monkeypatch):
+    class InvalidJsonResponse:
+        status_code = 200
+
+        def json(self):
+            raise ValueError("invalid json")
+
+    monkeypatch.setattr(analyzer.requests, "get", lambda *args, **kwargs: InvalidJsonResponse())
+
+    assert analyzer.safe_get_json("https://cmp.example.com/test", headers={}) is None
