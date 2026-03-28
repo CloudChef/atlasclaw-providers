@@ -4,6 +4,8 @@ import json
 import sys
 from pathlib import Path
 
+import requests
+
 
 SCRIPT_DIR = (
     Path(__file__).resolve().parents[1]
@@ -25,6 +27,15 @@ class DummyResponse:
 
     def json(self):
         return self._body
+
+
+class InvalidJsonResponse:
+    def __init__(self, text="not-json"):
+        self.status_code = 200
+        self.text = text
+
+    def json(self):
+        raise ValueError("No JSON object could be decoded")
 
 
 def test_build_execution_result_uses_submission_semantics():
@@ -95,3 +106,37 @@ def test_main_rejects_blank_id(monkeypatch, capsys):
 
     assert executor.main() == 1
     assert "[ERROR] --id must not be empty." in capsys.readouterr().out
+
+
+def test_main_handles_request_exception(monkeypatch, capsys):
+    def fake_require_config():
+        return "https://cmp.example.com/platform-api", "token", {}, {}
+
+    def fake_post(*_args, **_kwargs):
+        raise requests.RequestException("connection timed out")
+
+    monkeypatch.setattr(executor, "require_config", fake_require_config)
+    monkeypatch.setattr(executor.requests, "post", fake_post)
+    monkeypatch.setattr(sys, "argv", ["execute_optimization.py", "--id", "vio-1"])
+
+    assert executor.main() == 1
+    output = capsys.readouterr().out
+    assert "[ERROR] SmartCMP day2 fix request failed: connection timed out" in output
+    assert "##COST_EXECUTION_START##" not in output
+
+
+def test_main_handles_invalid_json_response(monkeypatch, capsys):
+    def fake_require_config():
+        return "https://cmp.example.com/platform-api", "token", {}, {}
+
+    def fake_post(url, headers, json, verify, timeout):
+        return InvalidJsonResponse()
+
+    monkeypatch.setattr(executor, "require_config", fake_require_config)
+    monkeypatch.setattr(executor.requests, "post", fake_post)
+    monkeypatch.setattr(sys, "argv", ["execute_optimization.py", "--id", "vio-1"])
+
+    assert executor.main() == 1
+    output = capsys.readouterr().out
+    assert "[ERROR] SmartCMP returned an invalid JSON response:" in output
+    assert "##COST_EXECUTION_START##" not in output

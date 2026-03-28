@@ -6,6 +6,7 @@ import json
 import sys
 
 import requests
+from requests import RequestException
 
 try:
     from _common import require_config
@@ -44,6 +45,7 @@ def render_execution_result(result: dict) -> str:
     ]
     return "\n".join(lines)
 
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Execute a SmartCMP-native day2 cost optimization fix.")
     parser.add_argument("--id", required=True, help="Violation identifier.")
@@ -59,18 +61,31 @@ def main() -> int:
         "Content-Type": "application/json; charset=utf-8",
         "CloudChef-Authenticate": auth_token,
     }
-    response = requests.post(
-        f"{base_url}/compliance-policies/violations/day2/fix/{violation_id}",
-        headers=headers,
-        json={},
-        verify=False,
-        timeout=30,
-    )
+    try:
+        response = requests.post(
+            f"{base_url}/compliance-policies/violations/day2/fix/{violation_id}",
+            headers=headers,
+            json={},
+            verify=False,
+            timeout=30,
+        )
+    except RequestException as exc:
+        print(f"[ERROR] SmartCMP day2 fix request failed: {exc}")
+        return 1
+
     if response.status_code != 200:
         print(f"[ERROR] HTTP {response.status_code}: {response.text}")
         return 1
 
-    body = response.json() if response.text else {}
+    if response.text:
+        try:
+            body = response.json()
+        except (ValueError, TypeError) as exc:
+            print(f"[ERROR] SmartCMP returned an invalid JSON response: {exc}")
+            return 1
+    else:
+        body = {}
+
     result = build_execution_result(
         violation_id=violation_id,
         submitted=True,
