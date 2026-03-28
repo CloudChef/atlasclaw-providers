@@ -8,6 +8,7 @@ SmartCMP Provider is a service provider module for AtlasClaw, integrating with S
 - **Approval Management** - View pending approvals, approve or reject requests
 - **Data Queries** - Query service catalogs, business groups, resource pools, and other reference data
 - **Intelligent Agents** - Automated pre-approval and request decomposition capabilities
+- **Cost Optimization** - Review optimization recommendations, analyze savings, execute SmartCMP-native fixes, and track remediation progress
 
 ## Quick Start
 
@@ -16,6 +17,11 @@ SmartCMP Provider is a service provider module for AtlasClaw, integrating with S
 SmartCMP Provider supports two deployment modes. Configure in `.env` file at project root:
 
 > **Note:** Auth URL is automatically inferred from `CMP_URL` - no manual configuration needed!
+>
+> SmartCMP SaaS auth handling is exact-match only:
+> - `https://console.smartcmp.cloud/` uses `https://account.smartcmp.cloud/bss-api/api/authentication`
+> - `https://account.smartcmp.cloud/#/login` uses `https://account.smartcmp.cloud/bss-api/api/authentication`
+> - All other hosts default to `{CMP_URL}/platform-api/login` unless `CMP_AUTH_URL` is set explicitly
 >
 > | Environment | Auth URL (auto-inferred) |
 > |-------------|--------------------------|
@@ -104,6 +110,7 @@ url, cookie = get_cmp_config()
 print(f'URL: {url}')
 print(f'Cookie: {cookie[:50]}...' if len(cookie) > 50 else f'Cookie: {cookie}')
 "
+```
 
 ## Skill Modules
 
@@ -204,6 +211,21 @@ Transforms descriptive infrastructure or application demands into executable CMP
 - `draft` - Generate drafts only, no submission
 - `review_required` - Create requests pending human adjustment
 
+### cost-optimization - Cost Optimization
+
+List SmartCMP optimization recommendations, analyze savings opportunities, execute SmartCMP-native day2 fixes, and track remediation progress.
+
+**Workflow:**
+1. Discover recommendations with `list_recommendations.py`
+2. Inspect a finding with `analyze_recommendation.py --id <violation_id>`
+3. Execute a SmartCMP-native fix with `execute_optimization.py --id <violation_id>`
+4. Check remediation state with `track_execution.py --id <violation_id>`
+
+**Safety Boundary:**
+- Public-cloud best-practice guidance is advisory only
+- Execution uses `POST /compliance-policies/violations/day2/fix/{id}`
+- No direct AWS or Azure API calls are made by this skill
+
 ## Directory Structure
 
 ```
@@ -225,6 +247,10 @@ SmartCMP-Provider/
 │   │   └── SKILL.md
 │   ├── request-decomposition-agent/  # Request decomposition agent
 │   │   ├── references/
+│   │   └── SKILL.md
+│   ├── cost-optimization/  # Cost optimization skill
+│   │   ├── references/
+│   │   ├── scripts/
 │   │   └── SKILL.md
 │   └── shared/scripts/     # Shared scripts
 │       ├── list_services.py
@@ -256,7 +282,7 @@ The `shared/scripts/` directory contains data query scripts shared across multip
 
 ## Notes
 
-1. **Environment Variables** - All scripts read connection info from `CMP_URL` and `CMP_COOKIE` environment variables
+1. **Environment Variables** - All scripts read connection info from `CMP_URL`, `CMP_COOKIE`, `CMP_USERNAME`, `CMP_PASSWORD`, and `CMP_AUTH_URL` environment variables
 2. **Cookie Expiration** - If you encounter `401` errors, refresh and update the Cookie
 3. **Output Format** - Script output includes `##META##` blocks for programmatic parsing
 4. **Error Handling** - On `[ERROR]` output, report to user immediately; do NOT self-debug

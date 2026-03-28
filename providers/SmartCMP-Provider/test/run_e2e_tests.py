@@ -25,6 +25,17 @@ PROVIDER_ROOT = SCRIPT_DIR.parent
 DEFAULT_URL = "http://localhost/platform-api"
 DEFAULT_COOKIE = "JSESSIONID=BF8FE40B1F512880116C71ECA2C7C5E9; username=%E5%B9%B3%E5%8F%B0%E7%AE%A1%E7%90%86%E5%91%98; userId=d4153d41-10a7-470c-b21a-8cee6243672e; userLoginId=admin; useremail=%28AES%29qK2pKqGW5NjauE3iJehRGA%3D%3D; tenantname=%E9%BB%98%E8%AE%A4%E7%A7%9F%E6%88%B7; tenant_id=default; userLastLogin=2026-03-11+15%3A47%3A34; CloudChef-Authenticate=eyJhbGciOiJIUzI1NiJ9.eyJ0ZW5hbnRJZCI6ImRlZmF1bHQiLCJzdWIiOiJkNDE1M2Q0MS0xMGE3LTQ3MGMtYjIxYS04Y2VlNjI0MzY3MmUiLCJleHAiOjE3NzMyMTkwMjQsImlhdCI6MTc3MzIxNzIyNH0.in-ONhWQe89iRhbf9mN_KpGd8gQP91_13wSm9eK3y84; CloudChef-Authenticate-Refresh=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJkNDE1M2Q0MS0xMGE3LTQ3MGMtYjIxYS04Y2VlNjI0MzY3MmUiLCJleHAiOjE3NzMyMjQ0MjQsImlhdCI6MTc3MzIxNzIyNH0.yRwb8PfdjPJ9hVknC2Kd2lUc3_cHdW64jas2A15mWBo"
 
+LIVE_ENV_VARS = (
+    "CMP_COOKIE",
+    "CMP_USERNAME",
+    "CMP_PASSWORD",
+    "CMP_AUTH_URL",
+    "ATLASCLAW_PROVIDER_CONFIG",
+    "ATLASCLAW_COOKIES",
+)
+EXECUTE_FIX_E2E_ENV = "SMARTCMP_ENABLE_EXECUTE_FIX_E2E"
+LIVE_SMOKE_AVAILABLE = False
+
 # Test results
 test_results = {"passed": 0, "failed": 0, "skipped": 0, "details": []}
 
@@ -102,6 +113,52 @@ def run_script(script_path: str, args: list = None) -> tuple:
         return False, "Script timeout"
     except Exception as e:
         return False, str(e)
+
+
+def env_has_value(name: str) -> bool:
+    """Return True when an environment variable is present and non-empty."""
+    return bool(os.environ.get(name, "").strip())
+
+
+def has_live_credentials() -> bool:
+    """Detect whether live SmartCMP credentials/configuration are available."""
+    return LIVE_SMOKE_AVAILABLE
+
+
+def compute_live_smoke_available(cli_cookie: str | None) -> bool:
+    """Detect whether the original invocation provided real live credentials."""
+    if cli_cookie is not None and cli_cookie.strip():
+        return True
+
+    if env_has_value("CMP_COOKIE"):
+        return True
+
+    if env_has_value("CMP_USERNAME") and env_has_value("CMP_PASSWORD"):
+        return True
+
+    return any(env_has_value(name) for name in ("ATLASCLAW_PROVIDER_CONFIG", "ATLASCLAW_COOKIES"))
+
+
+def resolve_url(cli_url: str | None) -> str:
+    """Resolve the CMP URL from CLI, environment, or fallback defaults."""
+    if cli_url is not None:
+        return cli_url
+    return os.environ.get("CMP_URL") or DEFAULT_URL
+
+
+def resolve_cookie(cli_cookie: str | None) -> str:
+    """Resolve the CMP cookie, preserving auto-login when credentials exist."""
+    if cli_cookie is not None:
+        return cli_cookie
+
+    env_cookie = os.environ.get("CMP_COOKIE", "")
+    if env_cookie.strip():
+        return env_cookie
+
+    if any(env_has_value(name) for name in ("CMP_USERNAME", "CMP_PASSWORD", "CMP_AUTH_URL")):
+        return ""
+
+    return DEFAULT_COOKIE
 
 
 def extract_meta_json(output: str, start_tag: str, end_tag: str):
@@ -184,6 +241,12 @@ def run_tests():
         "skills/approval/scripts/approve.py",
         "skills/approval/scripts/reject.py",
         "skills/request/scripts/submit.py",
+        "skills/cost-optimization/scripts/_cost_common.py",
+        "skills/cost-optimization/scripts/_analysis.py",
+        "skills/cost-optimization/scripts/list_recommendations.py",
+        "skills/cost-optimization/scripts/analyze_recommendation.py",
+        "skills/cost-optimization/scripts/execute_optimization.py",
+        "skills/cost-optimization/scripts/track_execution.py",
     ]
     
     syntax_ok = all(check_syntax(s) for s in scripts)
@@ -284,18 +347,86 @@ def run_tests():
     print_skip("reject.py", "Skipped to avoid side effects")
 
     # -------------------------------------------------------------------------
-    # Test 4: Request Skill Tests
+    # Test 4: Cost Optimization Skill Tests
     # -------------------------------------------------------------------------
-    print_header("4. Request Skill Tests")
+    print_header("4. Cost Optimization Skill Tests")
+
+    cost_recommendation_id = None
+    execute_fix_enabled = os.environ.get(EXECUTE_FIX_E2E_ENV, "").strip() == "1"
+
+    if not has_live_credentials():
+        print_skip(
+            "cost-optimization live smoke",
+            "No live credentials/config detected; syntax coverage is still enforced",
+        )
+    else:
+        success, output = run_script("skills/cost-optimization/scripts/list_recommendations.py")
+        print_result("list_recommendations.py", success, f"Exit code: {0 if success else 1}")
+        if success:
+            meta = extract_meta_json(
+                output,
+                "##COST_RECOMMENDATION_META_START##",
+                "##COST_RECOMMENDATION_META_END##",
+            )
+            if meta and len(meta) > 0:
+                cost_recommendation_id = meta[0].get("violationId")
+                print(
+                    f"       {Colors.GRAY}Found {len(meta)} recommendation(s), using first: "
+                    f"{meta[0].get('policyName') or meta[0].get('resourceName') or cost_recommendation_id}{Colors.RESET}"
+                )
+            else:
+                print(f"       {Colors.GRAY}No recommendation id returned from list output{Colors.RESET}")
+
+        if cost_recommendation_id:
+            success, output = run_script(
+                "skills/cost-optimization/scripts/analyze_recommendation.py",
+                ["--id", cost_recommendation_id],
+            )
+            print_result("analyze_recommendation.py", success, f"Exit code: {0 if success else 1}")
+            if success:
+                analysis = extract_meta_json(output, "##COST_ANALYSIS_START##", "##COST_ANALYSIS_END##")
+                if analysis:
+                    print(
+                        f"       {Colors.GRAY}Theme: {analysis.get('assessment', {}).get('optimizationTheme', 'unknown')}"
+                        f"{Colors.RESET}"
+                    )
+        else:
+            print_skip("analyze_recommendation.py", "No recommendation id available")
+
+        if cost_recommendation_id:
+            success, output = run_script(
+                "skills/cost-optimization/scripts/track_execution.py",
+                ["--id", cost_recommendation_id],
+            )
+            print_result("track_execution.py", success, f"Exit code: {0 if success else 1}")
+        else:
+            print_skip("track_execution.py", "No recommendation id available")
+
+        if execute_fix_enabled:
+            if cost_recommendation_id:
+                success, output = run_script(
+                    "skills/cost-optimization/scripts/execute_optimization.py",
+                    ["--id", cost_recommendation_id],
+                )
+                print_result("execute_optimization.py", success, f"Exit code: {0 if success else 1}")
+            else:
+                print_skip("execute_optimization.py", "No recommendation id available")
+        else:
+            print_skip("execute_optimization.py", f"Set {EXECUTE_FIX_E2E_ENV}=1 to enable remediation smoke")
+
+    # -------------------------------------------------------------------------
+    # Test 5: Request Skill Tests
+    # -------------------------------------------------------------------------
+    print_header("5. Request Skill Tests")
     
     success, output = run_script("skills/request/scripts/submit.py", ["--help"])
     # --help returns exit code 0 or shows usage
     print_result("submit.py --help", "usage:" in output.lower() or success, "Help output available")
 
     # -------------------------------------------------------------------------
-    # Test 5: SKILL.md Definition Validation
+    # Test 6: SKILL.md Definition Validation
     # -------------------------------------------------------------------------
-    print_header("5. SKILL.md Definition Validation")
+    print_header("6. SKILL.md Definition Validation")
     
     skill_dirs = [
         "skills/approval",
@@ -303,6 +434,7 @@ def run_tests():
         "skills/request",
         "skills/preapproval-agent",
         "skills/request-decomposition-agent",
+        "skills/cost-optimization",
     ]
     
     for skill_dir in skill_dirs:
@@ -318,9 +450,9 @@ def run_tests():
             print_result(f"{skill_name}/SKILL.md", False, "File not found")
 
     # -------------------------------------------------------------------------
-    # Test 6: Reference Files Validation
+    # Test 7: Reference Files Validation
     # -------------------------------------------------------------------------
-    print_header("6. Reference Files Validation")
+    print_header("7. Reference Files Validation")
     
     ref_files = [
         "skills/approval/references/WORKFLOW.md",
@@ -330,6 +462,7 @@ def run_tests():
         "skills/request/references/EXAMPLES.md",
         "skills/preapproval-agent/references/review-guidelines.md",
         "skills/request-decomposition-agent/references/decomposition-guidelines.md",
+        "skills/cost-optimization/references/WORKFLOW.md",
     ]
     
     for ref in ref_files:
@@ -372,15 +505,18 @@ def run_tests():
 # Main
 # ============================================================================
 def main():
+    global LIVE_SMOKE_AVAILABLE
+
     parser = argparse.ArgumentParser(description="SmartCMP-Provider E2E Test Suite")
-    parser.add_argument("--url", default=DEFAULT_URL, help="CMP API URL")
-    parser.add_argument("--cookie", default=DEFAULT_COOKIE, help="CMP Cookie string")
+    parser.add_argument("--url", default=None, help="CMP API URL")
+    parser.add_argument("--cookie", default=None, help="CMP Cookie string")
     args = parser.parse_args()
     
     # Set environment variables
-    os.environ["CMP_URL"] = args.url
-    os.environ["CMP_COOKIE"] = args.cookie
-    
+    os.environ["CMP_URL"] = resolve_url(args.url)
+    os.environ["CMP_COOKIE"] = resolve_cookie(args.cookie)
+    LIVE_SMOKE_AVAILABLE = compute_live_smoke_available(args.cookie)
+
     exit_code = run_tests()
     sys.exit(exit_code)
 

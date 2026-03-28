@@ -13,6 +13,7 @@ keywords:
   - resource
   - approval
   - request
+  - cost optimization
   - infrastructure
   - cmp
   - CMP
@@ -23,6 +24,9 @@ capabilities:
   - Manage approval workflows (approve/reject)
   - Autonomous approval pre-review agent
   - Transform natural language demands into cloud requests
+  - List and analyze cost optimization recommendations
+  - Execute SmartCMP-native remediation for cost optimization findings
+  - Track cost optimization remediation progress
 
 use_when:
   - User wants to provision cloud resources or virtual machines
@@ -30,6 +34,8 @@ use_when:
   - User needs to approve or reject provisioning requests
   - User wants to check pending approvals
   - User describes infrastructure needs in natural language
+  - User wants to review cost optimization recommendations or remediation progress
+  - User wants to execute a SmartCMP-native day2 fix for a cost finding
 
 avoid_when:
   - User is asking about issue tracking (use Jira provider)
@@ -47,7 +53,7 @@ SmartCMP cloud management platform service for resource provisioning, approval w
    - **Option 1**: Extract session cookie from SmartCMP web console (see [Cookie Extraction](#cookie-extraction))
    - **Option 2**: Set up auto-login credentials (recommended)
 2. Set environment variables (see [Environment Variables](#environment-variables))
-3. Use skills: `datasource` → `request` → `approval`
+3. Use skills: `datasource` → `request` → `approval` → `cost-optimization`
 
 ## Connection Parameters
 
@@ -171,6 +177,7 @@ export CMP_AUTH_URL="<explicit-login-url>"
 | `approval` | Workflow | Approval workflow management | `list_pending`, `approve`, `reject` |
 | `preapproval-agent` | Agent | Autonomous approval pre-review | Webhook-triggered, policy-based decisions |
 | `request-decomposition-agent` | Agent | Transform demands into CMP requests | NL parsing, multi-skill orchestration |
+| `cost-optimization` | Optimization | Analyze savings opportunities and execute SmartCMP-native fixes | `list_recommendations`, `analyze_recommendation`, `execute_optimization`, `track_execution` |
 
 ### Core Skills
 
@@ -230,6 +237,21 @@ Orchestration agent that transforms descriptive infrastructure demands into stru
 | `agent_identity` | string | Yes | Must be `agent-request-orchestrator` |
 | `request_text` | string | Yes | Free-form requirement description |
 | `submission_mode` | string | No | `draft` or `review_required` |
+
+#### cost-optimization
+
+Analyze SmartCMP optimization recommendations from discovery through remediation tracking. The analysis layer can explain common public-cloud best practices for AWS, Azure, and similar environments, but execution stays within SmartCMP and only uses the native day2 fix endpoint.
+
+**Workflow:**
+1. List recommendations with `list_recommendations.py`
+2. Analyze one finding with `analyze_recommendation.py --id <violation_id>`
+3. Execute the SmartCMP-native fix with `execute_optimization.py --id <violation_id>`
+4. Track the remediation with `track_execution.py --id <violation_id>`
+
+**Safety Boundary:**
+- Public-cloud best-practice guidance is advisory only
+- Execution uses `POST /compliance-policies/violations/day2/fix/{id}`
+- Do not expect direct AWS or Azure API calls from this skill
 
 ## Shared Scripts Reference
 
