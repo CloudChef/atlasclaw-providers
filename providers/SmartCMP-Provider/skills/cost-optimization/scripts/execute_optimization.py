@@ -46,6 +46,21 @@ def render_execution_result(result: dict) -> str:
     return "\n".join(lines)
 
 
+def extract_error_message(response) -> str:
+    """Extract a user-facing error message from a SmartCMP response."""
+    try:
+        body = response.json()
+    except (ValueError, TypeError, AttributeError):
+        body = None
+
+    if isinstance(body, dict):
+        message = str(body.get("message") or "").strip()
+        if message:
+            return message
+
+    return (response.text or "").strip()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Execute a SmartCMP-native day2 cost optimization fix.")
     parser.add_argument("--id", required=True, help="Violation identifier.")
@@ -74,7 +89,14 @@ def main() -> int:
         return 1
 
     if response.status_code != 200:
-        print(f"[ERROR] HTTP {response.status_code}: {response.text}")
+        message = extract_error_message(response)
+        if "no repair action configured" in message.lower():
+            print(
+                "[ERROR] SmartCMP rejected remediation because the policy has no repair action "
+                "configured. Configure the policy's day2 repair task before retrying."
+            )
+        else:
+            print(f"[ERROR] HTTP {response.status_code}: {message}")
         return 1
 
     if response.text:

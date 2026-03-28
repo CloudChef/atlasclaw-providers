@@ -140,3 +140,24 @@ def test_main_handles_invalid_json_response(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert "[ERROR] SmartCMP returned an invalid JSON response:" in output
     assert "##COST_EXECUTION_START##" not in output
+
+
+def test_main_surfaces_missing_repair_action_guidance(monkeypatch, capsys):
+    def fake_require_config():
+        return "https://cmp.example.com/platform-api", "token", {}, {}
+
+    def fake_post(url, headers, json, verify, timeout):
+        return DummyResponse(
+            status_code=400,
+            text='{"message":"The policy has no repair action configured"}',
+            body={"message": "The policy has no repair action configured"},
+        )
+
+    monkeypatch.setattr(executor, "require_config", fake_require_config)
+    monkeypatch.setattr(executor.requests, "post", fake_post)
+    monkeypatch.setattr(sys, "argv", ["execute_optimization.py", "--id", "vio-1"])
+
+    assert executor.main() == 1
+    output = capsys.readouterr().out
+    assert "policy has no repair action configured" in output
+    assert "##COST_EXECUTION_START##" not in output

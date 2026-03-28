@@ -86,6 +86,35 @@ def test_render_analysis_outputs_human_summary_and_structured_block():
     assert json.loads(meta_text) == payload
 
 
+def test_build_analysis_payload_flags_missing_repair_action():
+    payload = analyzer.build_analysis_payload(
+        violation={
+            "id": "vio-2",
+            "policyId": "policy.cost-optimization.machine.downgrade",
+            "policyName": "policy.cost-optimization.machine.downgrade.name",
+            "resourceName": "vm-demo-01",
+            "status": "ACTIVED",
+            "monthlySaving": None,
+            "monthlyCost": None,
+            "fixType": None,
+            "taskDefinition": None,
+            "remedie": "policy.cost-optimization.machine.downgrade.remedie",
+        },
+        policy={
+            "id": "policy.cost-optimization.machine.downgrade",
+            "name": "policy.cost-optimization.machine.downgrade.name",
+            "description": "policy.cost-optimization.machine.downgrade.description",
+            "remedie": "policy.cost-optimization.machine.downgrade.remedie",
+        },
+    )
+
+    assert payload["assessment"]["executionReadiness"] == "manual_review"
+    assert payload["assessment"]["taskDefinitionPresent"] is False
+    assert payload["suggestedNextStep"] == "configure_platform_policy"
+    assert payload["recommendations"][0]["platformExecutable"] is False
+    assert "does not expose a repair action" in payload["recommendations"][0]["reason"]
+
+
 def test_safe_get_json_returns_none_on_request_exception(monkeypatch):
     def raise_request_error(*_args, **_kwargs):
         raise RequestException("boom")

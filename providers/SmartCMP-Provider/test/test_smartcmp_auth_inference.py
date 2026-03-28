@@ -49,6 +49,7 @@ def test_env_auth_url_override_takes_priority(monkeypatch):
     calls = []
     monkeypatch.setattr(common, "_auto_login", _fake_auto_login(calls))
     monkeypatch.setattr(common, "_get_cached_cookie", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(common, "_cache_cookie", lambda *_args, **_kwargs: None)
     monkeypatch.setenv("CMP_URL", "https://democmp.smartcmp.cloud:1443")
     monkeypatch.setenv("CMP_AUTH_URL", "https://login.internal.example/platform-api/login")
     monkeypatch.setenv("CMP_USERNAME", "admin")
@@ -73,6 +74,7 @@ def test_skilldeps_auth_url_override_takes_priority(monkeypatch):
     calls = []
     monkeypatch.setattr(common, "_auto_login", _fake_auto_login(calls))
     monkeypatch.setattr(common, "_get_cached_cookie", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(common, "_cache_cookie", lambda *_args, **_kwargs: None)
     monkeypatch.setenv("ATLASCLAW_COOKIES", "{}")
     monkeypatch.setenv(
         "ATLASCLAW_PROVIDER_CONFIG",

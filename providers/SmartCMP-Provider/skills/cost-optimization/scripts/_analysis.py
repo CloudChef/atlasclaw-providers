@@ -23,6 +23,9 @@ BEST_PRACTICE_GUIDANCE = {
     "manual_review": "Review the SmartCMP recommendation before taking action.",
 }
 
+ACTIVE_STATUSES = {"ACTIVE", "ACTIVED", "OPEN", "NEW", "PENDING", "RUNNING"}
+COMPLETED_STATUSES = {"FIXED", "RESOLVED", "SUCCESS", "DONE", "CLOSED"}
+
 
 def classify_optimization_theme(
     saving_operation_type: str = "",
@@ -70,21 +73,33 @@ def normalize_analysis_facts(violation: dict, policy: dict | None = None) -> dic
     }
 
 
+def _status_key(facts: dict) -> str:
+    """Normalize SmartCMP status text for downstream decisions."""
+    return (facts.get("status") or "").strip().upper()
+
+
+def _has_platform_repair(facts: dict) -> bool:
+    """Return True when SmartCMP exposes a native repair action for the finding."""
+    return bool(facts.get("fixType") or facts.get("taskDefinitionName"))
+
+
 def determine_execution_readiness(facts: dict) -> str:
     """Decide whether SmartCMP-native execution is ready, manual, or skippable."""
+    status = _status_key(facts)
+    if status in COMPLETED_STATUSES:
+        return "skip"
+
+    if _has_platform_repair(facts):
+        return "ready"
+
+    # Active findings without a repair action should stay reviewable instead of
+    # being skipped just because SmartCMP omitted a savings estimate.
+    if status in ACTIVE_STATUSES or facts.get("policyId") or facts.get("remedie"):
+        return "manual_review"
+
     saving = facts.get("monthlySaving")
     if saving is None or saving <= 0:
         return "skip"
-
-    status = (facts.get("status") or "").strip().upper()
-    if status in {"FIXED", "RESOLVED", "SUCCESS", "DONE", "CLOSED"}:
-        return "skip"
-
-    has_execution_hint = bool(
-        facts.get("fixType") or facts.get("taskDefinitionName") or facts.get("remedie")
-    )
-    if has_execution_hint:
-        return "ready"
     return "manual_review"
 
 
@@ -97,6 +112,7 @@ def build_recommendations(facts: dict) -> list[dict]:
     )
     readiness = determine_execution_readiness(facts)
     platform_executable = readiness == "ready"
+    missing_repair_action = readiness == "manual_review" and not _has_platform_repair(facts)
     if readiness == "skip":
         action = "observe"
         confidence = "medium"
@@ -105,6 +121,13 @@ def build_recommendations(facts: dict) -> list[dict]:
         action = "execute_fix"
         confidence = "high"
         reason = "SmartCMP exposes enough remediation hints to submit the day2 fix safely."
+    elif missing_repair_action:
+        action = "configure_platform_policy"
+        confidence = "high"
+        reason = (
+            "The finding is active, but the SmartCMP policy does not expose a repair action. "
+            "Configure a day2 repair task before calling the fix endpoint."
+        )
     else:
         action = "manual_review"
         confidence = "medium"

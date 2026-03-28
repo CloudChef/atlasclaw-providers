@@ -58,7 +58,11 @@ def test_classify_optimization_theme_maps_stable_values():
 
 
 def test_determine_execution_readiness_distinguishes_ready_manual_and_skip():
-    assert analysis.determine_execution_readiness({"monthlySaving": 0, "status": "OPEN"}) == "skip"
+    assert (
+        analysis.determine_execution_readiness({"monthlySaving": 0, "status": "OPEN"})
+        == "manual_review"
+    )
+    assert analysis.determine_execution_readiness({"monthlySaving": 0, "status": "FIXED"}) == "skip"
     assert (
         analysis.determine_execution_readiness(
             {"monthlySaving": 10, "status": "OPEN", "fixType": "DAY2"}
