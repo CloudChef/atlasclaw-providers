@@ -7,6 +7,7 @@ openspec/
 *.pyo
 *.pyd
 .atlasclaw-test/
+.worktrees/
 
 **/__pycache__/
 
