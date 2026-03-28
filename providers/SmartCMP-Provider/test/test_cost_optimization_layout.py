@@ -26,7 +26,7 @@ def test_cost_optimization_skill_metadata_contains_required_keys():
     skill_text = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
 
     assert 'name: "cost-optimization"' in skill_text
-    assert 'description: "SmartCMP cost optimization skill.' in skill_text
+    assert 'description: "Cost optimization skill.' in skill_text
     assert 'provider_type: "smartcmp"' in skill_text
     assert "tool_list_name:" in skill_text
     assert "tool_analyze_name:" in skill_text

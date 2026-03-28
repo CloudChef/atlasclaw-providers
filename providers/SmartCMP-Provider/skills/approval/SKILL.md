@@ -1,6 +1,6 @@
 ---
 name: "approval"
-description: "SmartCMP approval management. View pending approvals, approve or reject provisioning requests."
+description: "Approval workflow skill. View pending approvals and approve or reject service requests."
 provider_type: "smartcmp"
 instance_required: "true"
 
@@ -14,8 +14,8 @@ triggers:
 
 use_when:
   - User wants to view pending approval items
-  - User needs to approve or reject provisioning requests
-  - User asks about approval status or workflow
+  - User needs to approve or reject service requests
+  - User asks about approval status, approval queue, or approval workflow
 
 avoid_when:
   - User wants to provision new resources (use request skill)
@@ -76,11 +76,11 @@ tool_reject_parameters: |
 
 # approval
 
-SmartCMP approval workflow management skill.
+Approval workflow management skill.
 
 ## Purpose
 
-Manage SmartCMP approval workflows:
+Manage approval workflows for service catalog requests:
 - Query pending approval items with priority analysis
 - Approve one or more requests with optional reason
 - Reject one or more requests with reason

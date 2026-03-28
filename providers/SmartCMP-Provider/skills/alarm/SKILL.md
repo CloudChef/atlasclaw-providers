@@ -1,6 +1,6 @@
 ---
 name: "alarm"
-description: "SmartCMP alarm management. List alerts, analyze alert rules, and perform alert status operations."
+description: "Alarm operations skill. List alerts, analyze alert rule context, and perform alert status operations with remediation guidance."
 provider_type: "smartcmp"
 instance_required: "true"
 
@@ -15,9 +15,9 @@ triggers:
   - operate alert
 
 use_when:
-  - User wants to inspect SmartCMP alarms or alerts
-  - User needs rule-aware alarm analysis with recommendations
-  - User wants to mute, resolve, or reopen SmartCMP alerts
+  - User wants to inspect alarms or alerts
+  - User needs rule-aware alarm analysis with remediation recommendations
+  - User wants to mute, resolve, or reopen alerts
 
 avoid_when:
   - User wants approval actions (use approval skill)
@@ -37,14 +37,14 @@ related:
 
 # alarm
 
-SmartCMP alarm workflow for triggered alert retrieval, rule-aware analysis, and
+Alarm workflow for triggered alert retrieval, rule-aware analysis, and
 status operations.
 
 ## Purpose
 
-Provide SmartCMP-native alarm capabilities:
+Provide alarm-management capabilities:
 - List triggered alerts with machine-readable metadata
-- Analyze one alert with normalized facts, assessment, and recommendations
+- Analyze one alert with normalized facts, assessment, and remediation guidance
 - Perform validated status operations (`mute`, `resolve`, `reopen`)
 
 ## Scripts

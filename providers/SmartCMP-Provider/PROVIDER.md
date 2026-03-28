@@ -6,50 +6,59 @@ version: "1.0.0"
 
 # === LLM Context Fields (for Skill Discovery) ===
 keywords:
-  - cloud
+  - cloud management
+  - multi-cloud
+  - hybrid cloud
+  - service catalog
+  - self-service
   - vm
   - virtual machine
-  - provisioning
-  - resource
+  - application deployment
+  - resource request
+  - ticket
+  - work order
+  - business group
+  - resource pool
   - approval
   - alarm
   - alert
   - monitoring
-  - request
+  - self-healing
   - cost optimization
+  - finops
   - infrastructure
   - cmp
   - CMP
 
 capabilities:
-  - Query cloud service catalogs and resource pools
-  - Submit cloud resource provisioning requests
-  - Manage approval workflows (approve/reject)
-  - List, analyze, and operate on SmartCMP alarm alerts
-  - Autonomous approval pre-review agent
-  - Transform natural language demands into cloud requests
-  - List and analyze cost optimization recommendations
-  - Execute SmartCMP-native remediation for cost optimization findings
-  - Track cost optimization remediation progress
+  - Browse available services, business groups, resource pools, templates, and other reference data before making a request
+  - Submit self-service requests for virtual machines, cloud resources, application environments, or ticket/work order services
+  - View pending approvals and approve or reject service requests
+  - List alerts, analyze alert context, and update alert status with remediation guidance
+  - Turn natural language infrastructure needs into structured request drafts
+  - Run automated pre-review for approval workflows
+  - Review cost optimization recommendations and savings opportunities
+  - Execute and track native day2 remediation for cost optimization findings
 
 use_when:
-  - User wants to provision cloud resources or virtual machines
-  - User asks about cloud service catalogs or resource pools
-  - User needs to approve or reject provisioning requests
+  - User wants to request a VM, database, application environment, or other service catalog item
+  - User wants to submit a ticket or work order for infrastructure or support needs
+  - User asks what services, business groups, or resource pools are available before making a request
+  - User needs to approve or reject a request
   - User wants to check pending approvals
-  - User wants to inspect, analyze, or operate on SmartCMP alarms
-  - User describes infrastructure needs in natural language
-  - User wants to review cost optimization recommendations or remediation progress
-  - User wants to execute a SmartCMP-native day2 fix for a cost finding
+  - User wants to inspect, analyze, or operate on resource alarms
+  - User describes infrastructure needs in natural language and wants them translated into request drafts
+  - User wants to review cost optimization recommendations, savings opportunities, or remediation progress
+  - User wants to execute a native day2 fix for a cost finding
 
 avoid_when:
-  - User is asking about issue tracking (use Jira provider)
+  - User wants generic issue tracking outside cloud service requests (use Jira provider)
   - User wants to manage code or repositories (use Git provider)
 ---
 
 # SmartCMP Service Provider
 
-SmartCMP cloud management platform service for resource provisioning, approval workflow management, alarm alert handling, cost optimization remediation, and data source queries. Supports enterprise hybrid cloud environments.
+Cloud management platform provider for self-service resource requests, approvals, alarms, and cost optimization across hybrid cloud environments.
 
 ## Quick Start
 
@@ -184,14 +193,14 @@ export CMP_AUTH_URL="<explicit-login-url>"
 | `approval` | Workflow | Approval workflow management | `list_pending`, `approve`, `reject` |
 | `alarm` | Monitoring | Alarm alert listing, analysis, and status operations | `list_alerts`, `analyze_alert`, `operate_alert` |
 | `preapproval-agent` | Agent | Autonomous approval pre-review | Webhook-triggered, policy-based decisions |
-| `request-decomposition-agent` | Agent | Transform demands into CMP requests | NL parsing, multi-skill orchestration |
-| `cost-optimization` | Optimization | Analyze savings opportunities and execute SmartCMP-native fixes | `list_recommendations`, `analyze_recommendation`, `execute_optimization`, `track_execution` |
+| `request-decomposition-agent` | Agent | Transform natural-language requirements into request drafts | NL parsing, multi-skill orchestration |
+| `cost-optimization` | Optimization | Analyze savings opportunities and execute platform-native fixes | `list_recommendations`, `analyze_recommendation`, `execute_optimization`, `track_execution` |
 
 ### Core Skills
 
 #### datasource
 
-Query SmartCMP reference data (read-only). Use before `request` skill to discover available resources.
+Query reference data (read-only). Use before `request` skill to discover available resources.
 
 ```bash
 python ../shared/scripts/list_services.py                          # List service catalogs
@@ -224,7 +233,7 @@ python scripts/reject.py <id> --reason "Budget exceeded"    # Reject
 
 #### alarm
 
-Inspect and analyze SmartCMP alarm alerts, and optionally operate on alert
+Inspect and analyze alarm alerts, and optionally operate on alert
 status when appropriate.
 
 ```bash
@@ -237,7 +246,7 @@ python scripts/operate_alert.py <alert_id> --action mute    # Change alert statu
 
 #### preapproval-agent
 
-Autonomous agent for CMP approval pre-review. Triggered by webhooks, analyzes request reasonableness, executes approve/reject decisions.
+Autonomous agent for approval pre-review. Triggered by webhooks, analyzes request reasonableness, executes approve/reject decisions.
 
 | Input | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -248,7 +257,7 @@ Autonomous agent for CMP approval pre-review. Triggered by webhooks, analyzes re
 
 #### request-decomposition-agent
 
-Orchestration agent that transforms descriptive infrastructure demands into structured CMP request candidates.
+Orchestration agent that transforms descriptive infrastructure demands into structured request candidates.
 
 | Input | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -259,12 +268,12 @@ Orchestration agent that transforms descriptive infrastructure demands into stru
 
 #### cost-optimization
 
-Analyze SmartCMP optimization recommendations from discovery through remediation tracking. The analysis layer can explain common public-cloud best practices for AWS, Azure, and similar environments, but execution stays within SmartCMP and only uses the native day2 fix endpoint.
+Analyze optimization recommendations from discovery through remediation tracking. The analysis layer can explain common public-cloud best practices for AWS, Azure, and similar environments, but execution stays within the platform and only uses the native day2 fix endpoint.
 
 **Workflow:**
 1. List recommendations with `list_recommendations.py`
 2. Analyze one finding with `analyze_recommendation.py --id <violation_id>`
-3. Execute the SmartCMP-native fix with `execute_optimization.py --id <violation_id>`
+3. Execute the native fix with `execute_optimization.py --id <violation_id>`
 4. Track the remediation with `track_execution.py --id <violation_id>`
 
 **Safety Boundary:**

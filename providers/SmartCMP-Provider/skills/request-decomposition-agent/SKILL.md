@@ -1,6 +1,6 @@
 ---
 name: request-decomposition-agent
-description: "Transform descriptive infrastructure demands into structured CMP requests. Analyzes requirements, decomposes into sub-requests, and prepares draft payloads."
+description: "Request orchestration agent. Transform natural language infrastructure or application needs into structured, reviewable service request drafts."
 provider_type: "smartcmp"
 instance_required: "true"
 
@@ -10,10 +10,12 @@ triggers:
   - natural language request
   - decompose requirements
   - agent orchestrator
+  - service request drafting
 
 use_when:
-  - User describes infrastructure needs in natural language
-  - Requirements need to be decomposed into multiple sub-requests
+  - User describes infrastructure or application needs in natural language
+  - Requirements need to be decomposed into multiple service requests
+  - User wants reviewable draft requests rather than direct submission
   - agent_identity is agent-request-orchestrator
 
 avoid_when:
@@ -31,15 +33,15 @@ related:
   - datasource
 ---
 
-# CMP Request Decomposition Agent
+# Request Decomposition Agent
 
-Orchestration agent for transforming descriptive demands into CMP request candidates.
+Orchestration agent for transforming descriptive demands into request candidates.
 
 ## Purpose
 
-When receiving free-form infrastructure/application requirements:
-1. Parse and decompose into CMP-executable sub-requests
-2. Match each sub-request to available CMP catalog services
+When receiving free-form infrastructure or application requirements:
+1. Parse and decompose into executable sub-requests
+2. Match each sub-request to available catalog services
 3. Build structured request payloads with resolved/unresolved fields
 4. Return draft requests for human review
 
@@ -69,7 +71,7 @@ This skill activates when:
 
 ## Orchestrated Skills
 
-This agent does NOT access CMP directly. It orchestrates:
+This agent does NOT access the platform directly. It orchestrates:
 
 | Skill | Purpose |
 |-------|---------|

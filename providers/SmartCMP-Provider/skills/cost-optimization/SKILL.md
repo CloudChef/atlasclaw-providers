@@ -1,6 +1,6 @@
 ---
 name: "cost-optimization"
-description: "SmartCMP cost optimization skill. List optimization recommendations, analyze savings opportunities, execute SmartCMP-native day2 fixes, and track remediation state."
+description: "Cost optimization skill. Review FinOps and optimization recommendations, analyze savings opportunities, execute native day2 remediation, and track remediation state."
 provider_type: "smartcmp"
 instance_required: "true"
 
@@ -14,9 +14,9 @@ triggers:
   - execute optimization
 
 use_when:
-  - User wants to list SmartCMP optimization recommendations
-  - User wants to analyze cost optimization opportunities
-  - User wants to execute SmartCMP-native remediation for an optimization finding
+  - User wants to list optimization or FinOps recommendations
+  - User wants to analyze cost optimization opportunities or savings potential
+  - User wants to execute native remediation for an optimization finding
   - User wants to track cost optimization remediation progress
 
 avoid_when:
@@ -42,21 +42,21 @@ tool_track_description: "Track SmartCMP cost optimization remediation execution.
 tool_track_entrypoint: "scripts/track_execution.py"
 ---
 
-# SmartCMP Cost Optimization Skill
+# cost-optimization
 
-Use this skill to work through SmartCMP optimization recommendations from
+Use this skill to work through cost optimization recommendations from
 discovery to remediation tracking.
 
 ## Workflow
 
 1. List recommendations with `list_recommendations.py`
 2. Analyze a recommendation with `analyze_recommendation.py`
-3. Execute a SmartCMP-native day2 fix with `execute_optimization.py`
+3. Execute a native day2 fix with `execute_optimization.py`
 4. Track remediation state with `track_execution.py`
 
 ## Safety Boundary
 
-The first version only executes SmartCMP-native remediation through:
+The first version only executes platform-native remediation through:
 
 - `POST /compliance-policies/violations/day2/fix/{id}`
 

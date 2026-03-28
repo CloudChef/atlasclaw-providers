@@ -1,6 +1,6 @@
 ---
 name: "datasource"
-description: "Query SmartCMP reference data (read-only). View catalogs, list business groups, check resource pools, show applications."
+description: "Discovery skill. Browse available services, business groups, resource pools, applications, OS templates, and images before submitting a request."
 provider_type: "smartcmp"
 instance_required: "true"
 
@@ -15,9 +15,9 @@ triggers:
   - list images
 
 use_when:
-  - User wants to browse or explore available SmartCMP resources
-  - User asks about available services, catalogs, or resource pools
-  - User needs to discover what options are available before making a request
+  - User wants to browse or explore available options before taking action
+  - User asks about available services, business groups, resource pools, applications, templates, or images
+  - User needs reference data to prepare a request but does not want to submit yet
 
 avoid_when:
   - User wants to submit a provisioning request (use request skill)
@@ -37,11 +37,11 @@ related:
 
 # datasource
 
-SmartCMP reference data query skill (read-only).
+Reference data discovery skill (read-only).
 
 ## Purpose
 
-Query and browse SmartCMP reference data as standalone read-only operations. Use when user wants to explore or look up data WITHOUT submitting a request.
+Query and browse reference data as standalone read-only operations. Use when user wants to explore available options without submitting a request.
 
 ## Trigger Conditions
 

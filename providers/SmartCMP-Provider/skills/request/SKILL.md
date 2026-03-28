@@ -1,6 +1,6 @@
 ---
 name: "request"
-description: "SmartCMP resource provisioning and ticket requests. Create VM, provision cloud resources, deploy applications, or submit work orders/tickets. Keywords: request, provision, deploy, create VM, apply resources, submit ticket, 申请资源, 创建虚拟机, 提交工单."
+description: "Self-service request skill. Request cloud resources, application environments, or ticket/work order services. Keywords: request, provision, deploy, create VM, apply resources, submit ticket, 申请资源, 创建虚拟机, 提交工单."
 provider_type: "smartcmp"
 instance_required: "true"
 
@@ -18,10 +18,10 @@ triggers:
   - 申请服务
 
 use_when:
-  - User wants to create or provision cloud resources
-  - User wants to deploy a virtual machine or application
-  - User needs to submit a resource request to SmartCMP
+  - User wants to request a VM, cloud resource, database, or application environment
+  - User wants to submit a self-service request through the service catalog
   - User wants to create a ticket or work order
+  - User already knows the service they want and is ready to provide request parameters
 
 avoid_when:
   - User only wants to browse available resources (use datasource skill)
@@ -62,9 +62,9 @@ tool_submit_description: "Submit resource request to SmartCMP."
 tool_submit_entrypoint: "scripts/submit.py"
 ---
 
-# SmartCMP Request Skill
+# request
 
-Submit cloud resource provisioning or ticket/work order requests through SmartCMP platform.
+Submit cloud resource, application environment, or ticket/work order requests through the service catalog.
 
 ---
 
