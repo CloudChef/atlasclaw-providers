@@ -23,6 +23,7 @@ try:
         build_pageable_request,
         build_query_request,
         extract_list_payload,
+        get_currency_symbol,
         normalize_money,
         normalize_timestamp,
     )
@@ -34,12 +35,13 @@ except ImportError:
         build_pageable_request,
         build_query_request,
         extract_list_payload,
+        get_currency_symbol,
         normalize_money,
         normalize_timestamp,
     )
 
 
-def normalize_violation(item: dict, index: int) -> dict:
+def normalize_violation(item: dict, index: int, related_policy_count: int = 0) -> dict:
     """Normalize a SmartCMP policy violation into stable output fields."""
     task_definition = item.get("taskDefinition") or {}
     return {
@@ -60,15 +62,15 @@ def normalize_violation(item: dict, index: int) -> dict:
         "lastExecuteDate": normalize_timestamp(item.get("lastExecuteDate")),
         "taskDefinitionId": task_definition.get("id", ""),
         "taskDefinitionName": task_definition.get("name", ""),
+        "relatedPolicyCount": related_policy_count,
     }
 
-
-def format_summary_line(item: dict) -> str:
+def format_summary_line(item: dict, with_related: bool = False, currency: str = "¥") -> str:
     """Return a concise human-readable summary line."""
     saving = item["monthlySaving"]
     saving_text = "unknown"
     if saving is not None:
-        saving_text = f"{saving:.2f}"
+        saving_text = f"{currency}{saving:.2f}"
     parts = [
         f"[{item['index']}]",
         item["resourceName"] or "unknown-resource",
@@ -78,17 +80,21 @@ def format_summary_line(item: dict) -> str:
     if item["savingOperationType"]:
         parts.append(item["savingOperationType"])
     parts.append(f"saving={saving_text}")
+    if with_related and item.get("relatedPolicyCount", 0) > 0:
+        parts.append(f"relatedPolicies={item['relatedPolicyCount']}")
     return " | ".join(parts)
 
 
-def render_output(items: list[dict]) -> str:
+def render_output(items: list[dict], with_related_policies: bool = False,
+                  base_url: str = "", auth_token: str = "") -> str:
     """Render user-visible summary plus machine-readable metadata."""
     normalized = [normalize_violation(item, index + 1) for index, item in enumerate(items)]
+    currency = get_currency_symbol(base_url, auth_token)
     lines = []
     if normalized:
         lines.append(f"Found {len(normalized)} cost optimization recommendation(s):")
         lines.append("")
-        lines.extend(format_summary_line(item) for item in normalized)
+        lines.extend(format_summary_line(item, with_related_policies, currency) for item in normalized)
     else:
         lines.append("No cost optimization recommendations found.")
     lines.append("")
@@ -106,6 +112,8 @@ def main() -> int:
     parser.add_argument("--query", default="", help="Free-text query.")
     parser.add_argument("--page", type=int, default=0, help="Zero-based page index.")
     parser.add_argument("--size", type=int, default=20, help="Page size.")
+    parser.add_argument("--with-related-policies", action="store_true",
+                        help="Show count of related policies in the same category.")
     args = parser.parse_args()
 
     base_url, auth_token, _, _ = require_config()
@@ -136,7 +144,36 @@ def main() -> int:
 
     payload = response.json()
     items = extract_list_payload(payload)
-    print(render_output(items))
+
+    # Fetch related policy counts if requested
+    if args.with_related_policies and items:
+        # Group by category and fetch policy counts
+        category_policy_counts = {}
+        categories = set(item.get("category") for item in items if item.get("category"))
+        for cat in categories:
+            try:
+                policies_resp = requests.get(
+                    f"{base_url}/compliance-policies/search",
+                    headers=headers,
+                    params={"category": cat, "page": 0, "size": 100},
+                    verify=False,
+                    timeout=30,
+                )
+                if policies_resp.status_code == 200:
+                    policies_data = policies_resp.json()
+                    policies_list = extract_list_payload(policies_data)
+                    category_policy_counts[cat] = len(policies_list)
+            except Exception:
+                pass
+
+        # Update items with related policy counts
+        for item in items:
+            cat = item.get("category")
+            total_policies = category_policy_counts.get(cat, 0)
+            # Subtract 1 for the current policy
+            item["relatedPolicyCount"] = max(0, total_policies - 1)
+
+    print(render_output(items, args.with_related_policies, base_url=base_url, auth_token=auth_token))
     return 0
 
 

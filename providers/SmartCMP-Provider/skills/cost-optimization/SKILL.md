@@ -1,6 +1,6 @@
 ---
 name: "cost-optimization"
-description: "Cost optimization skill. Review FinOps and optimization recommendations, analyze savings opportunities, execute native day2 remediation, and track remediation state."
+description: "Cost optimization skill. Review FinOps and optimization recommendations, analyze savings opportunities with multi-dimensional insights, risk assessment, and best practices guidance. Execute native day2 remediation and track remediation state."
 provider_type: "smartcmp"
 instance_required: "true"
 
@@ -12,10 +12,15 @@ triggers:
   - finops
   - rightsize
   - execute optimization
+  - 费用优化
+  - 节省建议
+  - 降配
+  - 空闲资源
 
 use_when:
   - User wants to list optimization or FinOps recommendations
-  - User wants to analyze cost optimization opportunities or savings potential
+  - User wants to analyze cost optimization opportunities with detailed insights and risk assessment
+  - User wants to understand saving contribution and priority in global context
   - User wants to execute native remediation for an optimization finding
   - User wants to track cost optimization remediation progress
 
@@ -29,10 +34,10 @@ related:
   - approval
 
 tool_list_name: "smartcmp_list_cost_recommendations"
-tool_list_description: "List SmartCMP cost optimization recommendations."
+tool_list_description: "List SmartCMP cost optimization recommendations with optional related policy counts."
 tool_list_entrypoint: "scripts/list_recommendations.py"
 tool_analyze_name: "smartcmp_analyze_cost_recommendation"
-tool_analyze_description: "Analyze one SmartCMP cost optimization recommendation."
+tool_analyze_description: "Analyze one SmartCMP cost optimization recommendation with multi-dimensional insights, risk assessment, saving priority, and best practice guidance."
 tool_analyze_entrypoint: "scripts/analyze_recommendation.py"
 tool_execute_name: "smartcmp_execute_cost_optimization"
 tool_execute_description: "Execute SmartCMP-native day2 remediation for a violation."
@@ -50,13 +55,27 @@ discovery to remediation tracking.
 ## Workflow
 
 1. List recommendations with `list_recommendations.py`
+   - Optional: `--with-related-policies` to show related policy counts
 2. Analyze a recommendation with `analyze_recommendation.py`
+   - Returns multi-dimensional recommendations (P0/P1/P2 priority)
+   - Includes risk assessment and best practice guidance
+   - Shows saving contribution and policy history
 3. Execute a native day2 fix with `execute_optimization.py`
 4. Track remediation state with `track_execution.py`
 
+## Analysis Output Enhancement
+
+The `analyze_recommendation.py` now provides:
+
+- **P0 Primary Action**: Core recommendation (execute_fix / configure_platform_policy / manual_review)
+- **P1 Risk Assessment**: Risk level (high/medium/low) with specific warnings
+- **P1 Configuration Guide**: When fixType is missing, explains how to configure day2 repair
+- **P1 Saving Priority**: Contribution percentage to global optimizable amount
+- **P2 Policy History**: Compliance rate trend and violation recurrence count
+
 ## Safety Boundary
 
-The first version only executes platform-native remediation through:
+The skill only executes platform-native remediation through:
 
 - `POST /compliance-policies/violations/day2/fix/{id}`
 
