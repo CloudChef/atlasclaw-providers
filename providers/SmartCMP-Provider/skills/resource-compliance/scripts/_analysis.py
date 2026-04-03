@@ -20,6 +20,10 @@ def build_analysis_facts(resource_record: dict) -> dict:
         "softwares": resource.get("softwares") or summary.get("softwares", ""),
         "properties": resource.get("properties") or {},
         "details": details,
+        "resourceInfo": resource.get("resourceInfo") or {},
+        "extra": resource.get("extra") or {},
+        "exts": resource.get("exts") or {},
+        "extensibleProperties": resource.get("extensibleProperties") or {},
     }
 
 
@@ -33,6 +37,8 @@ def detect_mysql(facts: dict) -> dict | None:
         [
             r"mysql(?:\s+server)?[^\d]{0,8}(\d+(?:\.\d+){1,2})",
             r"mysqlversion[^\d]{0,8}(\d+(?:\.\d+){1,2})",
+            r"\bmysqlversion=(\d+(?:\.\d+){1,2})",
+            r"\bversion1=(\d+(?:\.\d+){1,2})",
         ],
     )
 
@@ -261,11 +267,9 @@ def _candidate_texts(facts: dict) -> list[str]:
         if value:
             texts.append(str(value))
 
-    for mapping_key in ("properties", "details"):
+    for mapping_key in ("properties", "details", "resourceInfo", "extra", "exts", "extensibleProperties"):
         mapping = facts.get(mapping_key) or {}
-        if isinstance(mapping, dict):
-            for key, value in mapping.items():
-                texts.append(f"{key}={value}")
+        texts.extend(_flatten_mapping(mapping, prefix=""))
 
     return texts
 
@@ -287,15 +291,17 @@ def _looks_like_linux(facts: dict, text: str) -> bool:
 
 def _extract_linux_distribution_and_version(texts: list[str]) -> tuple[str | None, str | None]:
     patterns = [
-        ("ubuntu", r"ubuntu\s+(\d+(?:\.\d+){1,2})"),
-        ("centos", r"centos\s+(\d+(?:\.\d+)*)"),
-        ("debian", r"debian\s+(\d+(?:\.\d+)*)"),
-        ("rocky", r"rocky(?:\s+linux)?\s+(\d+(?:\.\d+)*)"),
-        ("almalinux", r"alma(?:linux)?\s+(\d+(?:\.\d+)*)"),
-        ("rhel", r"(?:red hat enterprise linux|rhel)\s+(\d+(?:\.\d+)*)"),
+        ("ubuntu", r"ubuntu\s+(\d+(?:\.\d+){1,2})(?!/)"),
+        ("centos", r"centos\s+(\d+(?:\.\d+)*)(?!/)"),
+        ("debian", r"debian\s+(\d+(?:\.\d+)*)(?!/)"),
+        ("rocky", r"rocky(?:\s+linux)?\s+(\d+(?:\.\d+)*)(?!/)"),
+        ("almalinux", r"alma(?:linux)?\s+(\d+(?:\.\d+)*)(?!/)"),
+        ("rhel", r"(?:red hat enterprise linux|rhel)\s+(\d+(?:\.\d+)*)(?!/)"),
     ]
     for text in texts:
         lower_text = text.lower()
+        if re.search(r"centos\s+\d+/\d+", lower_text):
+            return ("centos", None)
         for distro, pattern in patterns:
             match = re.search(pattern, lower_text, flags=re.IGNORECASE)
             if match:
@@ -324,3 +330,22 @@ def _dedupe(items: list[str]) -> list[str]:
             seen.add(item)
             result.append(item)
     return result
+
+
+def _flatten_mapping(value, prefix: str) -> list[str]:
+    texts = []
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            next_prefix = f"{prefix}.{key}" if prefix else str(key)
+            texts.extend(_flatten_mapping(nested, next_prefix))
+        return texts
+    if isinstance(value, list):
+        for index, nested in enumerate(value):
+            next_prefix = f"{prefix}[{index}]" if prefix else f"[{index}]"
+            texts.extend(_flatten_mapping(nested, next_prefix))
+        return texts
+    if value is None:
+        return texts
+    label = prefix or "value"
+    texts.append(f"{label}={value}")
+    return texts

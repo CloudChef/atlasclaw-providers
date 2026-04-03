@@ -43,6 +43,19 @@ analysis with optional live internet validation against authoritative sources.
 |--------|-------------|----------|
 | `analyze_resource.py` | Analyze one or more resources by ID | `scripts/` |
 
+## Examples
+
+```bash
+python scripts/analyze_resource.py <resource_id>
+python scripts/analyze_resource.py --payload-json '{"resourceIds":["id-1"],"triggerSource":"webhook"}'
+```
+
+## Notes
+
+- Supports both direct user input and webhook-style payloads.
+- Emits human-readable output plus `##RESOURCE_COMPLIANCE_START##` metadata.
+- Performs best-effort live internet validation and degrades conservatively when validation is unavailable.
+
 ## Workflow
 
 See [references/WORKFLOW.md](references/WORKFLOW.md) for the supported workflow.

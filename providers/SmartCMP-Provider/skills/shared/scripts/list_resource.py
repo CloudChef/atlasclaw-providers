@@ -134,6 +134,40 @@ def build_missing_record(resource_id):
     }
 
 
+def load_resource_records(resource_ids, *, base_url, headers, request_fn=request_json):
+    search_payload = request_fn(
+        "POST",
+        "/nodes/search",
+        base_url=base_url,
+        headers=headers,
+        payload={"ids": resource_ids},
+    )
+
+    search_items = extract_list_payload(search_payload)
+    summary_by_id = {
+        item.get("id", ""): normalize_resource_summary(item)
+        for item in search_items
+        if item.get("id")
+    }
+
+    records = []
+    for resource_id in resource_ids:
+        if resource_id not in summary_by_id:
+            records.append(build_missing_record(resource_id))
+            continue
+
+        record = fetch_resource_record(
+            resource_id,
+            base_url=base_url,
+            headers=headers,
+            request_fn=request_fn,
+        )
+        record["summary"] = summary_by_id[resource_id]
+        records.append(record)
+
+    return records
+
+
 def render_output(items):
     lines = [f"Found {len(items)} resource(s).", ""]
 
@@ -165,38 +199,15 @@ def main(argv=None) -> int:
     base_url, _, headers, _ = require_config()
 
     try:
-        search_payload = request_json(
-            "POST",
-            "/nodes/search",
-            base_url=base_url,
-            headers=headers,
-            payload={"ids": args.resource_ids},
-        )
-    except (RuntimeError, RequestException) as exc:
-        print(f"[ERROR] {exc}")
-        return 1
-
-    search_items = extract_list_payload(search_payload)
-    summary_by_id = {
-        item.get("id", ""): normalize_resource_summary(item)
-        for item in search_items
-        if item.get("id")
-    }
-
-    records = []
-    for resource_id in args.resource_ids:
-        if resource_id not in summary_by_id:
-            records.append(build_missing_record(resource_id))
-            continue
-
-        record = fetch_resource_record(
-            resource_id,
+        records = load_resource_records(
+            args.resource_ids,
             base_url=base_url,
             headers=headers,
             request_fn=request_json,
         )
-        record["summary"] = summary_by_id[resource_id]
-        records.append(record)
+    except (RuntimeError, RequestException) as exc:
+        print(f"[ERROR] {exc}")
+        return 1
 
     print(render_output(records))
     return 0

@@ -45,6 +45,17 @@ def test_datasource_skill_mentions_resource_lookup():
     assert "list_resource.py" in skill_text
     assert "resource details" in skill_text.lower()
 
+    provider_text = (PROVIDER_ROOT / "PROVIDER.md").read_text(encoding="utf-8")
+    assert "resource-compliance" in provider_text
+
+    readme_text = (PROVIDER_ROOT / "README.md").read_text(encoding="utf-8")
+    assert "resource-compliance" in readme_text
+
+    workflow_text = (
+        PROVIDER_ROOT / "skills" / "datasource" / "references" / "WORKFLOW.md"
+    ).read_text(encoding="utf-8")
+    assert "list_resource.py" in workflow_text
+
 
 def test_resource_compliance_scripts_import_cleanly():
     helper_module = load_module(

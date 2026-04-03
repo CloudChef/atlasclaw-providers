@@ -45,6 +45,7 @@ def test_build_analysis_facts_extracts_core_fields():
             "osDescription": "Ubuntu 20.04 LTS",
             "softwares": "MySQL 5.7.22",
             "properties": {"hostname": "db-1.corp"},
+            "extensibleProperties": {"RuntimeProperties": {"version1": "5.7"}},
         },
         "details": {"kernel": "5.15.0", "mysqlVersion": "5.7.22"},
     }
@@ -57,6 +58,7 @@ def test_build_analysis_facts_extracts_core_fields():
     assert facts["osDescription"] == "Ubuntu 20.04 LTS"
     assert facts["softwares"] == "MySQL 5.7.22"
     assert facts["details"]["mysqlVersion"] == "5.7.22"
+    assert facts["extensibleProperties"]["RuntimeProperties"]["version1"] == "5.7"
 
 
 def test_builds_mysql_finding_from_version_and_external_check():
@@ -168,3 +170,61 @@ def test_degrades_when_external_validation_is_unavailable():
     assert result["summary"]["confidence"] == "low"
     assert any("external validation unavailable" in item for item in result["uncertainties"])
     assert result["findings"][0]["status"] == "needs_review"
+
+
+def test_mysql_detection_can_use_nested_version_fields():
+    module = load_module()
+    facts = {
+        "resourceId": "db-2",
+        "resourceName": "MySQL_32_example",
+        "resourceType": "resource.software.rds.mysql_32",
+        "componentType": "resource.software.rds.mysql_32",
+        "osType": "linux",
+        "osDescription": "",
+        "softwares": "",
+        "details": {},
+        "properties": {},
+        "exts": {"customProperty": {"version1": "5.7"}},
+        "extensibleProperties": {"RuntimeProperties": {"version1": "5.7"}},
+    }
+
+    result = module.analyze_resource_facts(
+        facts,
+        external_checker=lambda product, version: {
+            "status": "unsupported",
+            "summary": f"{product} {version} is unsupported.",
+            "links": ["https://example.invalid/mysql-support"],
+        },
+    )
+
+    assert result["findings"][0]["category"] == "mysql_lifecycle"
+    assert result["findings"][0]["title"] == "MySQL 5.7"
+    assert result["summary"]["overallCompliance"] == "non_compliant"
+
+
+def test_ambiguous_centos_version_stays_needs_review():
+    module = load_module()
+    facts = {
+        "resourceId": "vm-4",
+        "resourceName": "centos-ambiguous",
+        "resourceType": "cloudchef.nodes.Compute",
+        "componentType": "resource.iaas.machine.instance.abstract",
+        "osType": "LINUX",
+        "osDescription": "CentOS 4/5 或更高版本 (64 位)",
+        "softwares": "",
+        "details": {},
+        "properties": {},
+    }
+
+    result = module.analyze_resource_facts(
+        facts,
+        external_checker=lambda product, version: {
+            "status": "supported",
+            "summary": "unused",
+            "links": [],
+        },
+    )
+
+    assert result["findings"][0]["category"] == "linux_security"
+    assert result["findings"][0]["status"] == "needs_review"
+    assert result["findings"][0]["title"] == "Centos detected with unknown version"

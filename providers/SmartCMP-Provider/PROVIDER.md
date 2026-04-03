@@ -26,6 +26,9 @@ keywords:
   - self-healing
   - cost optimization
   - finops
+  - resource compliance
+  - lifecycle analysis
+  - security posture
   - infrastructure
   - cmp
   - CMP
@@ -39,6 +42,7 @@ capabilities:
   - Run automated pre-review for approval workflows
   - Review cost optimization recommendations and savings opportunities
   - Execute and track native day2 remediation for cost optimization findings
+  - Fetch resource details by ID and analyze lifecycle, patch, and security risk
 
 use_when:
   - User wants to request a VM, database, application environment, or other service catalog item
@@ -50,6 +54,7 @@ use_when:
   - User describes infrastructure needs in natural language and wants them translated into request drafts
   - User wants to review cost optimization recommendations, savings opportunities, or remediation progress
   - User wants to execute a native day2 fix for a cost finding
+  - User wants to analyze one or more existing resources by ID for compliance or security risk
 
 avoid_when:
   - User wants generic issue tracking outside cloud service requests (use Jira provider)
@@ -58,7 +63,7 @@ avoid_when:
 
 # SmartCMP Service Provider
 
-Cloud management platform provider for self-service resource requests, approvals, alarms, and cost optimization across hybrid cloud environments.
+Cloud management platform provider for self-service resource requests, approvals, alarms, cost optimization, and resource compliance analysis across hybrid cloud environments.
 
 ## Quick Start
 
@@ -66,7 +71,7 @@ Cloud management platform provider for self-service resource requests, approvals
    - **Option 1**: Extract session cookie from SmartCMP web console (see [Cookie Extraction](#cookie-extraction))
    - **Option 2**: Set up auto-login credentials (recommended)
 2. Set environment variables (see [Environment Variables](#environment-variables))
-3. Use skills: `datasource` → `request` → `approval` → `alarm` → `cost-optimization`
+3. Use skills: `datasource` → `request` → `approval` → `alarm` → `cost-optimization` → `resource-compliance`
 
 ## Connection Parameters
 
@@ -195,6 +200,7 @@ export CMP_AUTH_URL="<explicit-login-url>"
 | `preapproval-agent` | Agent | Autonomous approval pre-review | Webhook-triggered, policy-based decisions |
 | `request-decomposition-agent` | Agent | Transform natural-language requirements into request drafts | NL parsing, multi-skill orchestration |
 | `cost-optimization` | Optimization | Analyze savings opportunities and execute platform-native fixes | `list_recommendations`, `analyze_recommendation`, `execute_optimization`, `track_execution` |
+| `resource-compliance` | Analysis | Fetch resources by ID and analyze lifecycle, patch, and security posture | `list_resource`, `analyze_resource` |
 
 ### Core Skills
 
@@ -209,6 +215,7 @@ python ../shared/scripts/list_resource_pools.py <bgId> <key> <type>  # Resource 
 python ../shared/scripts/list_applications.py <bgId>               # Applications
 python ../shared/scripts/list_os_templates.py <poolId>             # OS templates
 python ../shared/scripts/list_images.py <poolId>                   # Images
+python ../shared/scripts/list_resource.py <resource_id>            # Resource details
 ```
 
 #### request
@@ -240,6 +247,17 @@ status when appropriate.
 python scripts/list_alerts.py                               # List current alerts
 python scripts/analyze_alert.py <alert_id>                  # Analyze one alert
 python scripts/operate_alert.py <alert_id> --action mute    # Change alert status
+```
+
+#### resource-compliance
+
+Inspect one or more existing resources by ID and analyze lifecycle,
+patch, and security posture with best-effort external validation.
+
+```bash
+python ../shared/scripts/list_resource.py <resource_id>             # Fetch resource details
+python scripts/analyze_resource.py <resource_id>                    # Analyze direct input
+python scripts/analyze_resource.py --payload-json '{"resourceIds":["id-1"],"triggerSource":"webhook"}'
 ```
 
 ### Agent Skills

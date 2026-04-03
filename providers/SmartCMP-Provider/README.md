@@ -1,6 +1,6 @@
 # SmartCMP Provider
 
-SmartCMP Provider is a service provider module for AtlasClaw, integrating with SmartCMP cloud management platform. It supports cloud resource provisioning, approval workflow management, alarm alert handling, and data source queries.
+SmartCMP Provider is a service provider module for AtlasClaw, integrating with SmartCMP cloud management platform. It supports cloud resource provisioning, approval workflow management, alarm alert handling, data source queries, and resource compliance analysis.
 
 ## Features
 
@@ -10,6 +10,7 @@ SmartCMP Provider is a service provider module for AtlasClaw, integrating with S
 - **Data Queries** - Query service catalogs, business groups, resource pools, and other reference data
 - **Intelligent Agents** - Automated pre-approval and request decomposition capabilities
 - **Cost Optimization** - Review optimization recommendations, analyze savings, execute SmartCMP-native fixes, and track remediation progress
+- **Resource Compliance** - Fetch resources by ID and analyze lifecycle, patch, and security posture with best-effort external validation
 
 ## Quick Start
 
@@ -170,6 +171,7 @@ Read-only queries for SmartCMP reference data, used for browsing and discovering
 - Application lists
 - OS templates
 - Images
+- Resource details by resource ID
 
 **Examples:**
 ```bash
@@ -181,6 +183,9 @@ python ../shared/scripts/list_business_groups.py <catalogId>
 
 # List resource pools
 python ../shared/scripts/list_resource_pools.py <bgId> <sourceKey> <nodeType>
+
+# Show resource details by ID
+python ../shared/scripts/list_resource.py <resource_id>
 ```
 
 ### request - Resource Requests
@@ -250,6 +255,35 @@ List SmartCMP optimization recommendations, analyze savings opportunities, execu
 - Execution uses `POST /compliance-policies/violations/day2/fix/{id}`
 - No direct AWS or Azure API calls are made by this skill
 
+### resource-compliance - Resource Compliance
+
+Fetch one or more existing SmartCMP resources by ID, normalize their facts,
+and analyze lifecycle, patch, and security posture.
+
+**Workflow:**
+1. Retrieve resource summary, full resource data, and details with `list_resource.py`
+2. Normalize facts for OS, software, and version detection
+3. Perform best-effort live internet validation against authoritative sources when product/version evidence is sufficient
+4. Emit readable output and a stable `##RESOURCE_COMPLIANCE_START##` JSON block
+
+**Examples:**
+```bash
+# Fetch raw resource facts
+python ../shared/scripts/list_resource.py <resource_id>
+
+# Analyze one or more resources directly
+python skills/resource-compliance/scripts/analyze_resource.py <resource_id>
+
+# Analyze webhook-style input
+python skills/resource-compliance/scripts/analyze_resource.py \
+  --payload-json '{"resourceIds":["id-1","id-2"],"triggerSource":"webhook"}'
+```
+
+**Safety Boundary:**
+- Analysis is advisory and evidence-driven
+- External validation is best-effort and degrades conservatively when unavailable
+- No remediation APIs are called by this skill
+
 ## Directory Structure
 
 ```
@@ -280,6 +314,10 @@ SmartCMP-Provider/
 │   │   ├── references/
 │   │   ├── scripts/
 │   │   └── SKILL.md
+│   ├── resource-compliance/  # Resource compliance analysis skill
+│   │   ├── references/
+│   │   ├── scripts/
+│   │   └── SKILL.md
 │   └── shared/scripts/     # Shared scripts
 │       ├── list_services.py
 │       ├── list_business_groups.py
@@ -288,7 +326,8 @@ SmartCMP-Provider/
 │       ├── list_applications.py
 │       ├── list_os_templates.py
 │       ├── list_cloud_entry_types.py
-│       └── list_images.py
+│       ├── list_images.py
+│       └── list_resource.py
 ├── PROVIDER.md             # Provider configuration docs
 └── README.md               # This file
 ```
@@ -307,6 +346,7 @@ The `shared/scripts/` directory contains data query scripts shared across multip
 | `list_os_templates.py` | List OS templates (VM only) |
 | `list_cloud_entry_types.py` | Get cloud entry types |
 | `list_images.py` | List images (private cloud only) |
+| `list_resource.py` | Fetch resource summary, details, and raw resource fields by ID |
 
 ## Notes
 
@@ -315,6 +355,7 @@ The `shared/scripts/` directory contains data query scripts shared across multip
 3. **Output Format** - Script output includes `##META##` blocks for programmatic parsing
 4. **Alarm Coverage** - Monitoring and alert workflows are supported directly by the `alarm` skill in this provider
 5. **Error Handling** - On `[ERROR]` output, report to user immediately; do NOT self-debug
+6. **Resource Compliance** - `resource-compliance` reuses SmartCMP resource facts first, then attempts live external validation for lifecycle and support checks
 
 ## Related Documentation
 

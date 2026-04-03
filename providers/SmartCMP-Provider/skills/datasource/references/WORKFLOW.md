@@ -143,6 +143,18 @@ python ../shared/scripts/list_images.py <RB_ID> <LT_ID> <CLOUD_ENTRY_TYPE_ID>
 
 ---
 
+### 9. List resource details by ID
+
+```bash
+python ../shared/scripts/list_resource.py <RESOURCE_ID> [RESOURCE_ID ...]
+```
+
+Output: summary lines plus `##RESOURCE_META_START## ... ##RESOURCE_META_END##`
+
+**Trigger**: "show resource details" / "按资源ID查看详情"
+
+---
+
 ## Typical Query Flows
 
 | User Intent | Script Sequence |
@@ -153,6 +165,7 @@ python ../shared/scripts/list_images.py <RB_ID> <LT_ID> <CLOUD_ENTRY_TYPE_ID>
 | "XX业务组有哪些资源池" | `list_components.py` → `list_resource_pools.py <bgId> <sourceKey> <nodeType>` |
 | "有哪些操作系统" | Pre-flight check → `list_os_templates.py <osType> <rbId>` |
 | "有哪些镜像" | `list_cloud_entry_types.py` → `list_images.py <rbId> <ltId> <cloudEntryTypeId>` |
+| "查看资源详情" | `list_resource.py <resourceId>` |
 
 ---
 
