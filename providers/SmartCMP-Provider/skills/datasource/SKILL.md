@@ -13,11 +13,15 @@ triggers:
   - list applications
   - list OS templates
   - list images
+  - resource details
+  - show resource
+  - analyze resource data
 
 use_when:
   - User wants to browse or explore available options before taking action
   - User asks about available services, business groups, resource pools, applications, templates, or images
   - User needs reference data to prepare a request but does not want to submit yet
+  - User wants resource details by resource ID before analysis or troubleshooting
 
 avoid_when:
   - User wants to submit a provisioning request (use request skill)
@@ -72,6 +76,7 @@ All scripts are located in `../shared/scripts/`:
 | `list_os_templates.py` | List OS templates (VM only) | `<OS_TYPE> <RESOURCE_BUNDLE_ID>` |
 | `list_cloud_entry_types.py` | Get cloud entry types | (no args) |
 | `list_images.py` | List images (private cloud) | `<RB_ID> <TEMPLATE_ID> <CLOUD_TYPE_ID>` |
+| `list_resource.py` | List resource details by resource ID | `<RESOURCE_ID> [RESOURCE_ID ...]` |
 
 ## Environment Setup
 
@@ -138,6 +143,14 @@ python ../shared/scripts/list_resource_pools.py \
   47673d8d-6b3f-41e1-8ec0-c37e082d9020 \
   resource.iaas.machine.instance.abstract \
   cloudchef.nodes.Compute
+```
+
+### Example 4: Show Resource Details
+
+**User:** "Show resource details for ID X"
+
+```bash
+python ../shared/scripts/list_resource.py <resource_id>
 ```
 
 ## Data Flow
