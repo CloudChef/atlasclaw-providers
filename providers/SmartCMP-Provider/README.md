@@ -10,7 +10,7 @@ SmartCMP Provider is a service provider module for AtlasClaw, integrating with S
 - **Data Queries** - Query service catalogs, business groups, resource pools, and other reference data
 - **Intelligent Agents** - Automated pre-approval and request decomposition capabilities
 - **Cost Optimization** - Review optimization recommendations, analyze savings, execute SmartCMP-native fixes, and track remediation progress
-- **Resource Compliance** - Fetch resources by ID and analyze lifecycle, patch, and security posture with best-effort external validation
+- **Resource Compliance** - Fetch resources by ID, reuse the shared normalized resource view, and analyze lifecycle, patch, security, and configuration posture
 
 ## Quick Start
 
@@ -48,7 +48,7 @@ CMP_URL=https://console.smartcmp.cloud
 
 # Auto-login credentials (Cookie will be obtained automatically)
 CMP_USERNAME=your_email@company.com
-CMP_PASSWORD=your_password_md5_hash
+CMP_PASSWORD=your_password_or_md5_hash
 
 # Optional: Override login endpoint explicitly
 # CMP_AUTH_URL=https://cmp.example.com/platform-api/login
@@ -74,7 +74,7 @@ CMP_URL=https://your-cmp-server-ip
 
 # Option A: Auto-login (Recommended)
 CMP_USERNAME=admin
-CMP_PASSWORD=your_password_md5_hash
+CMP_PASSWORD=your_password_or_md5_hash
 
 # Option B: Direct Cookie (if auto-login fails)
 # CMP_COOKIE=XXL_JOB_LOGIN_IDENTITY=xxx; CloudChef-Authenticate=xxx; tenant_id=xxx; ...
@@ -87,6 +87,9 @@ CMP_PASSWORD=your_password_md5_hash
 1. If `CMP_COOKIE` is set → Use directly
 2. If `CMP_COOKIE` is empty → Check local cache (`.atlasclaw/users/default/sessions/smartcmp_cookie_cache.json`)
 3. If cache missing/expired → Auto-login using `CMP_USERNAME` + `CMP_PASSWORD`
+
+The local `.atlasclaw/users/default/sessions/` cache is a runtime artifact and
+should not be committed.
 
 ---
 
@@ -105,17 +108,20 @@ CMP_PASSWORD=your_password_md5_hash
 Test your configuration:
 
 ```bash
-# Run from project root
+# Run from providers/SmartCMP-Provider/
 python -c "
-import sys; sys.path.insert(0, '.atlasclaw/providers/SmartCMP-Provider/skills/shared/scripts')
+import sys; sys.path.insert(0, 'skills/shared/scripts')
 from _common import get_cmp_config
 url, auth_token, _ = get_cmp_config()
 print(f'URL: {url}')
-print(f'Auth: {auth_token[:50]}...' if len(auth_token) > 50 else f'Auth: {auth_token}')
+print(f'Auth: {auth_token[:50]}...' if auth_token and len(auth_token) > 50 else f'Auth: {auth_token}')
 "
 ```
 
 ## Skill Modules
+
+All example commands below assume your current directory is
+`providers/SmartCMP-Provider/`.
 
 ### approval - Approval Management
 
@@ -129,13 +135,13 @@ Manage SmartCMP approval workflows including querying pending approvals, approvi
 **Examples:**
 ```bash
 # List pending approvals
-python scripts/list_pending.py
+python skills/approval/scripts/list_pending.py
 
 # Approve request
-python scripts/approve.py <approval_id> --reason "Approved per policy"
+python skills/approval/scripts/approve.py <approval_id> --reason "Approved per policy"
 
 # Reject request
-python scripts/reject.py <approval_id> --reason "Budget exceeded"
+python skills/approval/scripts/reject.py <approval_id> --reason "Budget exceeded"
 ```
 
 ### alarm - Alarm Alert Management
@@ -151,18 +157,19 @@ Inspect and analyze SmartCMP alarms directly in this provider. Use
 **Examples:**
 ```bash
 # List alerts
-python scripts/list_alerts.py
+python skills/alarm/scripts/list_alerts.py
 
 # Analyze one alert
-python scripts/analyze_alert.py <alert_id>
+python skills/alarm/scripts/analyze_alert.py <alert_id>
 
 # Operate on one or more alerts
-python scripts/operate_alert.py <alert_id> --action mute
+python skills/alarm/scripts/operate_alert.py <alert_id> --action mute
 ```
 
 ### datasource - Data Source Queries
 
-Read-only queries for SmartCMP reference data, used for browsing and discovering available resources.
+Read-only queries for SmartCMP reference data, used for browsing, discovering
+available resources, and looking up existing resources by ID.
 
 **Supported Queries:**
 - Service catalogs
@@ -171,21 +178,22 @@ Read-only queries for SmartCMP reference data, used for browsing and discovering
 - Application lists
 - OS templates
 - Images
-- Resource details by resource ID
+- Resource details by resource ID with `list_resource.py`
+- Shared normalized resource view (`type + properties`) from `list_resource.py`
 
 **Examples:**
 ```bash
 # List service catalogs
-python ../shared/scripts/list_services.py
+python skills/shared/scripts/list_services.py
 
 # List business groups
-python ../shared/scripts/list_business_groups.py <catalogId>
+python skills/shared/scripts/list_business_groups.py <catalogId>
 
 # List resource pools
-python ../shared/scripts/list_resource_pools.py <bgId> <sourceKey> <nodeType>
+python skills/shared/scripts/list_resource_pools.py <bgId> <sourceKey> <nodeType>
 
-# Show resource details by ID
-python ../shared/scripts/list_resource.py <resource_id>
+# Show resource details and normalized resource view by ID
+python skills/shared/scripts/list_resource.py <resource_id>
 ```
 
 ### request - Resource Requests
@@ -202,13 +210,13 @@ Submit cloud resource or application provisioning requests through SmartCMP plat
 **Examples:**
 ```bash
 # List services
-python ../shared/scripts/list_services.py
+python skills/shared/scripts/list_services.py
 
 # Get component type
-python ../shared/scripts/list_components.py resource.iaas.machine.instance.abstract
+python skills/shared/scripts/list_components.py resource.iaas.machine.instance.abstract
 
 # Submit request
-python scripts/submit.py --file request_body.json
+python skills/request/scripts/submit.py --file request_body.json
 ```
 
 ### preapproval-agent - Pre-approval Agent
@@ -257,19 +265,21 @@ List SmartCMP optimization recommendations, analyze savings opportunities, execu
 
 ### resource-compliance - Resource Compliance
 
-Fetch one or more existing SmartCMP resources by ID, normalize their facts,
-and analyze lifecycle, patch, and security posture.
+Fetch one or more existing SmartCMP resources by ID, reuse the shared
+normalized resource view, and analyze lifecycle, patch, security, and
+configuration posture.
 
 **Workflow:**
-1. Retrieve resource summary, full resource data, and details with `list_resource.py`
-2. Normalize facts for OS, software, and version detection
-3. Perform best-effort live internet validation against authoritative sources when product/version evidence is sufficient
-4. Emit readable output and a stable `##RESOURCE_COMPLIANCE_START##` JSON block
+1. Retrieve resource summary, full resource data, details, and the standard normalized `type + properties` view with `list_resource.py`
+2. Reuse that normalized resource view (`type = componentType`) for analyzer routing
+3. Route cloud/software/OS analyzers (Tomcat, MySQL, PostgreSQL, Redis, Elasticsearch, SQL Server, Linux, Windows, AliCloud OSS)
+4. Perform best-effort live internet validation against authoritative sources when product/version evidence is sufficient
+5. Emit readable output and a stable `##RESOURCE_COMPLIANCE_START##` JSON block
 
 **Examples:**
 ```bash
 # Fetch raw resource facts
-python ../shared/scripts/list_resource.py <resource_id>
+python skills/shared/scripts/list_resource.py <resource_id>
 
 # Analyze one or more resources directly
 python skills/resource-compliance/scripts/analyze_resource.py <resource_id>
@@ -277,6 +287,14 @@ python skills/resource-compliance/scripts/analyze_resource.py <resource_id>
 # Analyze webhook-style input
 python skills/resource-compliance/scripts/analyze_resource.py \
   --payload-json '{"resourceIds":["id-1","id-2"],"triggerSource":"webhook"}'
+```
+
+Representative output fields:
+```json
+{
+  "type": "resource.software.app.tomcat",
+  "analysisTargets": ["software:tomcat"]
+}
 ```
 
 **Safety Boundary:**
@@ -289,47 +307,50 @@ python skills/resource-compliance/scripts/analyze_resource.py \
 ```
 SmartCMP-Provider/
 ├── skills/
-│   ├── approval/           # Approval management skill
-│   │   ├── scripts/        # Approval scripts
-│   │   ├── references/     # Reference docs
+│   ├── approval/                    # Approval management skill
+│   │   ├── scripts/                 # Approval scripts
+│   │   ├── references/              # Reference docs
 │   │   └── SKILL.md
-│   ├── datasource/         # Data source query skill
+│   ├── alarm/                       # Alarm alert skill
+│   │   ├── scripts/                 # Alarm listing, analysis, and operations
 │   │   ├── references/
 │   │   └── SKILL.md
-│   ├── request/            # Resource request skill
-│   │   ├── scripts/        # Submit scripts
-│   │   ├── references/
-│   │   └── SKILL.md
-│   ├── alarm/              # Alarm alert skill
-│   │   ├── scripts/        # Alarm listing, analysis, and operations
-│   │   ├── references/
-│   │   └── SKILL.md
-│   ├── preapproval-agent/  # Pre-approval agent
-│   │   ├── references/
-│   │   └── SKILL.md
-│   ├── request-decomposition-agent/  # Request decomposition agent
-│   │   ├── references/
-│   │   └── SKILL.md
-│   ├── cost-optimization/  # Cost optimization skill
+│   ├── cost-optimization/           # Cost optimization skill
 │   │   ├── references/
 │   │   ├── scripts/
 │   │   └── SKILL.md
-│   ├── resource-compliance/  # Resource compliance analysis skill
+│   ├── datasource/                  # Data source query skill
+│   │   ├── references/
+│   │   └── SKILL.md
+│   ├── preapproval-agent/           # Pre-approval agent
+│   │   ├── references/
+│   │   └── SKILL.md
+│   ├── request/                     # Resource request skill
+│   │   ├── scripts/                 # Submit scripts
+│   │   ├── references/
+│   │   └── SKILL.md
+│   ├── request-decomposition-agent/ # Request decomposition agent
+│   │   ├── references/
+│   │   └── SKILL.md
+│   ├── resource-compliance/         # Resource compliance analysis skill
 │   │   ├── references/
 │   │   ├── scripts/
 │   │   └── SKILL.md
-│   └── shared/scripts/     # Shared scripts
-│       ├── list_services.py
-│       ├── list_business_groups.py
-│       ├── list_components.py
-│       ├── list_resource_pools.py
-│       ├── list_applications.py
-│       ├── list_os_templates.py
-│       ├── list_cloud_entry_types.py
-│       ├── list_images.py
-│       └── list_resource.py
-├── PROVIDER.md             # Provider configuration docs
-└── README.md               # This file
+│   └── shared/
+│       └── scripts/                 # Shared SmartCMP data-access scripts
+│           ├── _common.py
+│           ├── list_services.py
+│           ├── list_business_groups.py
+│           ├── list_components.py
+│           ├── list_resource_pools.py
+│           ├── list_applications.py
+│           ├── list_os_templates.py
+│           ├── list_cloud_entry_types.py
+│           ├── list_images.py
+│           └── list_resource.py
+├── test/                            # Provider test suite
+├── PROVIDER.md                      # Provider configuration docs
+└── README.md                        # This file
 ```
 
 ## Shared Scripts
@@ -346,16 +367,16 @@ The `shared/scripts/` directory contains data query scripts shared across multip
 | `list_os_templates.py` | List OS templates (VM only) |
 | `list_cloud_entry_types.py` | Get cloud entry types |
 | `list_images.py` | List images (private cloud only) |
-| `list_resource.py` | Fetch resource summary, details, and raw resource fields by ID |
+| `list_resource.py` | Fetch resource summary, details, raw resource fields, and the shared normalized `type + properties` view by ID |
 
 ## Notes
 
 1. **Environment Variables** - All scripts read connection info from `CMP_URL`, `CMP_COOKIE`, `CMP_USERNAME`, `CMP_PASSWORD`, and `CMP_AUTH_URL` environment variables
 2. **Cookie Expiration** - If you encounter `401` errors, refresh and update the Cookie
-3. **Output Format** - Script output includes `##META##` blocks for programmatic parsing
+3. **Output Format** - Script output includes named metadata blocks such as `##..._START## ... ##..._END##` for programmatic parsing
 4. **Alarm Coverage** - Monitoring and alert workflows are supported directly by the `alarm` skill in this provider
 5. **Error Handling** - On `[ERROR]` output, report to user immediately; do NOT self-debug
-6. **Resource Compliance** - `resource-compliance` reuses SmartCMP resource facts first, then attempts live external validation for lifecycle and support checks
+6. **Resource Compliance** - `resource-compliance` reuses the shared normalized resource view from `list_resource.py`, then attempts live external validation for lifecycle and support checks
 
 ## Related Documentation
 

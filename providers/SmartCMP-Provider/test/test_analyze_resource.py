@@ -44,29 +44,38 @@ def extract_payload(output: str):
 
 
 def make_resource_record(resource_id: str, name: str, *, os_description: str, softwares: str = ""):
+    is_linux = "Ubuntu" in os_description
     return {
         "resourceId": resource_id,
         "summary": {
             "id": resource_id,
             "name": name,
             "resourceType": "cloudchef.nodes.Compute",
-            "componentType": "resource.iaas.machine.instance.abstract",
+            "componentType": "resource.software.app.tomcat" if softwares else ("resource.os.linux" if is_linux else "resource.os.windows"),
             "status": "started",
-            "osType": "LINUX" if "Ubuntu" in os_description else "WINDOWS",
+            "osType": "LINUX" if is_linux else "WINDOWS",
             "osDescription": os_description,
         },
         "resource": {
             "id": resource_id,
             "name": name,
             "resourceType": "cloudchef.nodes.Compute",
-            "componentType": "resource.iaas.machine.instance.abstract",
+            "componentType": "resource.software.app.tomcat" if softwares else ("resource.os.linux" if is_linux else "resource.os.windows"),
             "status": "started",
-            "osType": "LINUX" if "Ubuntu" in os_description else "WINDOWS",
+            "osType": "LINUX" if is_linux else "WINDOWS",
             "osDescription": os_description,
             "softwares": softwares,
-            "properties": {},
         },
         "details": {},
+        "normalized": {
+            "type": "resource.software.app.tomcat" if softwares else ("resource.os.linux" if is_linux else "resource.os.windows"),
+            "properties": {
+                "osType": "LINUX" if is_linux else "WINDOWS",
+                "osDescription": os_description,
+                "softwareVersion": "9.0.0.M10" if softwares else "",
+                "softwares": softwares,
+            },
+        },
         "fetchStatus": "ok",
         "errors": [],
     }
@@ -104,6 +113,8 @@ def test_main_emits_summary_and_analysis_block(monkeypatch):
     assert payload["triggerSource"] == "user"
     assert payload["analyzedCount"] == 1
     assert payload["failedCount"] == 0
+    assert payload["results"][0]["type"] == "resource.os.linux"
+    assert payload["results"][0]["analysisTargets"] == ["os:linux"]
     assert payload["results"][0]["summary"]["overallCompliance"] == "compliant"
 
 
@@ -148,6 +159,7 @@ def test_main_accepts_webhook_payload_json(monkeypatch):
     assert payload["triggerSource"] == "webhook"
     assert payload["requestedResourceIds"] == ["res-1"]
     assert payload["results"][0]["resourceId"] == "res-1"
+    assert payload["results"][0]["type"] == "resource.os.windows"
 
 
 def test_main_reports_partial_success_when_one_fetch_failed(monkeypatch):
@@ -160,7 +172,7 @@ def test_main_reports_partial_success_when_one_fetch_failed(monkeypatch):
             make_resource_record("res-1", "ubuntu-01", os_description="Ubuntu 22.04.3 LTS"),
             {
                 "resourceId": "res-missing",
-                "summary": {},
+                "summary": {"componentType": "resource.software.db.mysql"},
                 "resource": {},
                 "details": {},
                 "fetchStatus": "not_found",
@@ -189,6 +201,7 @@ def test_main_reports_partial_success_when_one_fetch_failed(monkeypatch):
     assert payload["analyzedCount"] == 1
     assert payload["failedCount"] == 1
     assert payload["results"][1]["analysisStatus"] == "fetch_failed"
+    assert payload["results"][1]["type"] == "resource.software.db.mysql"
 
 
 def test_main_preserves_degraded_external_validation_result(monkeypatch):
@@ -213,7 +226,63 @@ def test_main_preserves_degraded_external_validation_result(monkeypatch):
 
     assert exit_code == 0
     assert payload["results"][0]["summary"]["overallCompliance"] == "needs_review"
+    assert payload["results"][0]["analysisTargets"] == ["os:windows"]
     assert any(
         "external validation unavailable" in item
         for item in payload["results"][0]["uncertainties"]
     )
+
+
+def test_main_builds_normalized_fallback_from_legacy_record_shape(monkeypatch):
+    module = load_module()
+
+    monkeypatch.setattr(
+        module,
+        "load_resources",
+        lambda ids: [
+            {
+                "resourceId": "res-legacy-mysql",
+                "summary": {
+                    "id": "res-legacy-mysql",
+                    "name": "mysql-legacy",
+                    "resourceType": "cloudchef.nodes.Compute",
+                    "componentType": "resource.software.rds.mysql_32",
+                    "osType": "LINUX",
+                },
+                "resource": {
+                    "id": "res-legacy-mysql",
+                    "name": "mysql-legacy",
+                    "resourceType": "cloudchef.nodes.Compute",
+                    "componentType": "resource.software.rds.mysql_32",
+                    "osType": "LINUX",
+                    "properties": {"softwareVersion": "1.0"},
+                    "extensibleProperties": {"RuntimeProperties": {"version1": "5.7"}},
+                },
+                "details": {"hostname": "mysql-legacy"},
+                "fetchStatus": "ok",
+                "errors": [],
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        module,
+        "external_checker",
+        lambda product, version: {
+            "status": "supported",
+            "summary": f"{product} {version} is supported.",
+            "links": ["https://example.invalid/support"],
+            "checkedAt": "2026-04-03T00:00:00Z",
+        },
+    )
+
+    stdout = io.StringIO()
+    with redirect_stdout(stdout):
+        exit_code = module.main(["res-legacy-mysql"])
+
+    payload = extract_payload(stdout.getvalue())
+
+    assert exit_code == 0
+    assert payload["results"][0]["type"] == "resource.software.rds.mysql_32"
+    assert payload["results"][0]["analysisTargets"] == ["software:mysql"]
+    assert payload["results"][0]["properties"]["version1"] == "5.7"
+    assert payload["results"][0]["findings"][0]["evidence"] == ["version1=5.7"]

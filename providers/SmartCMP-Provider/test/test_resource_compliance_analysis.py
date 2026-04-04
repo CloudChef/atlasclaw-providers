@@ -32,199 +32,198 @@ def load_module():
     return module
 
 
-def test_build_analysis_facts_extracts_core_fields():
+def supported_checker(product, version):
+    return {
+        "status": "supported",
+        "summary": f"{product} {version} is in support.",
+        "links": [f"https://example.invalid/{product}"],
+        "checkedAt": "2026-04-04T00:00:00Z",
+    }
+
+
+def test_routes_tomcat_by_component_type_and_emits_generic_finding():
     module = load_module()
-    resource_record = {
-        "resourceId": "db-1",
-        "summary": {"name": "db-1", "resourceType": "cloudchef.nodes.Compute"},
-        "resource": {
-            "name": "db-1",
+    normalized = {
+        "type": "resource.software.app.tomcat",
+        "properties": {"softwareVersion": "9.0.0.M10", "port": 8080},
+    }
+    result = module.analyze_normalized_resource(normalized, external_checker=supported_checker)
+
+    assert result["type"] == "resource.software.app.tomcat"
+    assert result["analysisTargets"] == ["software:tomcat"]
+    assert result["findings"][0]["technology"] == "tomcat"
+    assert result["findings"][0]["analyzerType"] == "software"
+    assert result["findings"][0]["findingType"] == "lifecycle"
+
+
+def test_returns_coverage_when_no_analyzer_matches():
+    module = load_module()
+    result = module.analyze_normalized_resource(
+        {"type": "resource.unknown.custom", "properties": {"name": "x"}},
+        external_checker=supported_checker,
+    )
+
+    assert result["findings"][0]["findingType"] == "coverage"
+    assert result["summary"]["overallCompliance"] == "needs_review"
+
+
+def test_routes_supported_software_types():
+    module = load_module()
+    cases = [
+        ("resource.software.db.mysql", "software:mysql", "mysql"),
+        ("resource.software.db.postgresql", "software:postgresql", "postgresql"),
+        ("resource.software.cache.redis", "software:redis", "redis"),
+        ("resource.software.search.elasticsearch", "software:elasticsearch", "elasticsearch"),
+        ("resource.software.db.sqlserver", "software:sqlserver", "sqlserver"),
+    ]
+    for resource_type, target, technology in cases:
+        result = module.analyze_normalized_resource(
+            {"type": resource_type, "properties": {"softwareVersion": "1.2.3"}},
+            external_checker=supported_checker,
+        )
+        assert result["analysisTargets"] == [target]
+        assert result["findings"][0]["technology"] == technology
+
+
+def test_mysql_prefers_runtime_version_over_component_version():
+    module = load_module()
+    result = module.analyze_normalized_resource(
+        {
+            "type": "resource.software.rds.mysql_32",
+            "properties": {
+                "softwareVersion": "1.0",
+                "version1": "5.7",
+            },
+        },
+        external_checker=supported_checker,
+    )
+
+    assert result["analysisTargets"] == ["software:mysql"]
+    assert result["findings"][0]["title"] == "Mysql 5.7"
+    assert result["findings"][0]["evidence"] == ["version1=5.7"]
+
+
+def test_legacy_facts_keep_nested_runtime_fields_for_mysql_analysis():
+    module = load_module()
+    record = {
+        "resourceId": "db-legacy-1",
+        "summary": {
+            "name": "mysql-legacy",
             "resourceType": "cloudchef.nodes.Compute",
-            "componentType": "resource.iaas.machine.instance.abstract",
+            "componentType": "resource.software.rds.mysql_32",
             "osType": "LINUX",
-            "osDescription": "Ubuntu 20.04 LTS",
-            "softwares": "MySQL 5.7.22",
-            "properties": {"hostname": "db-1.corp"},
+        },
+        "resource": {
+            "name": "mysql-legacy",
+            "resourceType": "cloudchef.nodes.Compute",
+            "componentType": "resource.software.rds.mysql_32",
+            "osType": "LINUX",
+            "properties": {"softwareVersion": "1.0"},
             "extensibleProperties": {"RuntimeProperties": {"version1": "5.7"}},
         },
-        "details": {"kernel": "5.15.0", "mysqlVersion": "5.7.22"},
+        "details": {"hostname": "db-legacy-1"},
     }
 
-    facts = module.build_analysis_facts(resource_record)
+    facts = module.build_analysis_facts(record)
+    result = module.analyze_resource_facts(facts, external_checker=supported_checker)
 
-    assert facts["resourceId"] == "db-1"
-    assert facts["resourceName"] == "db-1"
-    assert facts["resourceType"] == "cloudchef.nodes.Compute"
-    assert facts["osDescription"] == "Ubuntu 20.04 LTS"
-    assert facts["softwares"] == "MySQL 5.7.22"
-    assert facts["details"]["mysqlVersion"] == "5.7.22"
-    assert facts["extensibleProperties"]["RuntimeProperties"]["version1"] == "5.7"
+    assert result["type"] == "resource.software.rds.mysql_32"
+    assert result["analysisTargets"] == ["software:mysql"]
+    assert result["properties"]["version1"] == "5.7"
+    assert result["findings"][0]["evidence"] == ["version1=5.7"]
 
 
-def test_builds_mysql_finding_from_version_and_external_check():
+def test_software_without_version_degrades_to_needs_review():
     module = load_module()
-    facts = {
-        "resourceId": "db-1",
-        "resourceName": "mysql-prod-01",
-        "resourceType": "cloudchef.nodes.Compute",
-        "componentType": "resource.iaas.machine.instance.abstract",
-        "osType": "LINUX",
-        "osDescription": "CentOS 7.9",
-        "softwares": "MySQL 5.7.22",
-        "details": {},
-        "properties": {},
-    }
-
-    result = module.analyze_resource_facts(
-        facts,
-        external_checker=lambda product, version: {
-            "status": "unsupported",
-            "summary": f"{product} {version} is beyond standard support.",
-            "links": ["https://example.invalid/mysql-support"],
-        },
+    result = module.analyze_normalized_resource(
+        {"type": "resource.software.db.postgresql", "properties": {"softwareName": "PostgreSQL"}},
+        external_checker=supported_checker,
     )
 
-    assert result["summary"]["overallCompliance"] == "non_compliant"
-    assert result["findings"][0]["category"] == "mysql_lifecycle"
-    assert result["findings"][0]["status"] == "non_compliant"
-    assert result["findings"][0]["sourceLinks"] == ["https://example.invalid/mysql-support"]
-
-
-def test_builds_linux_finding_with_supported_version():
-    module = load_module()
-    facts = {
-        "resourceId": "vm-1",
-        "resourceName": "ubuntu-01",
-        "resourceType": "cloudchef.nodes.Compute",
-        "componentType": "resource.iaas.machine.instance.abstract",
-        "osType": "LINUX",
-        "osDescription": "Ubuntu 22.04.3 LTS",
-        "softwares": "",
-        "details": {"kernel": "6.5.0"},
-        "properties": {},
-    }
-
-    result = module.analyze_resource_facts(
-        facts,
-        external_checker=lambda product, version: {
-            "status": "supported",
-            "summary": f"{product} {version} is in support.",
-            "links": ["https://example.invalid/ubuntu-support"],
-        },
-    )
-
-    assert result["summary"]["overallCompliance"] == "compliant"
-    assert result["findings"][0]["category"] == "linux_security"
-    assert result["findings"][0]["status"] == "compliant"
-
-
-def test_returns_needs_review_when_version_evidence_is_missing():
-    module = load_module()
-    facts = {
-        "resourceId": "vm-2",
-        "resourceName": "win-legacy",
-        "resourceType": "cloudchef.nodes.Compute",
-        "componentType": "resource.iaas.machine.instance.abstract",
-        "osType": "WINDOWS",
-        "osDescription": "Windows Server",
-        "softwares": "",
-        "details": {},
-        "properties": {},
-    }
-
-    result = module.analyze_resource_facts(
-        facts,
-        external_checker=lambda product, version: {
-            "status": "supported",
-            "summary": "unused",
-            "links": [],
-        },
-    )
-
+    assert result["findings"][0]["status"] == "needs_review"
     assert result["summary"]["overallCompliance"] == "needs_review"
-    assert result["findings"][0]["category"] == "windows_patch"
-    assert result["findings"][0]["status"] == "needs_review"
-    assert result["findings"][0]["confidence"] == "low"
 
 
-def test_degrades_when_external_validation_is_unavailable():
+def test_routes_linux_as_first_class_os_target():
     module = load_module()
-    facts = {
-        "resourceId": "vm-3",
-        "resourceName": "win-2016",
-        "resourceType": "cloudchef.nodes.Compute",
-        "componentType": "resource.iaas.machine.instance.abstract",
-        "osType": "WINDOWS",
-        "osDescription": "Windows Server 2016 Datacenter",
-        "softwares": "",
-        "details": {},
-        "properties": {},
-    }
-
-    def failing_checker(product, version):
-        raise RuntimeError(f"external validation unavailable for {product} {version}")
-
-    result = module.analyze_resource_facts(facts, external_checker=failing_checker)
-
-    assert result["summary"]["overallCompliance"] == "needs_review"
-    assert result["summary"]["confidence"] == "low"
-    assert any("external validation unavailable" in item for item in result["uncertainties"])
-    assert result["findings"][0]["status"] == "needs_review"
-
-
-def test_mysql_detection_can_use_nested_version_fields():
-    module = load_module()
-    facts = {
-        "resourceId": "db-2",
-        "resourceName": "MySQL_32_example",
-        "resourceType": "resource.software.rds.mysql_32",
-        "componentType": "resource.software.rds.mysql_32",
-        "osType": "linux",
-        "osDescription": "",
-        "softwares": "",
-        "details": {},
-        "properties": {},
-        "exts": {"customProperty": {"version1": "5.7"}},
-        "extensibleProperties": {"RuntimeProperties": {"version1": "5.7"}},
-    }
-
-    result = module.analyze_resource_facts(
-        facts,
-        external_checker=lambda product, version: {
-            "status": "unsupported",
-            "summary": f"{product} {version} is unsupported.",
-            "links": ["https://example.invalid/mysql-support"],
+    result = module.analyze_normalized_resource(
+        {
+            "type": "resource.os.linux",
+            "properties": {"osDescription": "Ubuntu 22.04.3 LTS", "osType": "LINUX"},
         },
+        external_checker=supported_checker,
+    )
+    assert result["analysisTargets"] == ["os:linux"]
+    assert result["findings"][0]["technology"] == "ubuntu"
+    assert result["findings"][0]["analyzerType"] == "os"
+
+
+def test_routes_windows_as_first_class_os_target():
+    module = load_module()
+    result = module.analyze_normalized_resource(
+        {
+            "type": "resource.os.windows",
+            "properties": {"osDescription": "Windows Server 2016 Datacenter", "osType": "WINDOWS"},
+        },
+        external_checker=supported_checker,
+    )
+    assert result["analysisTargets"] == ["os:windows"]
+    assert result["findings"][0]["technology"] == "windows"
+    assert result["findings"][0]["analyzerType"] == "os"
+
+
+def test_missing_windows_build_degrades_to_needs_review():
+    module = load_module()
+    result = module.analyze_normalized_resource(
+        {"type": "resource.os.windows", "properties": {"osType": "WINDOWS"}},
+        external_checker=supported_checker,
+    )
+    assert result["findings"][0]["status"] == "needs_review"
+
+
+def test_windows_client_version_is_detected_but_kept_conservative():
+    module = load_module()
+    result = module.analyze_normalized_resource(
+        {
+            "type": "resource.iaas.machine.windows_instance.vsphere",
+            "properties": {"osType": "WINDOWS", "osDescription": "Microsoft Windows 10 (64 位)"},
+        },
+        external_checker=supported_checker,
+    )
+    assert result["analysisTargets"] == ["os:windows"]
+    assert result["findings"][0]["title"] == "Windows 10"
+    assert result["findings"][0]["status"] == "needs_review"
+
+
+def test_ambiguous_linux_version_does_not_collapse_to_first_number():
+    module = load_module()
+    result = module.analyze_normalized_resource(
+        {
+            "type": "resource.iaas.machine.instance.vsphere",
+            "properties": {"osType": "LINUX", "osDescription": "CentOS 4/5 或更高版本 (64 位)"},
+        },
+        external_checker=supported_checker,
+    )
+    assert result["analysisTargets"] == ["os:linux"]
+    assert result["findings"][0]["title"] == "Linux resource detected but distro/version is incomplete"
+    assert result["findings"][0]["status"] == "needs_review"
+
+
+def test_routes_alicloud_oss_cloud_analyzer():
+    module = load_module()
+    result = module.analyze_normalized_resource(
+        {
+            "type": "resource.iaas.storage.object.alicloud_oss_v2",
+            "properties": {
+                "publicAccess": "private",
+                "encryptionAlgorithm": "",
+                "monitorEnabled": False,
+            },
+        },
+        external_checker=supported_checker,
     )
 
-    assert result["findings"][0]["category"] == "mysql_lifecycle"
-    assert result["findings"][0]["title"] == "MySQL 5.7"
-    assert result["summary"]["overallCompliance"] == "non_compliant"
-
-
-def test_ambiguous_centos_version_stays_needs_review():
-    module = load_module()
-    facts = {
-        "resourceId": "vm-4",
-        "resourceName": "centos-ambiguous",
-        "resourceType": "cloudchef.nodes.Compute",
-        "componentType": "resource.iaas.machine.instance.abstract",
-        "osType": "LINUX",
-        "osDescription": "CentOS 4/5 或更高版本 (64 位)",
-        "softwares": "",
-        "details": {},
-        "properties": {},
-    }
-
-    result = module.analyze_resource_facts(
-        facts,
-        external_checker=lambda product, version: {
-            "status": "supported",
-            "summary": "unused",
-            "links": [],
-        },
-    )
-
-    assert result["findings"][0]["category"] == "linux_security"
-    assert result["findings"][0]["status"] == "needs_review"
-    assert result["findings"][0]["title"] == "Centos detected with unknown version"
+    assert result["analysisTargets"] == ["cloud:alicloud_oss_v2"]
+    finding_types = {item["findingType"] for item in result["findings"]}
+    assert "configuration" in finding_types
+    assert "exposure" not in finding_types

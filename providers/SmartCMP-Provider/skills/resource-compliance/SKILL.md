@@ -1,6 +1,6 @@
 ---
 name: "resource-compliance"
-description: "Resource compliance skill. Analyze one or more SmartCMP resources for lifecycle, patch, and security risk."
+description: "Resource compliance skill. Analyze one or more SmartCMP resources with componentType-driven cloud/software/OS analyzers."
 provider_type: "smartcmp"
 instance_required: "true"
 
@@ -13,6 +13,8 @@ triggers:
   - mysql version
   - windows patch
   - linux security
+  - tomcat lifecycle
+  - alicloud oss security
 
 use_when:
   - User wants to analyze one or more resources by ID for compliance or security risk
@@ -30,12 +32,14 @@ related:
 
 # resource-compliance
 
-Analyze one or more SmartCMP resources for lifecycle, patch, and security posture.
+Analyze one or more SmartCMP resources for lifecycle, patch, security, and configuration posture.
 
 ## Purpose
 
-This skill fetches resource facts from SmartCMP and then performs explainable
-analysis with optional live internet validation against authoritative sources.
+This skill fetches resource facts from SmartCMP, consumes the shared
+normalized `type + properties` view from `list_resource.py`, routes analysis by
+`componentType`, and then performs explainable checks with optional live
+internet validation.
 
 ## Scripts
 
@@ -54,6 +58,8 @@ python scripts/analyze_resource.py --payload-json '{"resourceIds":["id-1"],"trig
 
 - Supports both direct user input and webhook-style payloads.
 - Emits human-readable output plus `##RESOURCE_COMPLIANCE_START##` metadata.
+- Routes analyzers by normalized `type` (`componentType`) and emits `analysisTargets`.
+- Supports cloud/software/OS analyzer families (including AliCloud OSS, Tomcat, MySQL, PostgreSQL, Redis, Elasticsearch, SQL Server, Linux, Windows).
 - Performs best-effort live internet validation and degrades conservatively when validation is unavailable.
 
 ## Workflow

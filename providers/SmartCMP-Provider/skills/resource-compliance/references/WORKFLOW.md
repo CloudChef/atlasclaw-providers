@@ -1,9 +1,9 @@
 # Resource Compliance Workflow
 
 1. Receive one or more SmartCMP resource IDs from user input or webhook input.
-2. Retrieve resource summary, full resource fields, and resource details.
-3. Normalize facts for analysis.
-4. Analyze lifecycle, patch, and security posture.
+2. Retrieve resource summary, full resource fields, resource details, and the shared normalized `type + properties` view.
+3. Reuse that normalized view (`type` comes from `componentType`) for analyzer routing.
+4. Route analyzer families by `type` (cloud/software/OS), then analyze lifecycle, patch, security, and configuration posture.
 5. Emit human-readable output plus a structured JSON block.
 
 ## Direct invocation
@@ -29,3 +29,12 @@ python scripts/analyze_resource.py \
   - `failedCount`
   - `generatedAt`
   - `results`
+
+Representative result fields:
+
+```json
+{
+  "type": "resource.software.app.tomcat",
+  "analysisTargets": ["software:tomcat"]
+}
+```

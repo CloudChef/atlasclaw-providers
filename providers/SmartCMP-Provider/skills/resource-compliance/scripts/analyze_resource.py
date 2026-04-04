@@ -2,7 +2,9 @@
 """Analyze one or more SmartCMP resources for compliance risk."""
 
 import argparse
+import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -10,35 +12,39 @@ from datetime import datetime, timezone
 
 import requests
 
-try:
-    from _analysis import analyze_resource_facts, build_analysis_facts
-except ImportError:
-    import os
 
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from _analysis import analyze_resource_facts, build_analysis_facts
+def _load_module_from_path(module_name, file_path):
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Failed to load module from path: {file_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
-try:
-    from _common import require_config
-except ImportError:
-    import os
 
-    sys.path.insert(
-        0,
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shared", "scripts"),
-    )
-    from _common import require_config
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SHARED_SCRIPT_DIR = os.path.join(SCRIPT_DIR, "..", "..", "shared", "scripts")
 
-try:
-    from list_resource import load_resource_records, request_json
-except ImportError:
-    import os
+analysis_module = _load_module_from_path(
+    "resource_compliance_analysis_local",
+    os.path.join(SCRIPT_DIR, "_analysis.py"),
+)
+analyze_normalized_resource = analysis_module.analyze_normalized_resource
+build_analysis_facts = analysis_module.build_analysis_facts
+build_normalized_from_legacy_facts = analysis_module.build_normalized_from_legacy_facts
 
-    sys.path.insert(
-        0,
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shared", "scripts"),
-    )
-    from list_resource import load_resource_records, request_json  # type: ignore
+common_module = _load_module_from_path(
+    "resource_compliance_common_local",
+    os.path.join(SHARED_SCRIPT_DIR, "_common.py"),
+)
+require_config = common_module.require_config
+
+list_resource_module = _load_module_from_path(
+    "resource_compliance_list_resource_local",
+    os.path.join(SHARED_SCRIPT_DIR, "list_resource.py"),
+)
+load_resource_records = list_resource_module.load_resource_records
+request_json = list_resource_module.request_json
 
 
 def parse_args(argv=None):
@@ -245,14 +251,22 @@ def fetch_text(url, accept="text/html"):
 
 
 def build_failed_result(record):
+    summary = record.get("summary") or {}
+    resource = record.get("resource") or {}
+    normalized = record.get("normalized") or {}
     return {
         "resourceId": record.get("resourceId", ""),
-        "resourceName": record.get("summary", {}).get("name")
-        or record.get("resource", {}).get("name", ""),
-        "resourceType": record.get("summary", {}).get("resourceType")
-        or record.get("resource", {}).get("resourceType", ""),
+        "resourceName": summary.get("name") or resource.get("name", ""),
+        "resourceType": summary.get("resourceType") or resource.get("resourceType", ""),
+        "type": normalized.get("type")
+        or summary.get("componentType")
+        or resource.get("componentType")
+        or summary.get("resourceType")
+        or resource.get("resourceType")
+        or "",
+        "properties": normalized.get("properties", {}),
+        "analysisTargets": [],
         "analysisStatus": "fetch_failed",
-        "observations": [],
         "findings": [],
         "summary": {
             "overallRisk": "medium",
@@ -262,6 +276,14 @@ def build_failed_result(record):
         "recommendations": ["Retry resource retrieval or inspect the resource directly in SmartCMP."],
         "uncertainties": record.get("errors", []),
     }
+
+
+def normalize_record_for_analysis(record):
+    normalized = record.get("normalized")
+    if isinstance(normalized, dict) and normalized.get("type"):
+        return normalized
+
+    return build_normalized_from_legacy_facts(build_analysis_facts(record))
 
 
 def render_output(payload):
@@ -330,8 +352,18 @@ def main(argv=None) -> int:
             failed_count += 1
             continue
 
-        facts = build_analysis_facts(record)
-        result = analyze_resource_facts(facts, external_checker=external_checker)
+        summary = record.get("summary") or {}
+        resource = record.get("resource") or {}
+        normalized = normalize_record_for_analysis(record)
+        result = analyze_normalized_resource(normalized, external_checker=external_checker)
+        result.update(
+            {
+                "resourceId": record.get("resourceId", ""),
+                "resourceName": resource.get("name") or summary.get("name", ""),
+                "resourceType": resource.get("resourceType") or summary.get("resourceType", ""),
+                "analysisStatus": "analyzed",
+            }
+        )
         if record.get("errors"):
             result["uncertainties"].extend(record["errors"])
         results.append(result)
