@@ -118,6 +118,7 @@ def fetch_resource_record(resource_id, *, base_url, headers, request_fn):
         "summary": {},
         "resource": resource if isinstance(resource, dict) else {},
         "details": details,
+        "normalized": {},
         "fetchStatus": "partial" if errors else "ok",
         "errors": errors,
     }
@@ -129,8 +130,91 @@ def build_missing_record(resource_id):
         "summary": {},
         "resource": {},
         "details": {},
+        "normalized": {"type": "", "properties": {}},
         "fetchStatus": "not_found",
         "errors": ["Resource was not returned by /nodes/search."],
+    }
+
+
+def merge_first_wins(target: dict, source: dict) -> None:
+    for key, value in source.items():
+        if not key:
+            continue
+        if key in target:
+            continue
+        if value in (None, ""):
+            continue
+        target[key] = value
+
+
+def _simple_fields(mapping: dict) -> dict:
+    if not isinstance(mapping, dict):
+        return {}
+    result = {}
+    for key, value in mapping.items():
+        if isinstance(value, (dict, list)):
+            continue
+        result[key] = value
+    return result
+
+
+def _extract_runtime_properties(resource: dict) -> dict:
+    runtime = {}
+    direct_runtime = resource.get("RuntimeProperties")
+    if isinstance(direct_runtime, dict):
+        merge_first_wins(runtime, _simple_fields(direct_runtime))
+
+    extensible = resource.get("extensibleProperties")
+    if isinstance(extensible, dict):
+        runtime_from_ext = extensible.get("RuntimeProperties")
+        if isinstance(runtime_from_ext, dict):
+            merge_first_wins(runtime, _simple_fields(runtime_from_ext))
+
+    exts = resource.get("exts")
+    if isinstance(exts, dict):
+        custom = exts.get("customProperty")
+        if isinstance(custom, dict):
+            merge_first_wins(runtime, _simple_fields(custom))
+    return runtime
+
+
+def determine_component_type(record: dict) -> str:
+    summary = record.get("summary") or {}
+    resource = record.get("resource") or {}
+    return (
+        resource.get("componentType")
+        or summary.get("componentType")
+        or resource.get("resourceType")
+        or summary.get("resourceType")
+        or ""
+    )
+
+
+def build_flat_properties(record: dict) -> dict:
+    summary = record.get("summary") or {}
+    resource = record.get("resource") or {}
+    details = record.get("details") or {}
+
+    properties = {}
+
+    # analysis-relevant top-level fields from resource first, then summary fallbacks.
+    merge_first_wins(properties, _simple_fields(resource))
+    merge_first_wins(properties, _simple_fields(summary))
+
+    merge_first_wins(properties, _simple_fields(resource.get("properties") or {}))
+    merge_first_wins(properties, _simple_fields(resource.get("resourceInfo") or {}))
+    merge_first_wins(properties, _extract_runtime_properties(resource))
+    merge_first_wins(properties, _simple_fields(resource.get("customProperties") or {}))
+    merge_first_wins(properties, _simple_fields(details))
+    merge_first_wins(properties, _simple_fields(resource.get("extra") or {}))
+
+    return properties
+
+
+def build_normalized_resource(record: dict) -> dict:
+    return {
+        "type": determine_component_type(record),
+        "properties": build_flat_properties(record),
     }
 
 
@@ -163,6 +247,7 @@ def load_resource_records(resource_ids, *, base_url, headers, request_fn=request
             request_fn=request_fn,
         )
         record["summary"] = summary_by_id[resource_id]
+        record["normalized"] = build_normalized_resource(record)
         records.append(record)
 
     return records

@@ -78,6 +78,10 @@ All scripts are located in `../shared/scripts/`:
 | `list_images.py` | List images (private cloud) | `<RB_ID> <TEMPLATE_ID> <CLOUD_TYPE_ID>` |
 | `list_resource.py` | List resource details by resource ID | `<RESOURCE_ID> [RESOURCE_ID ...]` |
 
+`list_resource.py` also emits a normalized `type + properties` view per
+resource as part of its standard output. That normalized view is shared across
+discovery, troubleshooting, automation, and compliance analysis.
+
 ## Environment Setup
 
 ### Option 1: Direct Cookie

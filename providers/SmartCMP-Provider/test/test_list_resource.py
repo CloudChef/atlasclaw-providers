@@ -48,7 +48,7 @@ def make_search_item(resource_id: str, name: str):
         "id": resource_id,
         "name": name,
         "resourceType": "cloudchef.nodes.Compute",
-        "componentType": "resource.iaas.machine.instance.abstract",
+        "componentType": "resource.software.app.tomcat",
         "osType": "LINUX",
         "osDescription": "Ubuntu 20.04 LTS",
         "isAgentInstalled": True,
@@ -62,13 +62,19 @@ def make_resource_item(resource_id: str, name: str):
         "id": resource_id,
         "name": name,
         "resourceType": "cloudchef.nodes.Compute",
-        "componentType": "resource.iaas.machine.instance.abstract",
+        "componentType": "resource.software.app.tomcat",
         "osType": "LINUX",
         "osDescription": "Ubuntu 20.04 LTS",
         "agentVersion": "1.2.3",
         "status": "started",
-        "properties": {"hostname": f"{name}.corp"},
-        "softwares": "MySQL 5.7.22",
+        "softwareName": "Tomcat",
+        "softwareVersion": "9.0.0.M10",
+        "properties": {"hostname": f"{name}.corp", "port": 8080},
+        "resourceInfo": {"machine": "svr-01"},
+        "customProperties": {"status": "stopped", "publicAccess": "private"},
+        "extensibleProperties": {"RuntimeProperties": {"status": "runtime-overwrite", "version": "9.0.0.M10"}},
+        "extra": {"monitorEnabled": False},
+        "softwares": "Tomcat 9.0.0.M10",
     }
 
 
@@ -110,7 +116,10 @@ def test_main_merges_search_resource_and_detail_calls(monkeypatch):
     assert payload[0]["resourceId"] == "res-1"
     assert payload[0]["fetchStatus"] == "ok"
     assert payload[0]["details"]["osVersion"] == "Ubuntu 20.04"
-    assert payload[0]["resource"]["softwares"] == "MySQL 5.7.22"
+    assert payload[0]["resource"]["softwares"] == "Tomcat 9.0.0.M10"
+    assert payload[0]["normalized"]["type"] == "resource.software.app.tomcat"
+    assert payload[0]["normalized"]["properties"]["softwareVersion"] == "9.0.0.M10"
+    assert payload[0]["normalized"]["properties"]["status"] == "started"
     assert calls[0][1] == "/nodes/search"
 
 
@@ -181,3 +190,31 @@ def test_main_marks_missing_resource_as_not_found(monkeypatch):
     assert payload[1]["resourceId"] == "res-missing"
     assert payload[1]["fetchStatus"] == "not_found"
     assert payload[1]["errors"] == ["Resource was not returned by /nodes/search."]
+
+
+def test_main_prefers_first_value_when_duplicate_properties_exist(monkeypatch):
+    module = load_module()
+
+    def fake_require_config():
+        return "https://cmp.example.com/platform-api", "token", {"CloudChef-Authenticate": "token"}, {}
+
+    def fake_request_json(method, path, *, base_url, headers, payload=None, params=None):
+        if method == "POST" and path == "/nodes/search":
+            return {"content": [make_search_item("res-1", "tomcat-01")]}
+        if method == "GET" and path == "/nodes/res-1":
+            return make_resource_item("res-1", "tomcat-01")
+        if method == "GET" and path == "/nodes/res-1/details":
+            return {"status": "from-details", "port": 9090}
+        raise AssertionError(f"Unexpected call: {method} {path}")
+
+    monkeypatch.setattr(module, "require_config", fake_require_config)
+    monkeypatch.setattr(module, "request_json", fake_request_json)
+
+    stdout = io.StringIO()
+    with redirect_stdout(stdout):
+        exit_code = module.main(["res-1"])
+
+    payload = extract_payload(stdout.getvalue())
+    assert exit_code == 0
+    assert payload[0]["normalized"]["properties"]["status"] == "started"
+    assert payload[0]["normalized"]["properties"]["port"] == 8080
