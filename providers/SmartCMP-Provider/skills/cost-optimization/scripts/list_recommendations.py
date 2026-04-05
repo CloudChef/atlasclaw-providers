@@ -41,10 +41,15 @@ except ImportError:
     )
 
 
-def normalize_violation(item: dict, index: int, related_policy_count: int = 0) -> dict:
+def normalize_violation(
+    item: dict,
+    index: int,
+    *,
+    include_related_policy_count: bool = False,
+) -> dict:
     """Normalize a SmartCMP policy violation into stable output fields."""
     task_definition = item.get("taskDefinition") or {}
-    return {
+    normalized = {
         "index": index,
         "violationId": item.get("id", ""),
         "policyId": item.get("policyId", ""),
@@ -62,15 +67,18 @@ def normalize_violation(item: dict, index: int, related_policy_count: int = 0) -
         "lastExecuteDate": normalize_timestamp(item.get("lastExecuteDate")),
         "taskDefinitionId": task_definition.get("id", ""),
         "taskDefinitionName": task_definition.get("name", ""),
-        "relatedPolicyCount": related_policy_count,
     }
+    if include_related_policy_count:
+        normalized["relatedPolicyCount"] = max(0, int(item.get("relatedPolicyCount", 0) or 0))
+    return normalized
 
-def format_summary_line(item: dict, with_related: bool = False, currency: str = "¥") -> str:
+
+def format_summary_line(item: dict, with_related: bool = False, currency: str = "") -> str:
     """Return a concise human-readable summary line."""
     saving = item["monthlySaving"]
     saving_text = "unknown"
     if saving is not None:
-        saving_text = f"{currency}{saving:.2f}"
+        saving_text = f"{currency}{saving:.2f}" if currency else f"{saving:.2f}"
     parts = [
         f"[{item['index']}]",
         item["resourceName"] or "unknown-resource",
@@ -88,8 +96,15 @@ def format_summary_line(item: dict, with_related: bool = False, currency: str = 
 def render_output(items: list[dict], with_related_policies: bool = False,
                   base_url: str = "", auth_token: str = "") -> str:
     """Render user-visible summary plus machine-readable metadata."""
-    normalized = [normalize_violation(item, index + 1) for index, item in enumerate(items)]
-    currency = get_currency_symbol(base_url, auth_token)
+    normalized = [
+        normalize_violation(
+            item,
+            index + 1,
+            include_related_policy_count=with_related_policies,
+        )
+        for index, item in enumerate(items)
+    ]
+    currency = get_currency_symbol(base_url, auth_token) if (base_url or auth_token) else ""
     lines = []
     if normalized:
         lines.append(f"Found {len(normalized)} cost optimization recommendation(s):")
