@@ -88,11 +88,19 @@ def test_build_recommendations_always_returns_required_fields():
         }
     )
 
-    assert len(recommendations) == 1
-    recommendation = recommendations[0]
-    assert recommendation["action"] == "execute_fix"
-    assert recommendation["confidence"] == "high"
-    assert recommendation["platformExecutable"] is True
-    assert recommendation["reason"]
-    assert recommendation["evidence"]
-    assert recommendation["bestPractice"]
+    assert len(recommendations) >= 2
+
+    primary_action = recommendations[0]
+    assert primary_action["type"] == "primary_action"
+    assert primary_action["priority"] == "P0"
+    assert primary_action["action"] == "execute_fix"
+    assert primary_action["confidence"] == "high"
+    assert primary_action["platformExecutable"] is True
+    assert primary_action["reason"]
+    assert primary_action["evidence"]
+    assert primary_action["bestPractice"]
+
+    risk_assessment = next((item for item in recommendations if item.get("type") == "risk_assessment"), None)
+    assert risk_assessment is not None
+    assert risk_assessment["priority"] == "P1"
+    assert risk_assessment["action"] == "assess_risk"

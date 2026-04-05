@@ -18,6 +18,29 @@ import analyze_recommendation as analyzer  # noqa: E402
 from requests import RequestException
 
 
+def _make_resource_records() -> list[dict]:
+    return [
+        {
+            "resourceId": "resource-001",
+            "summary": {
+                "name": "vm-prod-01",
+                "resourceType": "VirtualMachine",
+                "componentType": "cloudchef.nodes.Compute",
+                "status": "RUNNING",
+                "osType": "Linux",
+                "osDescription": "Ubuntu 22.04",
+            },
+            "resource": {"name": "vm-prod-01"},
+            "normalized": {
+                "type": "cloudchef.nodes.Compute",
+                "properties": {"instanceType": "c6.large"},
+            },
+            "fetchStatus": "ok",
+            "errors": [],
+        }
+    ]
+
+
 def test_build_analysis_payload_contains_required_sections():
     payload = analyzer.build_analysis_payload(
         violation={
@@ -55,6 +78,141 @@ def test_build_analysis_payload_contains_required_sections():
     assert "taskDefinitionPresent" not in payload["facts"]
 
 
+def test_build_analysis_payload_merges_resource_context():
+    payload = analyzer.build_analysis_payload(
+        violation={
+            "id": "vio-ctx",
+            "policyId": "pol-1",
+            "policyName": "Idle VM",
+            "resourceId": "resource-001",
+            "resourceName": "",
+            "status": "OPEN",
+            "monthlySaving": "80.25",
+            "monthlyCost": "120.50",
+            "savingOperationType": "STOP_IDLE",
+        },
+        policy={"id": "pol-1", "name": "Idle VM"},
+        resource_records=_make_resource_records(),
+    )
+
+    assert payload["facts"]["resourceName"] == "vm-prod-01"
+    assert payload["facts"]["componentType"] == "cloudchef.nodes.Compute"
+    assert payload["facts"]["resourceStatus"] == "RUNNING"
+    assert payload["facts"]["resourceContextAvailable"] is True
+    assert payload["facts"]["resourceContext"]["resolvedCount"] == 1
+    assert payload["facts"]["resourceContext"]["resources"][0]["normalized"]["properties"]["instanceType"] == "c6.large"
+    assert payload["assessment"]["resourceContextAvailable"] is True
+    assert payload["assessment"]["resourceFetchStatus"] == "ok"
+
+
+def test_safe_load_resource_records_falls_back_to_resource_name(monkeypatch):
+    def fake_load_resource_records(resource_ids, **_kwargs):
+        resource_id = resource_ids[0]
+        if resource_id == "missing-resource":
+            return [
+                {
+                    "resourceId": resource_id,
+                    "summary": {},
+                    "resource": {},
+                    "normalized": {"type": "", "properties": {}},
+                    "fetchStatus": "not_found",
+                    "errors": ["Resource was not returned by /nodes/search."],
+                }
+            ]
+        return [
+            {
+                "resourceId": resource_id,
+                "summary": {
+                    "name": "vm-prod-01",
+                    "resourceType": "VirtualMachine",
+                    "componentType": "cloudchef.nodes.Compute",
+                    "status": "RUNNING",
+                    "osType": "Linux",
+                    "osDescription": "Ubuntu 22.04",
+                },
+                "resource": {"name": "vm-prod-01"},
+                "normalized": {
+                    "type": "cloudchef.nodes.Compute",
+                    "properties": {"instanceType": "c6.large"},
+                },
+                "fetchStatus": "ok",
+                "errors": [],
+            }
+        ]
+
+    monkeypatch.setattr(analyzer, "load_resource_records", fake_load_resource_records)
+    monkeypatch.setattr(
+        analyzer,
+        "search_resource_summaries",
+        lambda **_kwargs: [
+            {
+                "id": "resolved-resource",
+                "name": "vm-prod-01",
+                "resourceType": "VirtualMachine",
+                "componentType": "cloudchef.nodes.Compute",
+                "status": "RUNNING",
+                "osType": "Linux",
+                "osDescription": "Ubuntu 22.04",
+                "externalId": "vm-001",
+                "nodeInstanceId": "Compute_abc123",
+            }
+        ],
+    )
+
+    resource_records = analyzer._safe_load_resource_records(
+        {
+            "resourceId": "missing-resource",
+            "resourceName": "vm-prod-01",
+        },
+        base_url="https://cmp.example.com/platform-api",
+        headers={"CloudChef-Authenticate": "token"},
+    )
+
+    assert resource_records[0]["fetchStatus"] == "not_found"
+    assert resource_records[1]["resourceId"] == "resolved-resource"
+    assert resource_records[1]["fetchStatus"] == "ok"
+
+
+def test_build_analysis_payload_prefers_resolved_resource_id_after_fallback_lookup():
+    payload = analyzer.build_analysis_payload(
+        violation={
+            "id": "vio-ctx",
+            "policyId": "pol-1",
+            "policyName": "Idle VM",
+            "resourceId": "missing-resource",
+            "resourceName": "",
+            "status": "OPEN",
+        },
+        policy={"id": "pol-1", "name": "Idle VM"},
+        resource_records=[
+            {
+                "resourceId": "resolved-resource",
+                "summary": {
+                    "name": "vm-prod-01",
+                    "resourceType": "VirtualMachine",
+                    "componentType": "cloudchef.nodes.Compute",
+                    "status": "RUNNING",
+                    "osType": "Linux",
+                    "osDescription": "Ubuntu 22.04",
+                },
+                "resource": {"name": "vm-prod-01"},
+                "normalized": {
+                    "type": "cloudchef.nodes.Compute",
+                    "properties": {"instanceType": "c6.large"},
+                },
+                "fetchStatus": "ok",
+                "errors": [],
+            }
+        ],
+    )
+
+    assert payload["facts"]["resourceId"] == "resolved-resource"
+    assert payload["facts"]["resourceContext"]["requestedResourceIds"] == [
+        "missing-resource",
+        "resolved-resource",
+    ]
+
+
 def test_render_analysis_outputs_human_summary_and_structured_block():
     payload = {
         "violationId": "vio-1",
@@ -75,7 +233,7 @@ def test_render_analysis_outputs_human_summary_and_structured_block():
     assert "Violation vio-1: ready" in output
     assert "Theme: idle_shutdown" in output
     assert "Resource: vm-prod-01" in output
-    assert "Estimated monthly saving: 80.25" in output
+    assert "Estimated monthly saving: ¥80.25" in output
     assert "##COST_ANALYSIS_START##" in output
     assert "##COST_ANALYSIS_END##" in output
 
@@ -112,7 +270,7 @@ def test_build_analysis_payload_flags_missing_repair_action():
     assert payload["assessment"]["taskDefinitionPresent"] is False
     assert payload["suggestedNextStep"] == "configure_platform_policy"
     assert payload["recommendations"][0]["platformExecutable"] is False
-    assert "does not expose a repair action" in payload["recommendations"][0]["reason"]
+    assert "no repair action configured" in payload["recommendations"][0]["reason"]
 
 
 def test_safe_get_json_returns_none_on_request_exception(monkeypatch):

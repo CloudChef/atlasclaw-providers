@@ -69,6 +69,29 @@ def _make_policy_executions(compliance_rate: int = 75) -> list:
     ]
 
 
+def _make_resource_records() -> list[dict]:
+    return [
+        {
+            "resourceId": "resource-001",
+            "summary": {
+                "name": "demo-vm",
+                "resourceType": "VirtualMachine",
+                "componentType": "cloudchef.nodes.Compute",
+                "status": "RUNNING",
+                "osType": "Linux",
+                "osDescription": "Ubuntu 22.04",
+            },
+            "resource": {"name": "demo-vm"},
+            "normalized": {
+                "type": "cloudchef.nodes.Compute",
+                "properties": {"instanceType": "c6.large"},
+            },
+            "fetchStatus": "ok",
+            "errors": [],
+        }
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Basic payload structure
 # ---------------------------------------------------------------------------
@@ -148,6 +171,18 @@ class TestAssessmentFields:
     def test_task_definition_present_false_when_missing(self):
         payload = build_analysis_payload(violation=_make_violation(fixType=""))
         assert payload["assessment"]["taskDefinitionPresent"] is False
+
+    def test_resource_context_available_true_when_datasource_record_is_present(self):
+        payload = build_analysis_payload(
+            violation=_make_violation(resourceName=""),
+            resource_records=_make_resource_records(),
+        )
+        assert payload["assessment"]["resourceContextAvailable"] is True
+        assert payload["assessment"]["resourceFetchStatus"] == "ok"
+        assert payload["facts"]["resourceName"] == "demo-vm"
+        assert payload["facts"]["componentType"] == "cloudchef.nodes.Compute"
+        assert payload["facts"]["resourceStatus"] == "RUNNING"
+        assert payload["facts"]["resourceContext"]["resolvedCount"] == 1
 
 
 # ---------------------------------------------------------------------------

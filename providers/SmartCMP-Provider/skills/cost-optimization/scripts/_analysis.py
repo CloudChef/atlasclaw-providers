@@ -132,6 +132,20 @@ def normalize_analysis_facts(violation: dict, policy: dict | None = None) -> dic
         "policyDescription": policy.get("description", ""),
         "remedie": violation.get("remedie") or policy_remedie or "",
         "times": violation.get("times", 0),
+        "resourceType": violation.get("resourceType", ""),
+        "componentType": violation.get("componentType", ""),
+        "resourceStatus": violation.get("resourceStatus", ""),
+        "osType": violation.get("osType", ""),
+        "osDescription": violation.get("osDescription", ""),
+        "resourceContextAvailable": bool(violation.get("resourceContextAvailable")),
+        "resourceFetchStatus": violation.get("resourceFetchStatus", ""),
+        "resourceContext": violation.get("resourceContext")
+        if isinstance(violation.get("resourceContext"), dict)
+        else {
+            "requestedResourceIds": [violation.get("resourceId", "")] if violation.get("resourceId") else [],
+            "resolvedCount": 0,
+            "resources": [],
+        },
     }
 
 
@@ -207,6 +221,14 @@ def build_recommendations(facts: dict, context: dict | None = None) -> list[dict
         evidence.append(f"fixType={facts['fixType']}")
     if facts.get("taskDefinitionName"):
         evidence.append(f"taskDefinitionName={facts['taskDefinitionName']}")
+    if facts.get("componentType"):
+        evidence.append(f"componentType={facts['componentType']}")
+    if facts.get("resourceType"):
+        evidence.append(f"resourceType={facts['resourceType']}")
+    if facts.get("resourceStatus"):
+        evidence.append(f"resourceStatus={facts['resourceStatus']}")
+    if facts.get("osType"):
+        evidence.append(f"osType={facts['osType']}")
 
     # Get operation-specific guidance
     operation_type = (facts.get("savingOperationType") or "").upper()

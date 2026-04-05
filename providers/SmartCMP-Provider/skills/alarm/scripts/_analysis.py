@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -20,8 +20,29 @@ def normalize_alert_fact(
     policy: Mapping[str, Any],
     *,
     detail: Mapping[str, Any] | None = None,
+    resource_records: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Merge SmartCMP alert and policy data into a stable fact object."""
+    projected_resources = _project_resource_records(resource_records or [])
+    resolved_resource_count = sum(
+        1 for item in projected_resources if item.get("fetchStatus") in {"ok", "partial"}
+    )
+    primary_resource = _select_primary_resource(projected_resources)
+    observed_name = _pick_first(
+        alert.get("entityInstanceName", ""),
+        alert.get("resourceExternalName", ""),
+        alert.get("deploymentName", ""),
+    )
+    observed_type = _pick_first(
+        policy.get("resourceType", ""),
+        alert.get("resourceType", ""),
+    )
+    resolved_name = _pick_first(primary_resource.get("name", ""))
+    resolved_type = _pick_first(
+        primary_resource.get("componentType", ""),
+        primary_resource.get("resourceType", ""),
+        (primary_resource.get("normalized") or {}).get("type", ""),
+    )
     fact = {
         "alert_id": alert.get("id", ""),
         "alarm_activity_id": alert.get("alarmActivityId", ""),
@@ -43,6 +64,18 @@ def normalize_alert_fact(
             "node_instance_id": alert.get("nodeInstanceId", ""),
             "resource_external_id": alert.get("resourceExternalId", ""),
             "resource_external_name": alert.get("resourceExternalName", ""),
+            "candidate_resource_ids": _collect_candidate_resource_ids(alert),
+            "resource_context_available": resolved_resource_count > 0,
+            "resolved_resource_count": resolved_resource_count,
+            "resolved_resources": projected_resources,
+            "resolved_resource": primary_resource,
+            "observed_name": observed_name,
+            "observed_type": observed_type,
+            "resolved_name": resolved_name,
+            "resolved_type": resolved_type,
+            "display_name": _pick_first(resolved_name, observed_name),
+            "display_type": _pick_first(resolved_type, observed_type),
+            "resolved_status": primary_resource.get("status", ""),
         },
         "rule": {
             "policy_id": policy.get("id") or alert.get("alarmPolicyId", ""),
@@ -90,6 +123,8 @@ def build_assessment(fact: Mapping[str, Any]) -> dict[str, Any]:
         "pattern": pattern,
         "risk": risk,
         "reasoning": reasoning,
+        "resourceContextAvailable": bool((fact.get("resource") or {}).get("resource_context_available")),
+        "impactedResourceCount": int((fact.get("resource") or {}).get("resolved_resource_count") or 0),
     }
 
 
@@ -214,6 +249,7 @@ def build_reasoning(fact: Mapping[str, Any], pattern: str, risk: str) -> list[st
     trigger_count = int(fact.get("trigger_count") or 0)
     span_minutes = round(float(fact.get("trigger_span_minutes") or 0.0), 1)
     reasoning: list[str] = []
+    resource = fact.get("resource") or {}
 
     if pattern == "persistent":
         reasoning.append("Repeated triggers over a sustained window indicate the condition is ongoing.")
@@ -227,12 +263,29 @@ def build_reasoning(fact: Mapping[str, Any], pattern: str, risk: str) -> list[st
         reasoning.append("The alert is active, but the current data does not show a strong repeat pattern.")
 
     reasoning.append(f"Trigger count is {trigger_count} across about {span_minutes} minute(s).")
+    resolved_name = resource.get("resolved_name", "")
+    resolved_type = resource.get("resolved_type", "")
+    resolved_status = resource.get("resolved_status", "")
+    display_name = resource.get("display_name", "")
+    display_type = resource.get("display_type", "")
+    if resource.get("resource_context_available") and (resolved_name or resolved_type or resolved_status):
+        parts = [part for part in (resolved_name, resolved_type, resolved_status) if part]
+        reasoning.append(f"Datasource resource context: {' | '.join(parts)}.")
+    elif display_name or display_type:
+        parts = [part for part in (display_name, display_type) if part]
+        reasoning.append(
+            f"Alert payload references resource: {' | '.join(parts)}. "
+            "Datasource enrichment did not return a matching node record."
+        )
+    elif resource.get("candidate_resource_ids"):
+        reasoning.append("Resource identifiers are present, but datasource enrichment did not return normalized details.")
     reasoning.append(f"Overall operational risk is {risk}.")
     return reasoning
 
 
 def build_evidence(fact: Mapping[str, Any]) -> list[str]:
     """Build compact evidence strings for downstream recommendation output."""
+    resource = fact.get("resource") or {}
     evidence = [
         f"status={fact.get('status', '')}",
         f"level={fact.get('level', '')}",
@@ -244,6 +297,12 @@ def build_evidence(fact: Mapping[str, Any]) -> list[str]:
     policy_name = (fact.get("rule") or {}).get("name", "")
     if policy_name:
         evidence.append(f"rule={policy_name}")
+    display_type = resource.get("display_type", "")
+    if display_type:
+        evidence.append(f"resource_type={display_type}")
+    resolved_status = resource.get("resolved_status", "")
+    if resolved_status:
+        evidence.append(f"resource_status={resolved_status}")
     return evidence
 
 
@@ -283,3 +342,61 @@ def _normalize_entity_ids(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(item) for item in value if item not in (None, "")]
     return [str(value)]
+
+
+def _collect_candidate_resource_ids(alert: Mapping[str, Any]) -> list[str]:
+    resource_ids = _normalize_entity_ids(alert.get("entityInstanceId"))
+    node_instance_id = alert.get("nodeInstanceId")
+    if node_instance_id not in (None, ""):
+        resource_ids.append(str(node_instance_id))
+
+    deduped: list[str] = []
+    for resource_id in resource_ids:
+        if not resource_id or resource_id in deduped:
+            continue
+        deduped.append(resource_id)
+    return deduped
+
+
+def _pick_first(*values: Any) -> str:
+    for value in values:
+        if value not in (None, ""):
+            return str(value)
+    return ""
+
+
+def _project_resource_records(resource_records: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    projected: list[dict[str, Any]] = []
+    for record in resource_records:
+        if not isinstance(record, Mapping):
+            continue
+        summary = record.get("summary") or {}
+        normalized = record.get("normalized") or {}
+        projected.append(
+            {
+                "resourceId": record.get("resourceId", ""),
+                "name": _pick_first(
+                    summary.get("name", ""),
+                    (record.get("resource") or {}).get("name", ""),
+                ),
+                "resourceType": summary.get("resourceType", ""),
+                "componentType": summary.get("componentType", ""),
+                "status": summary.get("status", ""),
+                "osType": summary.get("osType", ""),
+                "osDescription": summary.get("osDescription", ""),
+                "fetchStatus": record.get("fetchStatus", ""),
+                "errors": list(record.get("errors") or []),
+                "normalized": {
+                    "type": normalized.get("type", ""),
+                    "properties": dict(normalized.get("properties") or {}),
+                },
+            }
+        )
+    return projected
+
+
+def _select_primary_resource(resource_records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    for record in resource_records:
+        if record.get("fetchStatus") in {"ok", "partial"}:
+            return dict(record)
+    return {}

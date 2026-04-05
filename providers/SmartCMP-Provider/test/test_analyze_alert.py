@@ -154,6 +154,170 @@ def test_main_degrades_when_optional_context_calls_fail(monkeypatch):
     assert payload["suggested_status_operation"]["should_operate"] is False
 
 
+def test_main_enriches_resource_context_when_datasource_lookup_succeeds(monkeypatch):
+    module = load_module()
+
+    def fake_get_json(path, *, params=None, timeout=30):
+        if path == "/alarm-alert/alert-1":
+            return make_alert()
+        if path == "/alarm-policies/policy-1":
+            return make_policy()
+        if path == "/alarm-overview/recent":
+            return []
+        if path == "/alarm-overview/alarm-trend":
+            return []
+        if path == "/stats/alarm-alert/detail":
+            return []
+        raise AssertionError(f"Unexpected path: {path}")
+
+    def fake_get_connection():
+        return "https://cmp.example.com/platform-api", {"CloudChef-Authenticate": "token"}, {}
+
+    def fake_load_resource_records(resource_ids, *, base_url, headers, request_fn):
+        assert resource_ids == ["entity-1", "node-1"]
+        assert base_url == "https://cmp.example.com/platform-api"
+        return [
+            {
+                "resourceId": "entity-1",
+                "summary": {
+                    "name": "vm-01",
+                    "resourceType": "VirtualMachine",
+                    "componentType": "cloudchef.nodes.Compute",
+                    "status": "RUNNING",
+                    "osType": "Linux",
+                    "osDescription": "Ubuntu 22.04",
+                },
+                "resource": {"name": "vm-01"},
+                "normalized": {
+                    "type": "cloudchef.nodes.Compute",
+                    "properties": {"instanceType": "c6.large"},
+                },
+                "fetchStatus": "ok",
+                "errors": [],
+            }
+        ]
+
+    monkeypatch.setattr(module, "get_json", fake_get_json)
+    monkeypatch.setattr(module, "get_connection", fake_get_connection)
+    monkeypatch.setattr(module, "load_resource_records", fake_load_resource_records)
+
+    stdout = io.StringIO()
+    with redirect_stdout(stdout):
+        exit_code = module.main(["alert-1"])
+
+    output = stdout.getvalue()
+    payload = extract_payload(output)
+    resource = payload["facts"][0]["resource"]
+
+    assert exit_code == 0
+    assert "Resource: vm-01." in output
+    assert resource["resource_context_available"] is True
+    assert resource["resolved_name"] == "vm-01"
+    assert resource["resolved_type"] == "cloudchef.nodes.Compute"
+    assert resource["resolved_status"] == "RUNNING"
+    assert resource["resolved_resources"][0]["normalized"]["properties"]["instanceType"] == "c6.large"
+    assert payload["assessment"]["resourceContextAvailable"] is True
+    assert payload["assessment"]["impactedResourceCount"] == 1
+
+
+def test_main_falls_back_to_resource_name_search_when_direct_ids_miss(monkeypatch):
+    module = load_module()
+
+    def fake_get_json(path, *, params=None, timeout=30):
+        if path == "/alarm-alert/alert-1":
+            alert = make_alert()
+            alert["nodeInstanceId"] = ""
+            alert["resourceExternalId"] = ""
+            return alert
+        if path == "/alarm-policies/policy-1":
+            return make_policy()
+        if path == "/alarm-overview/recent":
+            return []
+        if path == "/alarm-overview/alarm-trend":
+            return []
+        if path == "/stats/alarm-alert/detail":
+            return []
+        raise AssertionError(f"Unexpected path: {path}")
+
+    def fake_get_connection():
+        return "https://cmp.example.com/platform-api", {"CloudChef-Authenticate": "token"}, {}
+
+    def fake_load_resource_records(resource_ids, *, base_url, headers, request_fn):
+        if resource_ids == ["entity-1"]:
+            return [
+                {
+                    "resourceId": "entity-1",
+                    "summary": {},
+                    "resource": {},
+                    "details": {},
+                    "normalized": {"type": "", "properties": {}},
+                    "fetchStatus": "not_found",
+                    "errors": ["Resource was not returned by /nodes/search."],
+                }
+            ]
+        if resource_ids == ["resolved-1"]:
+            return [
+                {
+                    "resourceId": "resolved-1",
+                    "summary": {
+                        "name": "worker-01",
+                        "resourceType": "VirtualMachine",
+                        "componentType": "cloudchef.nodes.Compute",
+                        "status": "RUNNING",
+                        "osType": "Linux",
+                        "osDescription": "Ubuntu 22.04",
+                    },
+                    "resource": {"name": "worker-01"},
+                    "normalized": {
+                        "type": "cloudchef.nodes.Compute",
+                        "properties": {"instanceType": "c6.large"},
+                    },
+                    "fetchStatus": "ok",
+                    "errors": [],
+                }
+            ]
+        raise AssertionError(f"Unexpected resource ids: {resource_ids}")
+
+    def fake_request_json(method, path, *, base_url, headers, payload=None, params=None):
+        assert method == "POST"
+        assert path == "/nodes/search"
+        assert payload == {"queryValue": "worker-01"}
+        return {
+            "content": [
+                {
+                    "id": "resolved-1",
+                    "name": "worker-01",
+                },
+                {
+                    "id": "resolved-2",
+                    "name": "worker-01-shadow",
+                },
+            ]
+        }
+
+    monkeypatch.setattr(module, "get_json", fake_get_json)
+    monkeypatch.setattr(module, "get_connection", fake_get_connection)
+    monkeypatch.setattr(module, "load_resource_records", fake_load_resource_records)
+    monkeypatch.setattr(module, "search_resource_summaries", lambda **kwargs: [
+        {"id": "resolved-1", "name": "worker-01"},
+        {"id": "resolved-2", "name": "worker-01-shadow"},
+    ])
+
+    stdout = io.StringIO()
+    with redirect_stdout(stdout):
+        exit_code = module.main(["alert-1"])
+
+    payload = extract_payload(stdout.getvalue())
+    resource = payload["facts"][0]["resource"]
+
+    assert exit_code == 0
+    assert resource["resource_context_available"] is True
+    assert resource["resolved_name"] == "worker-01"
+    assert resource["display_name"] == "worker-01"
+    assert payload["assessment"]["resourceContextAvailable"] is True
+    assert payload["assessment"]["impactedResourceCount"] == 1
+
+
 def test_main_returns_error_when_policy_reference_is_missing(monkeypatch):
     module = load_module()
     alert = make_alert()

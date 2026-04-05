@@ -82,11 +82,48 @@ def test_normalize_alert_fact_merges_alert_and_rule_fields():
     assert fact["resource"]["deployment_id"] == "deployment-1"
     assert fact["resource"]["resource_external_name"] == "worker-01"
     assert fact["resource"]["entity_instance_id"] == ["entity-1"]
+    assert fact["resource"]["resource_context_available"] is False
+    assert fact["resource"]["resolved_resources"] == []
     assert fact["rule"]["policy_id"] == "policy-1"
     assert fact["rule"]["name"] == "CPU High"
     assert fact["rule"]["metric"] == "node_cpu_seconds_total"
     assert fact["rule"]["expression"] == "cpu_usage > 90"
     assert fact["rule"]["resource_type"] == "VirtualMachine"
+
+
+def test_normalize_alert_fact_merges_datasource_resource_context():
+    module = load_module()
+    fact = module.normalize_alert_fact(
+        make_alert(),
+        make_policy(),
+        resource_records=[
+            {
+                "resourceId": "entity-1",
+                "summary": {
+                    "name": "vm-01",
+                    "resourceType": "VirtualMachine",
+                    "componentType": "cloudchef.nodes.Compute",
+                    "status": "RUNNING",
+                    "osType": "Linux",
+                    "osDescription": "Ubuntu 22.04",
+                },
+                "resource": {"name": "vm-01"},
+                "normalized": {
+                    "type": "cloudchef.nodes.Compute",
+                    "properties": {"instanceType": "c6.large"},
+                },
+                "fetchStatus": "ok",
+                "errors": [],
+            }
+        ],
+    )
+
+    assert fact["resource"]["resource_context_available"] is True
+    assert fact["resource"]["resolved_resource_count"] == 1
+    assert fact["resource"]["resolved_name"] == "vm-01"
+    assert fact["resource"]["resolved_type"] == "cloudchef.nodes.Compute"
+    assert fact["resource"]["resolved_status"] == "RUNNING"
+    assert fact["resource"]["resolved_resources"][0]["normalized"]["type"] == "cloudchef.nodes.Compute"
 
 
 def test_classify_alert_pattern_distinguishes_persistent_and_noisy():

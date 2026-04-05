@@ -1,21 +1,35 @@
 #!/usr/bin/env python3
 """Analyze a SmartCMP cost optimization recommendation."""
 
+from __future__ import annotations
+
 import argparse
+import importlib.util
 import json
+import os
 import sys
 
 import requests
 from requests import RequestException
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SHARED_SCRIPT_DIR = os.path.join(SCRIPT_DIR, "..", "..", "shared", "scripts")
+
+
+def _load_module_from_path(module_name: str, file_path: str):
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Failed to load module from path: {file_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
 try:
     from _common import require_config
 except ImportError:
-    import os
-
     sys.path.insert(
         0,
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shared", "scripts"),
+        SHARED_SCRIPT_DIR,
     )
     from _common import require_config
 
@@ -31,9 +45,7 @@ try:
     )
     from _cost_common import normalize_money, get_currency_symbol
 except ImportError:
-    import os
-
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, SCRIPT_DIR)
     from _analysis import (  # type: ignore
         BEST_PRACTICE_GUIDANCE,
         BEST_PRACTICE_GUIDANCE_ZH,
@@ -46,6 +58,228 @@ except ImportError:
     from _cost_common import normalize_money, get_currency_symbol  # type: ignore
 
 
+resource_module = _load_module_from_path(
+    "cost_optimization_shared_list_resource_local",
+    os.path.join(SHARED_SCRIPT_DIR, "list_resource.py"),
+)
+collect_resource_ids_from_summaries = resource_module.collect_resource_ids_from_summaries
+load_resource_records = resource_module.load_resource_records
+shared_request_json = resource_module.request_json
+search_resource_summaries = resource_module.search_resource_summaries
+
+
+def _pick_first(*values) -> str:
+    for value in values:
+        if value not in (None, ""):
+            return str(value)
+    return ""
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    deduped: list[str] = []
+    for value in values:
+        if not value or value in deduped:
+            continue
+        deduped.append(value)
+    return deduped
+
+
+def _has_resolved_resource(resource_records: list[dict]) -> bool:
+    return any(record.get("fetchStatus") in {"ok", "partial"} for record in resource_records)
+
+
+def _load_resource_records_by_ids(
+    resource_ids: list[str],
+    *,
+    base_url: str,
+    headers: dict,
+) -> list[dict]:
+    if not resource_ids:
+        return []
+
+    try:
+        records = load_resource_records(
+            resource_ids,
+            base_url=base_url,
+            headers=headers,
+            request_fn=shared_request_json,
+        )
+    except (RuntimeError, RequestException):
+        return []
+
+    if not isinstance(records, list):
+        return []
+    return [record for record in records if isinstance(record, dict)]
+
+
+def _safe_load_resource_records(violation: dict, *, base_url: str, headers: dict) -> list[dict]:
+    candidate_ids = _dedupe_strings([
+        str(violation.get("resourceId") or "").strip(),
+    ])
+    records = _load_resource_records_by_ids(candidate_ids, base_url=base_url, headers=headers)
+    if _has_resolved_resource(records):
+        return records
+
+    fallback_lookup_ids: list[str] = []
+
+    node_instance_id = _pick_first(
+        violation.get("nodeInstanceId"),
+        violation.get("resourceNodeInstanceId"),
+    ).strip()
+    if node_instance_id:
+        try:
+            fallback_lookup_ids.extend(
+                collect_resource_ids_from_summaries(
+                    search_resource_summaries(
+                        base_url=base_url,
+                        headers=headers,
+                        request_fn=shared_request_json,
+                        params={"nodeInstanceId": node_instance_id},
+                    )
+                )
+            )
+        except Exception:
+            pass
+
+    resource_external_id = _pick_first(
+        violation.get("resourceExternalId"),
+        violation.get("externalId"),
+    ).strip()
+    if not fallback_lookup_ids and resource_external_id:
+        try:
+            fallback_lookup_ids.extend(
+                collect_resource_ids_from_summaries(
+                    search_resource_summaries(
+                        base_url=base_url,
+                        headers=headers,
+                        request_fn=shared_request_json,
+                        params={"externalIds": resource_external_id},
+                    )
+                )
+            )
+        except Exception:
+            pass
+
+    resource_name = _pick_first(
+        violation.get("resourceExternalName"),
+        violation.get("resourceName"),
+    ).strip()
+    if not fallback_lookup_ids and resource_name:
+        try:
+            fallback_lookup_ids.extend(
+                collect_resource_ids_from_summaries(
+                    search_resource_summaries(
+                        base_url=base_url,
+                        headers=headers,
+                        request_fn=shared_request_json,
+                        payload={"queryValue": resource_name},
+                    ),
+                    expected_name=resource_name,
+                    preferred_external_id=resource_external_id,
+                    preferred_node_instance_id=node_instance_id,
+                )
+            )
+        except Exception:
+            pass
+
+    fallback_lookup_ids = [
+        resource_id
+        for resource_id in _dedupe_strings(fallback_lookup_ids)
+        if resource_id not in candidate_ids
+    ]
+    if not fallback_lookup_ids:
+        return records
+
+    fallback_records = _load_resource_records_by_ids(
+        fallback_lookup_ids,
+        base_url=base_url,
+        headers=headers,
+    )
+    return records + fallback_records
+
+
+def _project_resource_records(resource_records: list | None) -> list[dict]:
+    projected: list[dict] = []
+    for record in resource_records or []:
+        if not isinstance(record, dict):
+            continue
+        summary = record.get("summary") or {}
+        resource = record.get("resource") or {}
+        normalized = record.get("normalized") or {}
+        projected.append(
+            {
+                "resourceId": record.get("resourceId", ""),
+                "name": _pick_first(summary.get("name"), resource.get("name")),
+                "resourceType": summary.get("resourceType", ""),
+                "componentType": summary.get("componentType", ""),
+                "status": summary.get("status", ""),
+                "osType": summary.get("osType", ""),
+                "osDescription": summary.get("osDescription", ""),
+                "fetchStatus": record.get("fetchStatus", ""),
+                "errors": list(record.get("errors") or []),
+                "normalized": {
+                    "type": normalized.get("type", ""),
+                    "properties": dict(normalized.get("properties") or {}),
+                },
+            }
+        )
+    return projected
+
+
+def _select_primary_resource(resource_records: list[dict]) -> dict:
+    for record in resource_records:
+        if record.get("fetchStatus") in {"ok", "partial"}:
+            return dict(record)
+    return dict(resource_records[0]) if resource_records else {}
+
+
+def _build_resource_context(resource_id: str, resource_records: list | None) -> dict:
+    projected_records = _project_resource_records(resource_records)
+    requested_resource_ids: list[str] = []
+    if resource_id:
+        requested_resource_ids.append(resource_id)
+    for item in projected_records:
+        projected_resource_id = str(item.get("resourceId", "") or "").strip()
+        if projected_resource_id and projected_resource_id not in requested_resource_ids:
+            requested_resource_ids.append(projected_resource_id)
+    return {
+        "requestedResourceIds": requested_resource_ids,
+        "resolvedCount": sum(1 for item in projected_records if item.get("fetchStatus") in {"ok", "partial"}),
+        "resources": projected_records,
+    }
+
+
+def _enrich_violation_with_resource_context(violation: dict, resource_records: list | None) -> dict:
+    enriched_violation = dict(violation)
+    resource_id = str(enriched_violation.get("resourceId", "") or "")
+    resource_context = _build_resource_context(resource_id, resource_records)
+    primary_resource = _select_primary_resource(resource_context["resources"])
+
+    enriched_violation["resourceContext"] = resource_context
+    enriched_violation["resourceContextAvailable"] = resource_context["resolvedCount"] > 0
+    enriched_violation["resourceFetchStatus"] = primary_resource.get("fetchStatus", "")
+
+    if primary_resource.get("fetchStatus") in {"ok", "partial"}:
+        enriched_violation["resourceId"] = _pick_first(
+            primary_resource.get("resourceId"),
+            enriched_violation.get("resourceId"),
+        )
+        enriched_violation["resourceName"] = _pick_first(
+            enriched_violation.get("resourceName"),
+            primary_resource.get("name"),
+        )
+        enriched_violation["resourceType"] = _pick_first(
+            primary_resource.get("resourceType"),
+            (primary_resource.get("normalized") or {}).get("type"),
+        )
+        enriched_violation["componentType"] = primary_resource.get("componentType", "")
+        enriched_violation["resourceStatus"] = primary_resource.get("status", "")
+        enriched_violation["osType"] = primary_resource.get("osType", "")
+        enriched_violation["osDescription"] = primary_resource.get("osDescription", "")
+
+    return enriched_violation
+
+
 def build_analysis_payload(
     violation: dict,
     policy: dict | None = None,
@@ -54,12 +288,13 @@ def build_analysis_payload(
     saving_trend: dict | None = None,
     resource_top: list | None = None,
     policy_executions: list | None = None,
+    resource_records: list | None = None,
     related_policy_count: int = 0,
     base_url: str = "",
     auth_token: str = "",
 ) -> dict:
     """Build the structured analysis payload with enriched context."""
-    normalized_violation = dict(violation)
+    normalized_violation = _enrich_violation_with_resource_context(violation, resource_records)
     normalized_violation["monthlyCost"] = normalize_money(violation.get("monthlyCost"))
     normalized_violation["monthlySaving"] = normalize_money(violation.get("monthlySaving"))
     facts = normalize_analysis_facts(normalized_violation, policy)
@@ -134,6 +369,8 @@ def build_analysis_payload(
             "policyComplianceRate": policy_compliance_rate,
             "violationRecurrence": facts.get("times", 0),
             "relatedPolicyCount": related_policy_count,
+            "resourceContextAvailable": bool(facts.get("resourceContextAvailable")),
+            "resourceFetchStatus": facts.get("resourceFetchStatus", ""),
         },
         "recommendations": recommendations,
         "suggestedNextStep": suggested_next_step,
@@ -171,10 +408,22 @@ def render_analysis(payload: dict, base_url: str = "", auth_token: str = "") -> 
     recurrence = assessment.get("violationRecurrence", 0)
     recurrence_text = "First occurrence" if recurrence <= 1 else f"Triggered {recurrence} times"
 
+    resource_line = "Resource: " + " | ".join(
+        part
+        for part in (
+            facts.get("resourceName") or "unknown-resource",
+            f"type={facts.get('componentType') or facts.get('resourceType')}"
+            if (facts.get("componentType") or facts.get("resourceType"))
+            else "",
+            f"status={facts.get('resourceStatus')}" if facts.get("resourceStatus") else "",
+        )
+        if part
+    )
+
     lines = [
         f"Violation {payload['violationId']}: {assessment['executionReadiness']}",
         f"Theme: {assessment['optimizationTheme']} ({assessment.get('violationType', 'UNKNOWN')})",
-        f"Resource: {facts.get('resourceName') or 'unknown-resource'}",
+        resource_line,
         f"Estimated monthly saving: {saving_text}{contribution_text}",
         f"Policy compliance: {compliance_text} | Occurrences: {recurrence_text}",
         f"Risk level: {risk_text}",
@@ -328,6 +577,12 @@ def main() -> int:
             # Exclude current policy from count
             related_policy_count = max(0, len(all_policies) - 1)
 
+    resource_records = _safe_load_resource_records(
+        violation,
+        base_url=base_url,
+        headers=headers,
+    )
+
     payload = build_analysis_payload(
         violation=violation,
         policy=policy,
@@ -336,6 +591,7 @@ def main() -> int:
         saving_trend=saving_trend,
         resource_top=resource_top,
         policy_executions=policy_executions,
+        resource_records=resource_records,
         related_policy_count=related_policy_count,
         base_url=base_url,
         auth_token=auth_token,

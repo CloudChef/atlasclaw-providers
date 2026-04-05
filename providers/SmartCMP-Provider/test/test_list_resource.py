@@ -218,3 +218,92 @@ def test_main_prefers_first_value_when_duplicate_properties_exist(monkeypatch):
     assert exit_code == 0
     assert payload[0]["normalized"]["properties"]["status"] == "started"
     assert payload[0]["normalized"]["properties"]["port"] == 8080
+
+
+def test_search_resource_summaries_and_collect_ids(monkeypatch):
+    module = load_module()
+
+    def fake_request_json(method, path, *, base_url, headers, payload=None, params=None):
+        assert method == "POST"
+        assert path == "/nodes/search"
+        assert params == {"externalIds": "vm-001"}
+        assert payload is None
+        return {
+            "content": [
+                {
+                    "id": "res-1",
+                    "name": "vm-01",
+                    "resourceType": "cloudchef.nodes.Compute",
+                    "componentType": "resource.iaas.machine.windows_instance.vsphere",
+                    "status": "started",
+                    "externalId": "vm-001",
+                    "nodeInstanceId": "WindowsServer_abc",
+                },
+                {
+                    "id": "res-2",
+                    "name": "vm-01-shadow",
+                    "resourceType": "cloudchef.nodes.Compute",
+                    "componentType": "resource.iaas.machine.windows_instance.vsphere",
+                    "status": "started",
+                    "externalId": "vm-001-shadow",
+                    "nodeInstanceId": "WindowsServer_xyz",
+                },
+            ]
+        }
+
+    summaries = module.search_resource_summaries(
+        base_url="https://cmp.example.com/platform-api",
+        headers={"CloudChef-Authenticate": "token"},
+        request_fn=fake_request_json,
+        params={"externalIds": "vm-001"},
+    )
+
+    assert len(summaries) == 2
+    assert summaries[0]["id"] == "res-1"
+    assert summaries[0]["externalId"] == "vm-001"
+    assert summaries[0]["nodeInstanceId"] == "WindowsServer_abc"
+    assert module.collect_resource_ids_from_summaries(summaries, expected_name="vm-01") == ["res-1"]
+
+
+def test_collect_resource_ids_from_summaries_rejects_ambiguous_name_without_preferences():
+    module = load_module()
+    summaries = [
+        {
+            "id": "res-1",
+            "name": "vm-01",
+            "externalId": "vm-001",
+            "nodeInstanceId": "node-001",
+        },
+        {
+            "id": "res-2",
+            "name": "vm-01",
+            "externalId": "vm-002",
+            "nodeInstanceId": "node-002",
+        },
+    ]
+
+    assert module.collect_resource_ids_from_summaries(summaries, expected_name="vm-01") == []
+
+
+def test_collect_resource_ids_from_summaries_prefers_matching_identifiers_for_name_lookup():
+    module = load_module()
+    summaries = [
+        {
+            "id": "res-1",
+            "name": "vm-01",
+            "externalId": "vm-001",
+            "nodeInstanceId": "node-001",
+        },
+        {
+            "id": "res-2",
+            "name": "vm-01",
+            "externalId": "vm-002",
+            "nodeInstanceId": "node-002",
+        },
+    ]
+
+    assert module.collect_resource_ids_from_summaries(
+        summaries,
+        expected_name="vm-01",
+        preferred_external_id="vm-002",
+    ) == ["res-2"]

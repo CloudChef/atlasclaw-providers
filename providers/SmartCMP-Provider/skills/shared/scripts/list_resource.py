@@ -77,7 +77,78 @@ def normalize_resource_summary(item):
         "osDescription": item.get("osDescription", ""),
         "isAgentInstalled": item.get("isAgentInstalled"),
         "monitorEnabled": item.get("monitorEnabled"),
+        "externalId": item.get("externalId", ""),
+        "nodeInstanceId": item.get("nodeInstanceId", ""),
     }
+
+
+def search_resource_summaries(
+    *,
+    base_url,
+    headers,
+    request_fn=request_json,
+    params=None,
+    payload=None,
+):
+    search_payload = request_fn(
+        "POST",
+        "/nodes/search",
+        base_url=base_url,
+        headers=headers,
+        params=params,
+        payload=payload,
+    )
+    search_items = extract_list_payload(search_payload)
+    return [
+        normalize_resource_summary(item)
+        for item in search_items
+        if isinstance(item, dict)
+    ]
+
+
+def collect_resource_ids_from_summaries(
+    resource_summaries,
+    *,
+    expected_name="",
+    preferred_external_id="",
+    preferred_node_instance_id="",
+):
+    candidates = []
+    for item in resource_summaries:
+        if not isinstance(item, dict):
+            continue
+        if expected_name and item.get("name") != expected_name:
+            continue
+        candidates.append(item)
+
+    if preferred_node_instance_id:
+        node_matches = [
+            item for item in candidates
+            if item.get("nodeInstanceId") == preferred_node_instance_id
+        ]
+        if node_matches:
+            candidates = node_matches
+
+    if preferred_external_id:
+        external_matches = [
+            item for item in candidates
+            if item.get("externalId") == preferred_external_id
+        ]
+        if external_matches:
+            candidates = external_matches
+
+    if expected_name and len(candidates) != 1:
+        return []
+
+    resource_ids = []
+    for item in candidates:
+        resource_id = item.get("id")
+        if resource_id in (None, ""):
+            continue
+        resource_id = str(resource_id)
+        if resource_id not in resource_ids:
+            resource_ids.append(resource_id)
+    return resource_ids
 
 
 def fetch_resource_record(resource_id, *, base_url, headers, request_fn):
@@ -219,17 +290,14 @@ def build_normalized_resource(record: dict) -> dict:
 
 
 def load_resource_records(resource_ids, *, base_url, headers, request_fn=request_json):
-    search_payload = request_fn(
-        "POST",
-        "/nodes/search",
+    search_items = search_resource_summaries(
         base_url=base_url,
         headers=headers,
+        request_fn=request_fn,
         payload={"ids": resource_ids},
     )
-
-    search_items = extract_list_payload(search_payload)
     summary_by_id = {
-        item.get("id", ""): normalize_resource_summary(item)
+        item.get("id", ""): item
         for item in search_items
         if item.get("id")
     }

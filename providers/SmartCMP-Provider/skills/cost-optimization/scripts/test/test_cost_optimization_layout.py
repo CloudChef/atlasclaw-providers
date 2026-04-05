@@ -37,6 +37,29 @@ def _render(**kwargs) -> str:
     return render_analysis(payload)
 
 
+def _make_resource_records() -> list[dict]:
+    return [
+        {
+            "resourceId": "resource-001",
+            "summary": {
+                "name": "demo-vm",
+                "resourceType": "VirtualMachine",
+                "componentType": "cloudchef.nodes.Compute",
+                "status": "RUNNING",
+                "osType": "Linux",
+                "osDescription": "Ubuntu 22.04",
+            },
+            "resource": {"name": "demo-vm"},
+            "normalized": {
+                "type": "cloudchef.nodes.Compute",
+                "properties": {"instanceType": "c6.large"},
+            },
+            "fetchStatus": "ok",
+            "errors": [],
+        }
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Markers
 # ---------------------------------------------------------------------------
@@ -96,6 +119,14 @@ class TestSummaryHeaderLines:
     def test_theme_line_present(self):
         output = _render()
         assert "Theme:" in output
+
+    def test_resource_line_shows_type_and_status_when_datasource_context_exists(self):
+        payload = build_analysis_payload(
+            violation=_make_violation(resourceName=""),
+            resource_records=_make_resource_records(),
+        )
+        output = render_analysis(payload)
+        assert "Resource: demo-vm | type=cloudchef.nodes.Compute | status=RUNNING" in output
 
 
 # ---------------------------------------------------------------------------
