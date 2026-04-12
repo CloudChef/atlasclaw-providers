@@ -76,7 +76,7 @@ if not ids:
     print("Get IDs from: python list_pending.py -> ##APPROVAL_META##")
     sys.exit(1)
 
-headers = {"Content-Type": "application/json; charset=utf-8", "CloudChef-Authenticate": AUTH_TOKEN}
+headers = HEADERS
 
 # ── Reject request ────────────────────────────────────────────────────────────
 url = f"{BASE_URL}/approval-activity/reject/batch"

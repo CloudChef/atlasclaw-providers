@@ -55,6 +55,7 @@ def test_env_auth_url_override_takes_priority(monkeypatch):
     monkeypatch.setenv("CMP_USERNAME", "admin")
     monkeypatch.setenv("CMP_PASSWORD", "secret")
     monkeypatch.delenv("CMP_COOKIE", raising=False)
+    monkeypatch.delenv("CMP_API_TOKEN", raising=False)
 
     base_url, auth_token, instance = common._get_config_from_env()
 

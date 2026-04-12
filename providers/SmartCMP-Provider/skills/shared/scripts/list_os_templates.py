@@ -57,7 +57,7 @@ if not os_type or not resource_bundle_id:
     print("   Or: Set OS_TYPE and RESOURCE_BUNDLE_ID environment variables")
     sys.exit(1)
 
-headers = {"CloudChef-Authenticate": AUTH_TOKEN}
+headers = HEADERS
 
 # ── Query logic templates ─────────────────────────────────────────────────────
 url = f"{BASE_URL}/logic-templates/search?expand&osType={os_type}&resourceBundleId={resource_bundle_id}"

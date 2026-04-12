@@ -49,7 +49,7 @@ if len(sys.argv) < 4:
 resource_bundle_id  = sys.argv[1]
 logic_template_id   = sys.argv[2]
 cloud_entry_type_id = sys.argv[3]
-headers = {"Content-Type": "application/json; charset=utf-8", "CloudChef-Authenticate": AUTH_TOKEN}
+headers = HEADERS
 
 # ── Construct cloudResourceType from cloudEntryTypeId ────────────────────────
 if "generic-cloud" in cloud_entry_type_id.lower():

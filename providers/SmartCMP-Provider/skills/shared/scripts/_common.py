@@ -22,10 +22,11 @@ Environment Variables (from SkillDeps):
   ATLASCLAW_USER_ID          - Current user ID
 
 Legacy Environment Variables (fallback):
-  CMP_URL      - Base URL (IP, hostname, or full path)
-  CMP_COOKIE   - Full session cookie string
-  CMP_USERNAME - Username for auto-login
-  CMP_PASSWORD - Password for auto-login
+  CMP_URL       - Base URL (IP, hostname, or full path)
+  CMP_API_TOKEN - User API token for token-based authentication
+  CMP_COOKIE    - Full session cookie string
+  CMP_USERNAME  - Username for auto-login
+  CMP_PASSWORD  - Password for auto-login
 """
 import os
 import sys
@@ -252,15 +253,17 @@ def _get_config_from_skilldeps() -> tuple:
 
     # Authentication priority:
     # 1. CloudChef-Authenticate from cookies (UI passed)
-    # 2. Cookie from provider config
-    # 3. Username/Password from provider config
+    # 2. User token from provider config
+    # 3. Cookie from provider config
+    # 4. Username/Password from provider config
     cloudchef_token = cookies.get('CloudChef-Authenticate', '')
+    user_token = instance.get('user_token', '')
     config_cookie = instance.get('cookie', '')
     username = instance.get('username', '')
     password = instance.get('password', '')
 
     # Determine auth token
-    auth_token = cloudchef_token or config_cookie
+    auth_token = cloudchef_token or user_token or config_cookie
 
     # If no token but have credentials, try auto-login
     if not auth_token and username and password and base_url:
@@ -297,6 +300,7 @@ def _get_config_from_env() -> tuple:
         Tuple of (base_url, auth_token, instance_config) or (None, None, None) if not available
     """
     raw_url = os.environ.get("CMP_URL", "")
+    user_token = os.environ.get("CMP_API_TOKEN", "")
     cookie = os.environ.get("CMP_COOKIE", "")
     username = os.environ.get("CMP_USERNAME", "")
     password = os.environ.get("CMP_PASSWORD", "")
@@ -304,6 +308,12 @@ def _get_config_from_env() -> tuple:
 
     if not raw_url:
         return None, None, None
+
+    # If user token is provided, use it directly
+    if user_token:
+        base_url = normalize_url(raw_url)
+        instance = {'base_url': raw_url, 'user_token': user_token}
+        return base_url, user_token, instance
 
     auth_url = _resolve_auth_url(raw_url, explicit_auth_url)
 
@@ -395,13 +405,19 @@ def create_headers(auth_token: str, content_type: str = "application/json; chars
     """Create standard HTTP headers for SmartCMP API requests.
 
     Args:
-        auth_token: CloudChef-Authenticate token or session cookie
+        auth_token: CloudChef-Authenticate token, session cookie, or API token
         content_type: Content-Type header value (default: application/json)
 
     Returns:
         Dictionary of HTTP headers
     """
-    headers = {"CloudChef-Authenticate": auth_token}
+    headers = {}
+    if auth_token:
+        # API tokens (cmp_tk_*) use Authorization: Bearer header
+        if auth_token.startswith("cmp_tk_"):
+            headers["Authorization"] = f"Bearer {auth_token}"
+        else:
+            headers["CloudChef-Authenticate"] = auth_token
     if content_type:
         headers["Content-Type"] = content_type
     return headers

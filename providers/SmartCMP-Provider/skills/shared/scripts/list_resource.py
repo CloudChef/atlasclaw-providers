@@ -19,9 +19,11 @@ except ImportError:
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(
-        description="List SmartCMP resource details by resource ID."
+        description="List SmartCMP resource details by resource ID, or list all resources if no IDs provided."
     )
-    parser.add_argument("resource_ids", nargs="+")
+    parser.add_argument("resource_ids", nargs="*", help="Resource IDs to query. If not provided, list all resources.")
+    parser.add_argument("--page", "-p", type=int, default=1, help="Page number for listing all resources (default: 1)")
+    parser.add_argument("--size", "-s", type=int, default=50, help="Page size for listing all resources (default: 50)")
     return parser.parse_args(argv)
 
 
@@ -347,10 +349,57 @@ def render_output(items):
     return "\n".join(lines)
 
 
+def list_all_resources(*, base_url, headers, request_fn=request_json, page=1, size=50):
+    """List all resources with pagination."""
+    result = request_fn(
+        "POST",
+        "/nodes/search",
+        base_url=base_url,
+        headers=headers,
+        params={"page": page, "size": size},
+        payload={},
+    )
+    items = extract_list_payload(result)
+    total = result.get("totalElements", len(items)) if isinstance(result, dict) else len(items)
+    return [
+        normalize_resource_summary(item)
+        for item in items
+        if isinstance(item, dict)
+    ], total
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
     base_url, _, headers, _ = require_config()
 
+    # If no resource IDs provided, list all resources
+    if not args.resource_ids:
+        try:
+            items, total = list_all_resources(
+                base_url=base_url,
+                headers=headers,
+                request_fn=request_json,
+                page=args.page,
+                size=args.size,
+            )
+        except (RuntimeError, RequestException) as exc:
+            print(f"[ERROR] {exc}")
+            return 1
+
+        print(f"Found {total} resource(s), showing {len(items)} (page {args.page}):\n")
+        for i, item in enumerate(items, start=1):
+            name = item.get("name", "N/A")
+            rid = item.get("id", "N/A")
+            rtype = item.get("resourceType", "N/A")
+            status = item.get("status", "N/A")
+            print(f"  [{i}] {name} | {rid} | {rtype} | {status}")
+        print()
+        print("##RESOURCE_META_START##")
+        print(json.dumps(items, ensure_ascii=False))
+        print("##RESOURCE_META_END##")
+        return 0
+
+    # Query specific resources by ID
     try:
         records = load_resource_records(
             args.resource_ids,

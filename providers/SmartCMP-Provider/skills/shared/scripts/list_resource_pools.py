@@ -65,7 +65,7 @@ if not bg_id or not component_type or not node_type:
     print("   Or: Set BUSINESS_GROUP_ID, SOURCE_KEY, NODE_TYPE environment variables")
     sys.exit(1)
 
-headers = {"Content-Type": "application/json; charset=utf-8", "CloudChef-Authenticate": AUTH_TOKEN}
+headers = HEADERS
 
 # ── Query resource pools ──────────────────────────────────────────────────────
 url = f"{BASE_URL}/resource-bundles"

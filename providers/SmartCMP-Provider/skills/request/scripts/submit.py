@@ -30,11 +30,11 @@ import requests
 
 # Import shared utilities (handles URL normalization, SSL warnings)
 try:
-    from _common import require_config
+    from _common import require_config, create_headers
 except ImportError:
     import os
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared', 'scripts'))
-    from _common import require_config
+    from _common import require_config, create_headers
 
 BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()
 
@@ -61,10 +61,7 @@ except FileNotFoundError:
 
 # ── Submit request ────────────────────────────────────────────────────────────
 url = f"{BASE_URL}/generic-request/submit"
-headers = {
-    "Content-Type": "application/json; charset=utf-8",
-    "CloudChef-Authenticate": AUTH_TOKEN
-}
+headers = create_headers(AUTH_TOKEN)
 
 try:
     resp = requests.post(url, headers=headers, json=body, verify=False, timeout=30)

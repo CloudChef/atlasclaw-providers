@@ -71,11 +71,7 @@ def main() -> int:
         print("[ERROR] --id must not be empty.")
         return 1
 
-    base_url, auth_token, _, _ = require_config()
-    headers = {
-        "Content-Type": "application/json; charset=utf-8",
-        "CloudChef-Authenticate": auth_token,
-    }
+    base_url, auth_token, headers, _ = require_config()
     try:
         response = requests.post(
             f"{base_url}/compliance-policies/violations/day2/fix/{violation_id}",

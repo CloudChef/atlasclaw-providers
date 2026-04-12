@@ -510,11 +510,7 @@ def main() -> int:
     parser.add_argument("--id", required=True, help="Violation identifier.")
     args = parser.parse_args()
 
-    base_url, auth_token, _, _ = require_config()
-    headers = {
-        "Content-Type": "application/json; charset=utf-8",
-        "CloudChef-Authenticate": auth_token,
-    }
+    base_url, auth_token, headers, _ = require_config()
 
     violation_response = requests.get(
         f"{base_url}/compliance-policies/violations/{args.id}",

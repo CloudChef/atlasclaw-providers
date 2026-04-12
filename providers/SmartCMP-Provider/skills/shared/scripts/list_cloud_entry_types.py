@@ -34,11 +34,10 @@ except ImportError:
 
 BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()
 
-headers = {"CloudChef-Authenticate": AUTH_TOKEN}
 url = f"{BASE_URL}/cloudentry-types/list_cloud_entry_types?queryByCurrentTenant"
 
 try:
-    resp = requests.get(url, headers=headers, verify=False, timeout=30)
+    resp = requests.get(url, headers=HEADERS, verify=False, timeout=30)
     resp.raise_for_status()
     data = resp.json()
 except requests.exceptions.RequestException as e:

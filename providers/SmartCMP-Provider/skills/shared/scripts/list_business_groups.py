@@ -49,9 +49,8 @@ if not CATALOG_ID:
     print("Get CATALOG_ID from: python list_services.py -> ##CATALOG_META##")
     sys.exit(1)
 url = f"{BASE_URL}/catalogs/{CATALOG_ID}/available-bgs"
-headers = {"Content-Type": "application/json; charset=utf-8", "CloudChef-Authenticate": AUTH_TOKEN}
 
-resp = requests.get(url, headers=headers, verify=False, timeout=30)
+resp = requests.get(url, headers=HEADERS, verify=False, timeout=30)
 if resp.status_code != 200:
     print(f"HTTP {resp.status_code}: {resp.text}")
     sys.exit(1)

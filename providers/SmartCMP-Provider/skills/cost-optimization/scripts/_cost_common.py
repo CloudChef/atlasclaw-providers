@@ -39,6 +39,7 @@ def _fetch_currency_symbol(base_url: str, auth_token: str) -> str:
     if not base_url or not auth_token:
         # Try to build from env as fallback
         raw_url = os.environ.get("CMP_URL", "").strip()
+        user_token = os.environ.get("CMP_API_TOKEN", "").strip()
         cookie = os.environ.get("CMP_COOKIE", "")
         if not raw_url:
             return "¥"
@@ -46,12 +47,15 @@ def _fetch_currency_symbol(base_url: str, auth_token: str) -> str:
         if not raw_url.endswith("/platform-api"):
             raw_url = raw_url.rstrip("/") + "/platform-api"
         base_url = raw_url
-        # Extract CloudChef-Authenticate token from cookie string
-        for part in cookie.split(";"):
-            part = part.strip()
-            if part.startswith("CloudChef-Authenticate="):
-                auth_token = part.split("=", 1)[1]
-                break
+        # Use user token if available, otherwise extract from cookie
+        if user_token:
+            auth_token = user_token
+        else:
+            for part in cookie.split(";"):
+                part = part.strip()
+                if part.startswith("CloudChef-Authenticate="):
+                    auth_token = part.split("=", 1)[1]
+                    break
         if not auth_token:
             return "¥"
 
@@ -60,7 +64,11 @@ def _fetch_currency_symbol(base_url: str, auth_token: str) -> str:
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-        headers = {"CloudChef-Authenticate": auth_token}
+        # Build correct header based on token type
+        if auth_token.startswith("cmp_tk_"):
+            headers = {"Authorization": f"Bearer {auth_token}"}
+        else:
+            headers = {"CloudChef-Authenticate": auth_token}
 
         # Step 1: get currencyUnitType code
         r_setting = requests.get(

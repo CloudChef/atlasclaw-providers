@@ -78,7 +78,7 @@ def test_main_posts_to_day2_fix_endpoint(monkeypatch, capsys):
     calls = {}
 
     def fake_require_config():
-        return "https://cmp.example.com/platform-api", "token", {}, {}
+        return "https://cmp.example.com/platform-api", "token", {"Content-Type": "application/json; charset=utf-8", "CloudChef-Authenticate": "token"}, {}
 
     def fake_post(url, headers, json, verify, timeout):
         calls["url"] = url

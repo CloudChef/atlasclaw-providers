@@ -44,7 +44,7 @@ url = f"{BASE_URL}/catalogs/published"
 params = {"query": "", "states": "PUBLISHED", "page": 1, "size": 50, "sort": "catalogIndex,asc"}
 if keyword:
     params["queryValue"] = keyword
-headers = {"Content-Type": "application/json; charset=utf-8", "CloudChef-Authenticate": AUTH_TOKEN}
+headers = HEADERS
 
 resp = requests.get(url, headers=headers, params=params, verify=False, timeout=30)
 if resp.status_code != 200:

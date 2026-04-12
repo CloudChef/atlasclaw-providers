@@ -39,12 +39,11 @@ if len(sys.argv) < 2:
     sys.exit(1)
 
 source_key = sys.argv[1]
-headers = {"CloudChef-Authenticate": AUTH_TOKEN}
 
 # ── Query /components ─────────────────────────────────────────────────────────
 url = f"{BASE_URL}/components"
 try:
-    resp = requests.get(url, headers=headers, params={"resourceType": source_key},
+    resp = requests.get(url, headers=HEADERS, params={"resourceType": source_key},
                         verify=False, timeout=30)
     resp.raise_for_status()
     data = resp.json()

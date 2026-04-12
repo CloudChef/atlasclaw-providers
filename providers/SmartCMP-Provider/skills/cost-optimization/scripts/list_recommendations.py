@@ -131,11 +131,7 @@ def main() -> int:
                         help="Show count of related policies in the same category.")
     args = parser.parse_args()
 
-    base_url, auth_token, _, _ = require_config()
-    headers = {
-        "Content-Type": "application/json; charset=utf-8",
-        "CloudChef-Authenticate": auth_token,
-    }
+    base_url, auth_token, headers, _ = require_config()
     params = {}
     if args.status:
         params["status"] = args.status
