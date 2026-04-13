@@ -11,7 +11,6 @@ Features:
   - Common HTTP headers generation
   - SSL warning suppression
   - Auto-login with username/password when cookie not provided
-  - Cookie caching with TTL to avoid repeated logins
 
 Usage:
   from _common import get_cmp_config, create_headers, require_config
@@ -31,10 +30,8 @@ Legacy Environment Variables (fallback):
 import os
 import sys
 import json
-import time
 import urllib3
 import requests
-from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
 # Suppress SSL warnings globally when this module is imported
@@ -52,18 +49,6 @@ _SAAS_HOSTS = {
     "console.cloudchef.io",
 }
 _SAAS_AUTH_URL = "https://account.smartcmp.cloud/bss-api/api/authentication"
-
-# Cookie cache configuration
-def _get_cache_dir() -> Path:
-    """Get the cache directory path."""
-    atlasclaw_root = os.environ.get("ATLASCLAW_ROOT", "")
-    if atlasclaw_root:
-        return Path(atlasclaw_root) / ".atlasclaw" / "users" / "default" / "sessions"
-    return Path.cwd() / ".atlasclaw" / "users" / "default" / "sessions"
-
-_CACHE_DIR = _get_cache_dir()
-_COOKIE_CACHE_FILE = _CACHE_DIR / "smartcmp_cookie_cache.json"
-_COOKIE_TTL_SECONDS = 1800  # 30 minutes
 
 
 def normalize_url(url: str) -> str:
@@ -130,38 +115,6 @@ def _resolve_auth_url(cmp_url: str, explicit_auth_url: str = "") -> str:
         return explicit_auth_url
     return _infer_auth_url(cmp_url)
 
-
-def _get_cached_cookie(cmp_url: str = "") -> str:
-    """Get cached cookie if still valid and URL matches."""
-    try:
-        if _COOKIE_CACHE_FILE.exists():
-            data = json.loads(_COOKIE_CACHE_FILE.read_text(encoding="utf-8"))
-            # Check expiration
-            if data.get("expires_at", 0) <= time.time():
-                return ""
-            # Check URL match
-            cached_url = data.get("cmp_url", "")
-            if cmp_url and cached_url and cached_url != cmp_url:
-                return ""
-            return data.get("cookie", "")
-    except Exception:
-        pass
-    return ""
-
-
-def _cache_cookie(cookie: str, cmp_url: str = "", ttl_seconds: int = _COOKIE_TTL_SECONDS) -> None:
-    """Cache cookie to file with URL binding."""
-    try:
-        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        data = {
-            "cookie": cookie,
-            "cmp_url": cmp_url,
-            "expires_at": time.time() + ttl_seconds,
-            "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
-        }
-        _COOKIE_CACHE_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    except Exception:
-        pass
 
 
 def _auto_login(auth_url: str, username: str, password: str) -> str:
@@ -270,8 +223,6 @@ def _get_config_from_skilldeps() -> tuple:
         try:
             auth_url = _resolve_auth_url(base_url, explicit_auth_url)
             cookie_str = _auto_login(auth_url, username, password)
-            # Cache the full cookie string for future use
-            _cache_cookie(cookie_str, base_url)
             # Extract CloudChef-Authenticate JWT token from cookie string
             for part in cookie_str.split(';'):
                 part = part.strip()
@@ -317,16 +268,11 @@ def _get_config_from_env() -> tuple:
 
     auth_url = _resolve_auth_url(raw_url, explicit_auth_url)
 
-    # If no explicit cookie, try cache or auto-login
+    # If no explicit cookie, try auto-login
     if not cookie:
-        # Try cached cookie first
-        cookie = _get_cached_cookie(raw_url)
-
-        # If still no cookie, try auto-login
-        if not cookie and username and password and auth_url:
+        if username and password and auth_url:
             try:
                 cookie = _auto_login(auth_url, username, password)
-                _cache_cookie(cookie, raw_url)
             except RuntimeError:
                 pass
 
