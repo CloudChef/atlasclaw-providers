@@ -36,15 +36,35 @@ related:
 tool_list_name: "smartcmp_list_cost_recommendations"
 tool_list_description: "List SmartCMP cost optimization recommendations with optional related policy counts."
 tool_list_entrypoint: "scripts/list_recommendations.py"
+tool_list_groups:
+  - cmp
+  - finops
+tool_list_capability_class: "provider:smartcmp"
+tool_list_priority: 100
 tool_analyze_name: "smartcmp_analyze_cost_recommendation"
 tool_analyze_description: "Analyze one SmartCMP cost optimization recommendation with multi-dimensional insights, datasource-enriched resource context, risk assessment, saving priority, and best practice guidance."
 tool_analyze_entrypoint: "scripts/analyze_recommendation.py"
+tool_analyze_groups:
+  - cmp
+  - finops
+tool_analyze_capability_class: "provider:smartcmp"
+tool_analyze_priority: 120
 tool_execute_name: "smartcmp_execute_cost_optimization"
 tool_execute_description: "Execute SmartCMP-native day2 remediation for a violation."
 tool_execute_entrypoint: "scripts/execute_optimization.py"
+tool_execute_groups:
+  - cmp
+  - finops
+tool_execute_capability_class: "provider:smartcmp"
+tool_execute_priority: 150
 tool_track_name: "smartcmp_track_cost_optimization"
 tool_track_description: "Track SmartCMP cost optimization remediation execution."
 tool_track_entrypoint: "scripts/track_execution.py"
+tool_track_groups:
+  - cmp
+  - finops
+tool_track_capability_class: "provider:smartcmp"
+tool_track_priority: 130
 ---
 
 # cost-optimization

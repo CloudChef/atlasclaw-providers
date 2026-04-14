@@ -45,21 +45,54 @@ related:
 tool_list_services_name: "smartcmp_list_services"
 tool_list_services_description: "List available service catalogs from SmartCMP."
 tool_list_services_entrypoint: "../shared/scripts/list_services.py"
+tool_list_services_group: "cmp"
+tool_list_services_capability_class: "provider:smartcmp"
+tool_list_services_priority: 100
+tool_list_services_result_mode: "tool_only_ok"
 tool_list_business_groups_name: "smartcmp_list_business_groups"
 tool_list_business_groups_description: "List business groups for a catalog. Use when user needs to select business group."
 tool_list_business_groups_entrypoint: "../shared/scripts/list_business_groups.py"
+tool_list_business_groups_groups:
+  - cmp
+  - request
+tool_list_business_groups_capability_class: "provider:smartcmp"
+tool_list_business_groups_priority: 105
+tool_list_business_groups_result_mode: "tool_only_ok"
 tool_list_resource_pools_name: "smartcmp_list_resource_pools"
 tool_list_resource_pools_description: "List resource pools. Get resourceBundleId for request."
 tool_list_resource_pools_entrypoint: "../shared/scripts/list_resource_pools.py"
+tool_list_resource_pools_groups:
+  - cmp
+  - request
+tool_list_resource_pools_capability_class: "provider:smartcmp"
+tool_list_resource_pools_priority: 110
+tool_list_resource_pools_result_mode: "tool_only_ok"
 tool_list_os_templates_name: "smartcmp_list_os_templates"
 tool_list_os_templates_description: "List OS templates for VM provisioning."
 tool_list_os_templates_entrypoint: "../shared/scripts/list_os_templates.py"
+tool_list_os_templates_groups:
+  - cmp
+  - request
+tool_list_os_templates_capability_class: "provider:smartcmp"
+tool_list_os_templates_priority: 115
+tool_list_os_templates_result_mode: "tool_only_ok"
 tool_list_components_name: "smartcmp_list_components"
 tool_list_components_description: "Get component type info including typeName, node, cloudEntryTypeIds."
 tool_list_components_entrypoint: "../shared/scripts/list_components.py"
+tool_list_components_groups:
+  - cmp
+  - request
+tool_list_components_capability_class: "provider:smartcmp"
+tool_list_components_priority: 120
+tool_list_components_result_mode: "tool_only_ok"
 tool_submit_name: "smartcmp_submit_request"
 tool_submit_description: "Submit resource request to SmartCMP."
 tool_submit_entrypoint: "scripts/submit.py"
+tool_submit_groups:
+  - cmp
+  - request
+tool_submit_capability_class: "provider:smartcmp"
+tool_submit_priority: 160
 ---
 
 # request

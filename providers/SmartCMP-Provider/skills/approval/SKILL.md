@@ -8,14 +8,29 @@ instance_required: "true"
 triggers:
   - pending approvals
   - list approvals
+  - request detail
+  - approval detail
+  - request status
   - approve request
   - reject request
   - approval workflow
+  - 待审批
+  - 查看待审批
+  - 请求详情
+  - 工单详情
+  - 审批详情
+  - 请求状态
+  - 查看详情
+  - 审批通过
+  - 审批拒绝
 
 use_when:
   - User wants to view pending approval items
+  - User wants to inspect one pending SmartCMP request or approval item in detail
   - User needs to approve or reject service requests
   - User asks about approval status, approval queue, or approval workflow
+  - User asks for the detail or status of a SmartCMP request by ticket/workflow/request/task/process identifier
+  - User asks for SmartCMP 待审批、工单详情、审批详情、请求状态
 
 avoid_when:
   - User wants to provision new resources (use request skill)
@@ -24,6 +39,10 @@ avoid_when:
 
 examples:
   - "Show me pending approvals"
+  - "Show me the detail of TIC20260316000001"
+  - "查看TIC20260316000001的详情"
+  - "看下这个工单的审批详情"
+  - "查下请求状态"
   - "Approve request #12345"
   - "Reject the VM request with reason budget exceeded"
   - "List all items waiting for my approval"
@@ -36,9 +55,72 @@ related:
 tool_list_name: "smartcmp_list_pending"
 tool_list_description: "Query pending approvals from SmartCMP. Automatically uses configured CMP connection."
 tool_list_entrypoint: "scripts/list_pending.py"
+tool_list_group: "cmp"
+tool_list_capability_class: "provider:smartcmp"
+tool_list_priority: 100
+tool_list_result_mode: "tool_only_ok"
+tool_detail_name: "smartcmp_get_request_detail"
+tool_detail_description: "Get SmartCMP pending approval/request detail. Always pass the lookup value in the `identifier` argument; valid identifier values include workflow ID, approval ID, request ID, task ID, or process instance ID."
+tool_detail_entrypoint: "scripts/get_request_detail.py"
+tool_detail_aliases:
+  - "request detail"
+  - "approval detail"
+  - "工单详情"
+  - "请求详情"
+  - "审批详情"
+  - "请求状态"
+tool_detail_keywords:
+  - "detail"
+  - "status"
+  - "workflow"
+  - "request detail"
+  - "approval detail"
+  - "ticket detail"
+  - "详情"
+  - "状态"
+  - "工单"
+  - "审批"
+  - "请求"
+tool_detail_use_when:
+  - "User asks for the detail or current status of a SmartCMP request by identifier"
+  - "User asks to inspect 工单详情、请求详情、审批详情 or 请求状态"
+tool_detail_groups:
+  - cmp
+  - approval
+  - request
+tool_detail_capability_class: "provider:smartcmp"
+tool_detail_priority: 105
+tool_detail_result_mode: "tool_only_ok"
+tool_detail_cli_positional:
+  - identifier
+tool_detail_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "identifier": {
+        "type": "string",
+        "description": "The single lookup identifier. Put workflow ID, approval ID, request ID, task ID, or process instance ID into this `identifier` field."
+      },
+      "days": {
+        "type": "integer",
+        "description": "Lookback window in days when searching pending approvals",
+        "default": 90
+      }
+    },
+    "required": ["identifier"]
+  }
 tool_approve_name: "smartcmp_approve"
 tool_approve_description: "Approve requests in SmartCMP. The system automatically selects and injects the provider instance configuration."
 tool_approve_entrypoint: "scripts/approve.py"
+tool_approve_groups:
+  - cmp
+  - approval
+tool_approve_capability_class: "provider:smartcmp"
+tool_approve_priority: 120
+tool_approve_cli_positional:
+  - ids
+tool_approve_cli_split:
+  - ids
 tool_approve_parameters: |
   {
     "type": "object",
@@ -57,6 +139,15 @@ tool_approve_parameters: |
 tool_reject_name: "smartcmp_reject"
 tool_reject_description: "Reject requests in SmartCMP. The system automatically selects and injects the provider instance configuration."
 tool_reject_entrypoint: "scripts/reject.py"
+tool_reject_groups:
+  - cmp
+  - approval
+tool_reject_capability_class: "provider:smartcmp"
+tool_reject_priority: 130
+tool_reject_cli_positional:
+  - ids
+tool_reject_cli_split:
+  - ids
 tool_reject_parameters: |
   {
     "type": "object",

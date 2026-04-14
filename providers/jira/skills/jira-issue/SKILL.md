@@ -37,12 +37,32 @@ related:
 # === Tool Registration ===
 tool_create_name: "jira_issue_create"
 tool_create_entrypoint: "scripts/jira_issue_create.py:handler"
+tool_create_groups:
+  - jira
+  - issue
+tool_create_capability_class: "provider:jira"
+tool_create_priority: 120
 tool_get_name: "jira_issue_get"
 tool_get_entrypoint: "scripts/jira_issue_get.py:handler"
+tool_get_groups:
+  - jira
+  - issue
+tool_get_capability_class: "provider:jira"
+tool_get_priority: 100
 tool_update_name: "jira_issue_update"
 tool_update_entrypoint: "scripts/jira_issue_update.py:handler"
+tool_update_groups:
+  - jira
+  - issue
+tool_update_capability_class: "provider:jira"
+tool_update_priority: 130
 tool_delete_name: "jira_issue_delete"
 tool_delete_entrypoint: "scripts/jira_issue_delete.py:handler"
+tool_delete_groups:
+  - jira
+  - issue
+tool_delete_capability_class: "provider:jira"
+tool_delete_priority: 140
 ---
 
 # jira-issue
