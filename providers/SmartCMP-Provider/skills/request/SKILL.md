@@ -43,14 +43,24 @@ related:
 
 # === Tool Registration ===
 tool_list_services_name: "smartcmp_list_services"
-tool_list_services_description: "List available service catalogs from SmartCMP."
+tool_list_services_description: "List available service catalogs from SmartCMP. Show only the numbered catalog list to the user. Treat returned _internal metadata such as id, sourceKey, serviceCategory, instructions, and params as hidden backend state only; never display or narrate those fields."
 tool_list_services_entrypoint: "../shared/scripts/list_services.py"
 tool_list_services_group: "cmp"
 tool_list_services_capability_class: "provider:smartcmp"
 tool_list_services_priority: 100
 tool_list_services_result_mode: "tool_only_ok"
+tool_list_services_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "keyword": {
+        "type": "string",
+        "description": "Optional keyword to filter services"
+      }
+    }
+  }
 tool_list_business_groups_name: "smartcmp_list_business_groups"
-tool_list_business_groups_description: "List business groups for a catalog. Use when user needs to select business group."
+tool_list_business_groups_description: "List business groups for a catalog. IMPORTANT: You MUST pass catalog_id from the previous list_services output (e.g. BUILD-IN-CATALOG-LINUX-VM)."
 tool_list_business_groups_entrypoint: "../shared/scripts/list_business_groups.py"
 tool_list_business_groups_groups:
   - cmp
@@ -58,8 +68,21 @@ tool_list_business_groups_groups:
 tool_list_business_groups_capability_class: "provider:smartcmp"
 tool_list_business_groups_priority: 105
 tool_list_business_groups_result_mode: "tool_only_ok"
+tool_list_business_groups_cli_positional:
+  - catalog_id
+tool_list_business_groups_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "catalog_id": {
+        "type": "string",
+        "description": "Catalog ID from list_services output (e.g. BUILD-IN-CATALOG-LINUX-VM)"
+      }
+    },
+    "required": ["catalog_id"]
+  }
 tool_list_resource_pools_name: "smartcmp_list_resource_pools"
-tool_list_resource_pools_description: "List resource pools. Get resourceBundleId for request."
+tool_list_resource_pools_description: "List resource pools for VM provisioning. Requires business_group_id (from list_business_groups), source_key (from list_services CATALOG_META), and node_type (from list_components COMPONENT_META)."
 tool_list_resource_pools_entrypoint: "../shared/scripts/list_resource_pools.py"
 tool_list_resource_pools_groups:
   - cmp
@@ -67,8 +90,31 @@ tool_list_resource_pools_groups:
 tool_list_resource_pools_capability_class: "provider:smartcmp"
 tool_list_resource_pools_priority: 110
 tool_list_resource_pools_result_mode: "tool_only_ok"
+tool_list_resource_pools_cli_positional:
+  - business_group_id
+  - source_key
+  - node_type
+tool_list_resource_pools_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "business_group_id": {
+        "type": "string",
+        "description": "Business group ID from list_business_groups output"
+      },
+      "source_key": {
+        "type": "string",
+        "description": "Service source key from list_services CATALOG_META (e.g. resource.iaas.machine.instance.abstract)"
+      },
+      "node_type": {
+        "type": "string",
+        "description": "Component typeName from list_components COMPONENT_META (e.g. cloudchef.nodes.Compute)"
+      }
+    },
+    "required": ["business_group_id", "source_key", "node_type"]
+  }
 tool_list_os_templates_name: "smartcmp_list_os_templates"
-tool_list_os_templates_description: "List OS templates for VM provisioning."
+tool_list_os_templates_description: "List OS templates. IMPORTANT: os_type MUST be 'Linux' or 'Windows' (from list_components osType), resource_bundle_id from list_resource_pools RESOURCE_POOL_META."
 tool_list_os_templates_entrypoint: "../shared/scripts/list_os_templates.py"
 tool_list_os_templates_groups:
   - cmp
@@ -76,8 +122,26 @@ tool_list_os_templates_groups:
 tool_list_os_templates_capability_class: "provider:smartcmp"
 tool_list_os_templates_priority: 115
 tool_list_os_templates_result_mode: "tool_only_ok"
+tool_list_os_templates_cli_positional:
+  - os_type
+  - resource_bundle_id
+tool_list_os_templates_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "os_type": {
+        "type": "string",
+        "description": "OS type: must be exactly 'Linux' or 'Windows' (capitalized, from list_components osType field)"
+      },
+      "resource_bundle_id": {
+        "type": "string",
+        "description": "Resource bundle ID from list_resource_pools output"
+      }
+    },
+    "required": ["os_type", "resource_bundle_id"]
+  }
 tool_list_components_name: "smartcmp_list_components"
-tool_list_components_description: "Get component type info including typeName, node, cloudEntryTypeIds."
+tool_list_components_description: "Silent backend lookup for request workflow. Get component type info including typeName, osType, and cloudEntryTypeIds for a service. IMPORTANT: you MUST pass source_key from the selected service card's sourceKey field (from list_services _internal/CATALOG_META). NEVER pass catalog_id or service id. Never narrate this lookup or display its output or metadata to the user."
 tool_list_components_entrypoint: "../shared/scripts/list_components.py"
 tool_list_components_groups:
   - cmp
@@ -85,14 +149,99 @@ tool_list_components_groups:
 tool_list_components_capability_class: "provider:smartcmp"
 tool_list_components_priority: 120
 tool_list_components_result_mode: "tool_only_ok"
+tool_list_components_cli_positional:
+  - source_key
+tool_list_components_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "source_key": {
+        "type": "string",
+        "description": "Service source key from list_services CATALOG_META (e.g. resource.iaas.machine.instance.abstract)"
+      }
+    },
+    "required": ["source_key"]
+  }
+tool_list_applications_name: "smartcmp_list_applications"
+tool_list_applications_description: "List applications/projects for a business group. Returns application IDs for request submission."
+tool_list_applications_entrypoint: "../shared/scripts/list_applications.py"
+tool_list_applications_groups:
+  - cmp
+  - request
+tool_list_applications_capability_class: "provider:smartcmp"
+tool_list_applications_priority: 125
+tool_list_applications_result_mode: "tool_only_ok"
+tool_list_applications_cli_positional:
+  - business_group_id
+  - keyword
+tool_list_applications_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "business_group_id": {
+        "type": "string",
+        "description": "Business group ID from list_business_groups output"
+      },
+      "keyword": {
+        "type": "string",
+        "description": "Optional keyword to filter applications by name"
+      }
+    },
+    "required": ["business_group_id"]
+  }
+tool_list_images_name: "smartcmp_list_images"
+tool_list_images_description: "List available VM images for the selected resource pool and OS template. IMPORTANT: pass resource_bundle_id from the selected resource pool, logic_template_id from the selected OS template, and cloud_entry_type_id from the same selected resource pool's cloudEntryTypeId. Build the lookup from the actual selected platform value; never hardcode vSphere or any single cloud platform."
+tool_list_images_entrypoint: "../shared/scripts/list_images.py"
+tool_list_images_groups:
+  - cmp
+  - request
+tool_list_images_capability_class: "provider:smartcmp"
+tool_list_images_priority: 130
+tool_list_images_result_mode: "tool_only_ok"
+tool_list_images_cli_positional:
+  - resource_bundle_id
+  - logic_template_id
+  - cloud_entry_type_id
+tool_list_images_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "resource_bundle_id": {
+        "type": "string",
+        "description": "Resource bundle ID from list_resource_pools output"
+      },
+      "logic_template_id": {
+        "type": "string",
+        "description": "Logic template ID from list_os_templates output"
+      },
+      "cloud_entry_type_id": {
+        "type": "string",
+        "description": "Cloud entry type ID from list_resource_pools RESOURCE_POOL_META (cloudEntryTypeId)"
+      }
+    },
+    "required": ["resource_bundle_id", "logic_template_id", "cloud_entry_type_id"]
+  }
 tool_submit_name: "smartcmp_submit_request"
-tool_submit_description: "Submit resource request to SmartCMP."
+tool_submit_description: "Submit resource request to SmartCMP. Pass the complete request JSON body as the 'json_body' parameter."
 tool_submit_entrypoint: "scripts/submit.py"
 tool_submit_groups:
   - cmp
   - request
 tool_submit_capability_class: "provider:smartcmp"
 tool_submit_priority: 160
+tool_submit_result_mode: "tool_only_ok"
+tool_submit_cli_positional: []
+tool_submit_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "json": {
+        "type": "string",
+        "description": "Complete request body as a JSON string. Must include catalogName, userLoginId, businessGroupName, name, and resourceSpecs (for cloud) or genericRequest (for ticket)."
+      }
+    },
+    "required": ["json"]
+  }
 ---
 
 # request
@@ -126,6 +275,12 @@ python ../shared/scripts/list_services.py
 ```
 
 **Output Example:**
+
+The tool returns a JSON result with two key fields:
+- `output`: The user-visible text (numbered list + selection prompt)
+- `_internal`: Machine-readable metadata (catalog IDs, params, etc.)
+
+The `output` field looks like:
 ```
 Found 3 published catalog(s):
 
@@ -133,14 +288,48 @@ Found 3 published catalog(s):
   [2] Issue Ticket
   [3] Server Room
 
-##CATALOG_META_START##
-[{"index":1,"id":"xxx","name":"Linux VM","sourceKey":"resource.iaas...","serviceCategory":"VM","description":"..."},
- {"index":2,"id":"yyy","name":"Issue Ticket","sourceKey":"...","serviceCategory":"GENERIC_SERVICE","description":"..."},
- {"index":3,"id":"zzz","name":"Server Room","sourceKey":"resource.infra.server_room","serviceCategory":"RESOURCE","description":"..."}]
-##CATALOG_META_END##
+请选择您要申请的服务（输入编号）：
 ```
 
-**Action:** Display numbered list to user, ask: "Please select the service you want to request (enter number)"
+When presenting service cards to the user:
+- Show only the numbered catalog names from the `output` field.
+- Do NOT display `_internal` metadata such as `id`, `sourceKey`, `serviceCategory`,
+  `instructions`, or `params`.
+
+The `_internal` field contains JSON like:
+```json
+[{
+  "index": 1,
+  "id": "xxx",
+  "name": "Linux VM",
+  "sourceKey": "resource.iaas...",
+  "serviceCategory": "VM",
+  "instructions": {
+    "parameters": [
+      {
+        "key": "name",
+        "label": "Resource Name",
+        "source": null,
+        "defaultValue": null,
+        "required": true
+      }
+    ]
+  },
+  "params": [
+    {
+      "key": "name",
+      "label": "Resource Name",
+      "source": null,
+      "defaultValue": null,
+      "required": true
+    }
+  ]
+}]
+```
+
+**IMPORTANT:** The `_internal` field is for your reference ONLY. Parse it silently to extract IDs, params, serviceCategory. NEVER display `_internal` content to the user.
+
+**Action:** Display ONLY the numbered list and the selection prompt to user. Ask user to select.
 
 **STOP - Wait for user input**
 
@@ -148,7 +337,16 @@ Found 3 published catalog(s):
 
 ## Step 2: Determine Service Type [Decision]
 
-After user selection, find the corresponding item from `##CATALOG_META##` and check `serviceCategory` field:
+After user selection, find the corresponding item from the `_internal` metadata and check `serviceCategory` field:
+
+Immediately save the selected service card metadata into working variables for the
+rest of the workflow, including:
+- `selected_catalog_id` = selected card `id`
+- `selected_source_key` = selected card `sourceKey`
+- `selected_service_category` = selected card `serviceCategory`
+- `selected_params` = selected card `params`
+
+Do this silently. Do NOT display these metadata fields to the user.
 
 | serviceCategory Value | Service Type | Flow |
 |----------------------|--------------|------|
@@ -214,44 +412,27 @@ python scripts/submit.py --file request.json
 
 Use this flow when `serviceCategory !== "GENERIC_SERVICE"`.
 
-### Cloud Resource Flow Decision Tree
+This flow is **strictly driven by the `params` array** from the selected service's `_internal` metadata. That `params` array is a normalized copy of `instructions.parameters`, and each item preserves the original `key`, `label`, `source`, `defaultValue`, and `required` fields.
+
+### Overview
 
 ```
-[R1] Get component info (list_components.py)
+[R1] Get component info (list_components.py) -> get typeName, node, cloudEntryTypeIds
     |
     v
-[R2] Check cloudEntryTypeIds
+[R2] Process params array in order:
+    For each param:
+      - source = "list:xxx" -> call corresponding tool, ask user to select
+      - source = null, defaultValue != null -> use default silently
+      - source = null, defaultValue = null, required = true -> ask user to input
+      - required = false, defaultValue = null -> skip
     |
-    +---> cloudEntryTypeIds is empty ("") ---> Path A: No resource pool needed
-    |                                          Set useResourceBundle: false
-    |                                          Skip resource pool selection
+    v
+[R3] Build request body with all collected values
     |
-    +---> cloudEntryTypeIds not empty ---> [R3] Check description config
-                                               |
-                                               +---> description empty/invalid ---> Path B: Must select resource pool
-                                               |                                    Execute list_resource_pools.py
-                                               |                                    Let user select resource pool
-                                               |
-                                               +---> description valid ---> [R4] Check resource pool config
-                                                                                |
-                                                                                +---> Has default pool ---> Path C: Use default pool
-                                                                                |     (resourceBundleName/Id has defaultValue)
-                                                                                |     No user selection needed
-                                                                                |
-                                                                                +---> No default pool ---> Path D: Need to select pool
-                                                                                      (source: "list:resource_pools")
-                                                                                      Execute list_resource_pools.py
-                                                                                      Let user select resource pool
+    v
+[R4] Confirm with user -> Submit
 ```
-
-### Resource Pool Decision Summary
-
-| Scenario | cloudEntryTypeIds | description | Pool Config | Action |
-|----------|-------------------|-------------|-------------|--------|
-| **Path A** | Empty `""` | Any | - | `useResourceBundle: false`, no pool needed |
-| **Path B** | Not empty | Empty/Invalid | - | **Must** query pool for user selection |
-| **Path C** | Not empty | Valid | Has default | Use default pool, no user selection |
-| **Path D** | Not empty | Valid | No default | Query pool for user selection |
 
 ---
 
@@ -261,204 +442,119 @@ Use this flow when `serviceCategory !== "GENERIC_SERVICE"`.
 python ../shared/scripts/list_components.py <sourceKey>
 ```
 
-**Output Example:**
-```
-##COMPONENT_META_START##
-{"sourceKey":"resource.infra.server_room","typeName":"resource.infra.server_room","id":"xxx","name":"Server Room","node":"server_room","cloudEntryTypeIds":""}
-##COMPONENT_META_END##
-```
+**IMPORTANT:** `smartcmp_list_components` / `list_components.py` only accepts `source_key`.
+That `source_key` is the selected service card's `sourceKey` field from `list_services`
+metadata. NEVER pass `catalog_id`, service `id`, or the user's numeric selection.
 
-**Key Fields:**
+This is a hidden backend step for cloud-resource requests:
+- Call `smartcmp_list_components(source_key=<selected_source_key>)` immediately after the
+  user selects the service card.
+- Do NOT announce this lookup to the user.
+- Do NOT tell the user you are checking component info, node types, or backend metadata.
+- Do NOT display component details to the user unless the user explicitly asks.
 
-| Field | Purpose | Example |
-|-------|---------|---------|
-| `typeName` | For `type` field in request body | `resource.infra.server_room` |
-| `node` | For `node` field in request body | `server_room` |
-| `cloudEntryTypeIds` | **Resource pool requirement indicator** | `""` or `"yacmp:cloudentry:type:..."` |
+Parse the `_internal` field silently. NEVER display to user. Extract:
+- `typeName` → for `type` field in request body
+- `node` → for `node` field in request body
+- `cloudEntryTypeIds` → if empty, set `useResourceBundle: false` in request body
 
-**Note:** This step executes silently, do not display to user, proceed to next step directly.
-
----
-
-### R2: Determine Resource Pool Requirement [Silent Decision]
-
-Determine resource pool requirement based on `cloudEntryTypeIds` value:
-
-```
-IF cloudEntryTypeIds === "" (empty string)
-    THEN needResourcePool = false
-         useResourceBundle = false
-    GOTO R4 (skip resource pool related steps)
-
-ELSE (cloudEntryTypeIds not empty)
-    THEN needResourcePool = true (preliminary)
-    GOTO R3 (continue checking description config)
-```
+Proceed to R2 directly without user interaction.
 
 ---
 
-### R3: Parse Service Card Description [Silent Analysis]
+### R2: Process Params Array Step by Step
 
-Parse parameter definitions from `description` field in `##CATALOG_META##`.
+Read the `params` array from the selected service's `_internal` metadata. Process each parameter **in order**. For each parameter, follow these rules:
 
-#### Scenario 1: description empty or invalid JSON (Path B)
+#### Source-to-Tool Mapping
 
+| `source` value | Tool to call | Parameters needed |
+|---------------|-------------|------------------|
+| `list:business_groups` | `smartcmp_list_business_groups` | catalog_id (from selected service id) |
+| `list:applications` | `smartcmp_list_applications` | business_group_id (from selected business group), keyword (optional) |
+| `list:resource_pools` | `smartcmp_list_resource_pools` | business_group_id, source_key, node_type (from R1 typeName) |
+| `list:os_templates` | `smartcmp_list_os_templates` | os_type (from R1 `osType`; fallback: infer from `typeName`), resource_bundle_id (from selected pool) |
+| `list:list_images` or `list:images` | `smartcmp_list_images` | resource_bundle_id (from selected pool), logic_template_id (from selected OS template), cloud_entry_type_id (from the same selected pool's `cloudEntryTypeId`; use the actual selected value, never hardcode a platform) |
+
+#### Parameter Decision Rules
+
+| Condition | Action | Example |
+|-----------|--------|--------|
+| `source: "list:xxx"` AND `defaultValue: null` | Call the mapped tool, show list to user, ask to select. **STOP and wait.** | businessGroupId, resourceBundleName, logicTemplateName |
+| `source: "list:xxx"` AND `defaultValue` has value | Use default value silently. Do NOT call tool. | - |
+| `source: null` AND `defaultValue` has value | Use default value silently. Do NOT ask user. | computeProfileName="微型计算", cpu=1, memory=1 |
+| `source: null` AND `defaultValue: null` AND `required: true` | **Ask user to input this value.** Show prompt: "请输入{label}". **STOP and wait.** | name, credentialUser, credentialPassword |
+| `source: null` AND `defaultValue: null` AND `required: false` | Skip this parameter. Do not ask user. | dataDisks, subnetId, securityGroupIds |
+
+#### Example: Linux VM params processing
+
+Given this params array:
 ```
-IF description is empty OR description is not valid JSON
-    AND cloudEntryTypeIds not empty
-THEN
-    Must execute list_resource_pools.py for user selection
-    needUserSelectResourcePool = true
+name           -> source=null, default=null, required=true   → ASK user: "请输入资源名称"
+businessGroupId -> source=list:business_groups, default=null → CALL list_business_groups, show list, ask user to select
+resourceBundleName -> source=list:resource_pools, default=null → CALL list_resource_pools, show list, ask user to select
+computeProfileName -> source=null, default="微型计算"       → USE default silently
+logicTemplateName -> source=list:os_templates, default=null  → CALL list_os_templates, show list, ask user to select
+templateId     -> source=list:list_images, default=null      → CALL list_images, show list, ask user to select
+credentialUser -> source=null, default=null, required=true   → ASK user: "请输入用户名"
+credentialPassword -> source=null, default=null, required=true → ASK user: "请输入密码"
+networkId      -> source=null, default="network-79"          → USE default silently
+cpu            -> source=null, default=1                     → USE default silently
+memory         -> source=null, default=1                     → USE default silently
+systemDisk.size -> source=null, default=50, required=false   → USE default silently
+dataDisks      -> required=false, default=null               → SKIP
+subnetId       -> required=false, default=null               → SKIP
+securityGroupIds -> required=false, default=null             → SKIP
 ```
 
-#### Scenario 2: description is valid JSON
-
-Parse `parameters` array, look for resource pool related config:
-
-```json
-{
-  "parameters": [
-    {"key": "businessGroupId", "source": "list:business_groups", "defaultValue": null, "required": true},
-    {"key": "resourceBundleName", "source": "list:resource_pools", "defaultValue": "Default Pool", "required": true},
-    {"key": "cpu", "source": null, "defaultValue": 2, "required": true}
-  ]
-}
-```
-
-**Resource Pool Config Check Rules:**
-
-| Check | Condition | Result |
-|-------|-----------|--------|
-| Has default pool (Path C) | `key` is `resourceBundleName`/`resourceBundleId` AND `defaultValue` has value | `needUserSelectResourcePool = false` |
-| Need pool selection (Path D) | `key` is `resourceBundleName`/`resourceBundleId` AND `source: "list:resource_pools"` AND `defaultValue` is null | `needUserSelectResourcePool = true` |
-| No pool param configured | No pool related field in `parameters`, but `cloudEntryTypeIds` not empty | `needUserSelectResourcePool = true` (fallback to Path B) |
-
-**Other Parameter Handling Rules:**
-
-| Condition | Action |
-|-----------|--------|
-| `defaultValue` has value | Use default, don't ask user |
-| `source: "list:business_groups"` | Execute `list_business_groups.py` -> Ask user to select |
-| `source: "list:resource_pools"` with no default | Execute `list_resource_pools.py` -> Ask user to select |
-| `source: "list:os_templates"` | Execute `list_os_templates.py` -> Ask user to select |
-| `source: null` AND `required: true` | Ask user for input |
-| `source: null` AND `required: false` | Skip (optional parameter) |
+**CRITICAL RULES:**
+- **ONLY call tools that appear in the params `source` field.** Do NOT call tools not listed.
+- **Process parameters one at a time.** After each tool call or user input request, STOP and wait.
+- **You CAN batch multiple user-input questions** into one prompt (e.g., ask name + username + password together).
+- If a param has `source: "list:applications"`, call `smartcmp_list_applications` after `businessGroupId` is known, show the numbered list, and STOP for user selection.
+- For `smartcmp_list_components`, always pass `source_key=<selected service card sourceKey>`. Never pass `catalog_id`.
+- For `smartcmp_list_images`, always pass the saved `cloudEntryTypeId` from the user's selected resource pool. Do not invent, omit, or hardcode the platform identifier.
 
 ---
 
-### R4: Collect Parameters Step by Step
+### R3: Build Request Body [Build]
 
-Based on R2/R3 analysis results, collect parameters step by step:
-
-**R4a: Business Group** (always required)
-```bash
-python ../shared/scripts/list_business_groups.py <catalogId>
-```
-Display list, ask user to select. **STOP**
-
-**R4b: Resource Pool** (conditional)
-
-```
-IF needUserSelectResourcePool === true (Path B or Path D)
-THEN execute:
-```
-
-```bash
-python ../shared/scripts/list_resource_pools.py <businessGroupId> <sourceKey> <typeName>
-```
-
-Display list, ask user to select. **STOP**
-
-```
-ELSE IF useResourceBundle === false (Path A)
-THEN skip this step
-
-ELSE IF has default pool (Path C)
-THEN use default value, skip this step
-```
-
-**R4c: OS Template** (if needed)
-```bash
-python ../shared/scripts/list_os_templates.py <osType> <resourceBundleId>
-```
-Display list, ask user to select. **STOP**
-
-**R4d: Other Required Fields**
-Ask user to input remaining required fields (e.g., resource name). **STOP**
-
----
-
-### R5: Build Request Body [Build]
-
-**Core Rules (Very Important):**
+**Core Rules:**
 
 1. `type` = complete `typeName` (from R1)
 2. `node` = last segment after the last dot in `typeName` (from R1's `node` field)
-3. Resource pool handling:
-   - **Path A** (cloudEntryTypeIds empty): Add `"useResourceBundle": false`, no resourceBundleName
-   - **Path B/C/D** (cloudEntryTypeIds not empty): Must add `resourceBundleName`
+3. If `cloudEntryTypeIds` is empty: add `"useResourceBundle": false`, do NOT include `resourceBundleName`
+4. If `cloudEntryTypeIds` is not empty: include `resourceBundleName` at top level
 
-**Request Body Example - Path A (No Resource Pool):**
+**Request Body Template:**
 
 ```json
 {
-    "catalogName": "Server Room",
-    "userLoginId": "admin",
-    "businessGroupName": "My Business Group",
-    "name": "server-room-222",
+    "catalogName": "<service name from CATALOG_META>",
+    "userLoginId": "<current user login ID>",
+    "businessGroupName": "<selected business group name>",
+    "resourceBundleName": "<selected resource pool name, omit if useResourceBundle=false>",
+    "name": "<user-provided resource name>",
     "resourceSpecs": [
         {
-            "useResourceBundle": false,
-            "node": "server_room",
-            "type": "resource.infra.server_room",
+            "node": "<node from R1>",
+            "type": "<typeName from R1>",
+            "useResourceBundle": false,  // only if cloudEntryTypeIds is empty
             "params": {
-                "infra_brand": "111"
+                // all other collected params (cpu, memory, networkId, etc.)
             }
         }
     ]
 }
 ```
 
-**Request Body Example - Path B/C/D (Resource Pool Required):**
-
-```json
-{
-    "catalogName": "VPC Service",
-    "userLoginId": "admin",
-    "businessGroupName": "My Business Group",
-    "resourceBundleName": "ResourcePool for Test",
-    "name": "vpc-001",
-    "resourceSpecs": [
-        {
-            "node": "testvpc",
-            "type": "resource.iaas.network.network.testvpc",
-            "params": {}
-        }
-    ]
-}
-```
-
-**Field Mapping:**
-
-| Request Field | Data Source | Applicable Path |
-|---------------|-------------|-----------------|
-| `catalogName` | `name` from CATALOG_META | All |
-| `userLoginId` | Current user login ID | All |
-| `businessGroupName` | Business group name from R4a | All |
-| `resourceBundleName` | User selection or default from R4b | B/C/D |
-| `name` | Resource name from R4d user input | All |
-| `resourceSpecs[0].type` | `typeName` from R1 | All |
-| `resourceSpecs[0].node` | `node` from R1 | All |
-| `resourceSpecs[0].useResourceBundle` | Only set to `false` for Path A | A |
-| `resourceSpecs[0].params` | Other params collected in R4d | All |
-
-**Action:** Display confirmation to user, ask: "Please confirm if the above information is correct? (yes/no)"
+**Action:** Display confirmation to user in Chinese. Ask: "请确认以上信息是否正确？（是/否）"
 
 **STOP - Wait for user confirmation**
 
 ---
 
-### R6: Submit [Execute]
+### R4: Submit [Execute]
 
 ```bash
 python scripts/submit.py --file request.json
@@ -468,28 +564,13 @@ python scripts/submit.py --file request.json
 
 ---
 
-## No Description Handling (Path B Details)
-
-When `description` field is empty or invalid JSON, but `cloudEntryTypeIds` is not empty:
-
-1. **Do not stop the flow**, continue execution
-2. **Must query resource pool** for user selection:
-   ```bash
-   python ../shared/scripts/list_resource_pools.py <businessGroupId> <sourceKey> <typeName>
-   ```
-3. Collect basic required fields: business group, resource pool, resource name
-4. Build request body and submit
-
-> **Note:** Only prompt user to contact administrator for service card configuration when `cloudEntryTypeIds` is also empty.
-
----
-
 ## Scripts Reference
 
 | Script | Purpose | Parameters |
 |--------|---------|------------|
 | `../shared/scripts/list_services.py` | List service catalogs | `[keyword]` |
 | `../shared/scripts/list_business_groups.py` | List business groups | `<catalogId>` |
+| `../shared/scripts/list_applications.py` | List applications/projects | `<bgId> [keyword]` |
 | `../shared/scripts/list_resource_pools.py` | List resource pools | `<bgId> <sourceKey> <nodeType>` |
 | `../shared/scripts/list_os_templates.py` | List OS templates | `<osType> <resourceBundleId>` |
 | `../shared/scripts/list_components.py` | Get component type info | `<sourceKey>` |
@@ -499,17 +580,22 @@ When `description` field is empty or invalid JSON, but `cloudEntryTypeIds` is no
 
 ## Critical Rules
 
-1. **Execute only one action per turn.** After displaying output or asking question, MUST STOP and wait for user response.
-2. **Never fabricate data.** Only use values from script output or user input.
-3. **Never skip steps.** Strictly follow the workflow.
-4. **Never auto-submit.** Must get user confirmation before submission.
-5. **Set node and type correctly.** `type` = complete typeName, `node` = last segment of typeName.
-6. **Resource pool decision rules (Very Important):**
-   - `cloudEntryTypeIds` empty -> `useResourceBundle: false`, no pool needed
-   - `cloudEntryTypeIds` not empty + `description` empty -> **Must** query pool for user selection
-   - `cloudEntryTypeIds` not empty + has default pool config -> Use default, no user selection
-   - `cloudEntryTypeIds` not empty + no default pool -> Query pool for user selection
-7. **resourceBundleName required:** When `cloudEntryTypeIds` is not empty, request body top level **must** include `resourceBundleName` field.
+1. **Display rules (MOST IMPORTANT):**
+   - When showing tool output to user, ONLY display the numbered list and the selection prompt (e.g. "请选择...").
+   - NEVER display `_internal` field content, META data, Index, Id, Source Key, Service Category, Params, cloudEntryTypeId, or any JSON/technical data to the user.
+   - The `_internal` field in tool results contains metadata for your reference only. Parse it silently to extract IDs for subsequent tool calls.
+   - After each list, ALWAYS ask user to select with a clear Chinese prompt like "请选择您要申请的服务（输入编号）".
+   - STOP and wait for user response after showing each list. Do NOT proceed automatically.
+2. **Params-driven workflow:** The `params` array from the selected service's `_internal` metadata is the ONLY source of truth for what tools to call and what to ask the user. Do NOT call tools not declared in params.
+3. **Execute only one action per turn.** After displaying output or asking question, MUST STOP and wait for user response.
+4. **Never fabricate data.** Only use values from script output or user input.
+5. **Ask for required manual input.** If a param has `source: null`, `defaultValue: null`, and `required: true`, you MUST ask the user for that value and STOP.
+6. **Never skip required list selections.** If a param has `source: "list:xxx"` and `defaultValue: null`, you MUST call the mapped tool and STOP for user selection.
+7. **Never auto-submit.** Must get user confirmation before submission.
+8. **Set node and type correctly.** `type` = complete typeName, `node` = last segment of typeName.
+9. **resourceBundleName required:** When `cloudEntryTypeIds` is not empty (from list_components), request body top level **must** include `resourceBundleName` field.
+10. **Preserve selected card metadata.** Once the user selects a service card, keep using that card's saved `sourceKey`, `id`, `serviceCategory`, and `params` throughout the whole request flow.
+11. **Component lookup is silent.** For cloud-resource requests, `smartcmp_list_components(source_key=<selected sourceKey>)` is a hidden backend step and should not be narrated or shown to the user.
 
 ---
 

@@ -27,6 +27,7 @@ Examples:
 import os
 import sys
 import json
+import base64
 import requests
 
 # Import shared utilities (handles URL normalization, SSL warnings)
@@ -80,17 +81,14 @@ if not templates:
 
 for i, t in enumerate(templates, 1):
     name    = t.get("nameZh") or t.get("name") or t.get("templateName", "Unknown")
-    eng     = t.get("name", "")
-    tid     = t.get("id", "N/A")
     os_ver  = t.get("osVersion") or t.get("version", "")
     display = f"  [{i}] {name}"
-    if eng and eng != name:
-        display += f"  ({eng})"
     if os_ver:
         display += f"  v{os_ver}"
-    display += f"  [ID: {tid}]"
     print(display)
 
+print()
+print("请选择OS模板（输入编号）：")
 print()
 
 # -- META block (agent reads silently, do NOT display to user) -----------------
@@ -102,6 +100,7 @@ meta = [
     }
     for i, t in enumerate(templates)
 ]
-print("##OS_TEMPLATE_META_START##")
-print(json.dumps(meta, ensure_ascii=False))
-print("##OS_TEMPLATE_META_END##")
+_meta_json = json.dumps(meta, ensure_ascii=False, separators=(',', ':'))
+print("##OS_TEMPLATE_META_START##", file=sys.stderr)
+print(_meta_json, file=sys.stderr)
+print("##OS_TEMPLATE_META_END##", file=sys.stderr)

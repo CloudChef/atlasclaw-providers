@@ -325,9 +325,7 @@ def main(argv: list[str]) -> int:
     """Execute the pending approvals query and render output."""
     days = parse_days_from_argv(argv)
     now_ms = int(time.time() * 1000)
-    base_url, auth_token, _headers, _instance = require_config()
-
-    headers = {"Content-Type": "application/json; charset=utf-8", "CloudChef-Authenticate": auth_token}
+    base_url, auth_token, headers, _instance = require_config()
     url = f"{base_url}/generic-request/current-activity-approval"
     params = build_pending_query_params(now_ms=now_ms, days=days)
 

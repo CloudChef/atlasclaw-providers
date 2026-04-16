@@ -30,6 +30,7 @@ API Reference:
 import os
 import sys
 import json
+import base64
 import requests
 
 # Import shared utilities (handles URL normalization, SSL warnings)
@@ -83,6 +84,9 @@ try:
     resp = requests.get(url, headers=headers, params=params, verify=False, timeout=30)
     resp.raise_for_status()
     data = resp.json()
+except json.JSONDecodeError:
+    print(f"[ERROR] API returned invalid JSON. Status={resp.status_code}, Body={resp.text[:200]}")
+    sys.exit(1)
 except requests.exceptions.RequestException as e:
     print(f"[ERROR] Request failed: {e}")
     sys.exit(1)
@@ -108,6 +112,8 @@ for i, rb in enumerate(items):
     name = rb.get("name", "N/A")
     print(f"  [{i+1}] {name}")
 print()
+print("请选择资源池（输入编号）：")
+print()
 
 # ── META block (agent reads silently, do NOT display to user) ─────────────────
 meta = [
@@ -119,22 +125,8 @@ meta = [
     }
     for i, rb in enumerate(items)
 ]
-print("##RESOURCE_POOL_META_START##")
-print(json.dumps(meta, ensure_ascii=False))
-print("##RESOURCE_POOL_META_END##")
+_meta_json = json.dumps(meta, ensure_ascii=False, separators=(',', ':'))
+print("##RESOURCE_POOL_META_START##", file=sys.stderr)
+print(_meta_json, file=sys.stderr)
+print("##RESOURCE_POOL_META_END##", file=sys.stderr)
 
-# ── RAW block (simplified - only essential fields to reduce output size) ─────
-raw_simplified = [
-    {
-        "id":               rb.get("id", ""),
-        "name":             rb.get("name", ""),
-        "cloudEntryTypeId": rb.get("cloudEntryTypeId", ""),
-        "cloudEntryType":   rb.get("cloudEntryType", ""),
-        "enabled":          rb.get("enabled", True),
-        "readOnly":         rb.get("readOnly", False),
-    }
-    for rb in items
-]
-print("##RESOURCE_POOL_RAW_START##")
-print(json.dumps(raw_simplified, ensure_ascii=False))
-print("##RESOURCE_POOL_RAW_END##")

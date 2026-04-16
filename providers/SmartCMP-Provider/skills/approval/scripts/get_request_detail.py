@@ -207,10 +207,7 @@ def _query_pending_items(days: int) -> list[dict[str, Any]]:
     start_at_min = start_of_today - (days * 86400000)
     start_at_max = now_ms
     url = f"{BASE_URL}/generic-request/current-activity-approval"
-    headers = {
-        "Content-Type": "application/json; charset=utf-8",
-        "CloudChef-Authenticate": AUTH_TOKEN,
-    }
+    headers = HEADERS
     all_items: list[dict[str, Any]] = []
     for page in range(1, 6):
         params = {

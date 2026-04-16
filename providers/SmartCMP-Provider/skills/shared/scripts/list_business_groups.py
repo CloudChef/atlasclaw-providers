@@ -24,6 +24,7 @@ Examples:
 import os
 import sys
 import json
+import base64
 import requests
 
 # Import shared utilities (handles URL normalization, SSL warnings)
@@ -40,15 +41,13 @@ CATALOG_ID = os.environ.get("CATALOG_ID", "")
 if not CATALOG_ID and len(sys.argv) >= 2:
     CATALOG_ID = sys.argv[1]
 
-if not CATALOG_ID:
-    print("[ERROR] CATALOG_ID is required.")
-    print()
-    print("Usage: python list_business_groups.py <CATALOG_ID>")
-    print("   Or: Set CATALOG_ID environment variable")
-    print()
-    print("Get CATALOG_ID from: python list_services.py -> ##CATALOG_META##")
-    sys.exit(1)
-url = f"{BASE_URL}/catalogs/{CATALOG_ID}/available-bgs"
+if CATALOG_ID:
+    url = f"{BASE_URL}/catalogs/{CATALOG_ID}/available-bgs"
+else:
+    # Fallback: list all business groups when catalog_id is not provided
+    url = f"{BASE_URL}/business-groups"
+    import sys as _sys
+    print("[WARN] No CATALOG_ID provided, listing all business groups.", file=_sys.stderr)
 
 resp = requests.get(url, headers=HEADERS, verify=False, timeout=30)
 if resp.status_code != 200:
@@ -62,8 +61,9 @@ items = result if isinstance(result, list) else result.get("content", [])
 print(f"Found {len(items)} business group(s):\n")
 for i, bg in enumerate(items):
     name = bg.get("name", "N/A")
-    bid = bg.get("id", "N/A")
-    print(f"  [{i+1}] {name} (id: {bid})")
+    print(f"  [{i+1}] {name}")
+print()
+print("请选择业务组（输入编号）：")
 print()
 
 # -- META block (agent reads silently, do NOT display to user) -----------------
@@ -75,6 +75,7 @@ meta = [
     }
     for i, bg in enumerate(items)
 ]
-print("##BG_META_START##")
-print(json.dumps(meta, ensure_ascii=False))
-print("##BG_META_END##")
+_meta_json = json.dumps(meta, ensure_ascii=False, separators=(',', ':'))
+print("##BG_META_START##", file=sys.stderr)
+print(_meta_json, file=sys.stderr)
+print("##BG_META_END##", file=sys.stderr)

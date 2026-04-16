@@ -39,6 +39,24 @@ except ImportError:
 
 BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()
 
+
+def _normalize_param(raw_param: dict) -> dict:
+    """Preserve the instruction fields that drive the request workflow."""
+    normalized = {
+        "key": raw_param.get("key", ""),
+        "label": raw_param.get("label") or raw_param.get("key", ""),
+        "required": bool(raw_param.get("required", False)),
+        "source": raw_param.get("source"),
+        "defaultValue": raw_param.get("defaultValue"),
+    }
+
+    if raw_param.get("description") is not None:
+        normalized["description"] = raw_param.get("description")
+    if raw_param.get("type") is not None:
+        normalized["type"] = raw_param.get("type")
+
+    return normalized
+
 keyword = sys.argv[1] if len(sys.argv) > 1 else ""
 url = f"{BASE_URL}/catalogs/published"
 params = {"query": "", "states": "PUBLISHED", "page": 1, "size": 50, "sort": "catalogIndex,asc"}
@@ -61,26 +79,36 @@ for i, c in enumerate(items):
     name = c.get("nameZh") or c.get("name", "N/A")
     print(f"  [{i+1}] {name}")
 print()
+print("请选择您要申请的服务（输入编号）：")
+print()
 
 # ── Machine-readable metadata (agent reads silently, do NOT display to user)
-# Contains: id, name, sourceKey, serviceCategory, description
-# IMPORTANT: 
-#   - Check 'serviceCategory' first: "GENERIC_SERVICE" = Ticket, others = Cloud Resource
-#   - 'description' contains parameter definition JSON from 'instructions' field
-#   - Parse it to determine which parameters need user input vs use defaults
-#   - Check 'source' field to know which list_xxx tools to call
-#   - Check 'defaultValue' to skip asking user for pre-filled values
-meta = [
-    {
+# IMPORTANT: Do NOT show this block to user. Parse it silently.
+#   - serviceCategory: "GENERIC_SERVICE" = Ticket, others = Cloud Resource
+#   - params: normalized instruction parameters for the workflow
+meta = []
+for i, c in enumerate(items):
+    entry = {
         "index": i + 1,
         "id":    c.get("id", ""),
         "name":  c.get("nameZh") or c.get("name", ""),
         "sourceKey":   c.get("sourceKey", ""),
         "serviceCategory": c.get("serviceCategory", ""),
-        "description": (c.get("instructions") or "").strip(),
     }
-    for i, c in enumerate(items)
-]
-print("##CATALOG_META_START##")
-print(json.dumps(meta, ensure_ascii=False))
-print("##CATALOG_META_END##")
+    # Extract normalized instruction parameters from instructions
+    raw_instructions = (c.get("instructions") or "").strip()
+    if raw_instructions:
+        try:
+            instr = json.loads(raw_instructions)
+            params_list = instr.get("parameters", [])
+            if isinstance(params_list, list):
+                normalized_params = [_normalize_param(p) for p in params_list if isinstance(p, dict)]
+                entry["instructions"] = {"parameters": normalized_params}
+                entry["params"] = normalized_params
+        except (json.JSONDecodeError, TypeError):
+            pass
+    meta.append(entry)
+_meta_json = json.dumps(meta, ensure_ascii=False, separators=(',', ':'))
+print(f"##CATALOG_META_START##", file=sys.stderr)
+print(_meta_json, file=sys.stderr)
+print(f"##CATALOG_META_END##", file=sys.stderr)
