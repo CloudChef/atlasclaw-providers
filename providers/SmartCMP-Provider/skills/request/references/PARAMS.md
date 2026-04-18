@@ -1,5 +1,16 @@
 # Parameter Placement Reference
 
+## Authoritative rule
+
+For cloud requests:
+
+- `resourceSpecs[0].node` must come from selected catalog `instructions.node`
+- `resourceSpecs[0].type` must come from selected catalog `instructions.type`
+- lookup `nodeType` for resource pools must use selected catalog `instructions.type`
+- do not use `list_components.py` to populate these values
+
+---
+
 ## Field locations in request body
 
 | Field | Location |
@@ -18,8 +29,8 @@
 | `imageId` / `imageName` | inside resourceSpecs |
 
 **VM `type` field:**
-- Linux → `cloudchef.nodes.Compute`
-- Windows → `cloudchef.nodes.WindowsCompute`
+- Prefer the selected catalog `instructions.type`
+- Typical examples are `cloudchef.nodes.Compute` and `cloudchef.nodes.WindowsCompute`
 
 **Memory unit:** always GB (e.g. "2c4g" → `cpu: 2, memory: 4`)
 

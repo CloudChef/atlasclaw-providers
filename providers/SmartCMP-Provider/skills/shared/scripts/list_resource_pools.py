@@ -7,7 +7,8 @@ Usage:
 Arguments:
   BUSINESS_GROUP_ID    Business group ID from list_business_groups.py
   SOURCE_KEY           Service type key from list_services.py (##CATALOG_META##)
-  NODE_TYPE            Component typeName from list_components.py (##COMPONENT_META##)
+  NODE_TYPE            Component type from the selected catalog instructions
+                       (usually instructions.type, e.g. cloudchef.nodes.Compute)
 
 Output:
   - Numbered list of resource pool names (user-visible)
@@ -60,7 +61,7 @@ if not bg_id or not component_type or not node_type:
     print()
     print("  BUSINESS_GROUP_ID - from list_business_groups.py")
     print("  SOURCE_KEY        - from list_services.py (##CATALOG_META##)")
-    print("  NODE_TYPE         - from list_components.py (##COMPONENT_META##)")
+    print("  NODE_TYPE         - from selected catalog instructions.type")
     print()
     print("Usage: python list_resource_pools.py <BG_ID> <SOURCE_KEY> <NODE_TYPE>")
     print("   Or: Set BUSINESS_GROUP_ID, SOURCE_KEY, NODE_TYPE environment variables")

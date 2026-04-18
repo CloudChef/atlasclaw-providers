@@ -82,7 +82,7 @@ tool_list_business_groups_parameters: |
     "required": ["catalog_id"]
   }
 tool_list_resource_pools_name: "smartcmp_list_resource_pools"
-tool_list_resource_pools_description: "List resource pools for VM provisioning. Requires business_group_id (from list_business_groups), source_key (from list_services CATALOG_META), and node_type (from list_components COMPONENT_META)."
+tool_list_resource_pools_description: "List resource pools for VM provisioning. Requires business_group_id from list_business_groups, source_key from the selected catalog metadata, and node_type from the selected catalog instructions.type field."
 tool_list_resource_pools_entrypoint: "../shared/scripts/list_resource_pools.py"
 tool_list_resource_pools_groups:
   - cmp
@@ -108,13 +108,13 @@ tool_list_resource_pools_parameters: |
       },
       "node_type": {
         "type": "string",
-        "description": "Component typeName from list_components COMPONENT_META (e.g. cloudchef.nodes.Compute)"
+        "description": "Selected catalog instructions.type value (for example cloudchef.nodes.Compute)"
       }
     },
     "required": ["business_group_id", "source_key", "node_type"]
   }
 tool_list_os_templates_name: "smartcmp_list_os_templates"
-tool_list_os_templates_description: "List OS templates. IMPORTANT: os_type MUST be 'Linux' or 'Windows' (from list_components osType), resource_bundle_id from list_resource_pools RESOURCE_POOL_META."
+tool_list_os_templates_description: "List OS templates. IMPORTANT: os_type MUST be 'Linux' or 'Windows' from selected catalog instructions.osType, or derived from the selected catalog instructions.type when osType is absent. resource_bundle_id comes from list_resource_pools metadata."
 tool_list_os_templates_entrypoint: "../shared/scripts/list_os_templates.py"
 tool_list_os_templates_groups:
   - cmp
@@ -131,7 +131,7 @@ tool_list_os_templates_parameters: |
     "properties": {
       "os_type": {
         "type": "string",
-        "description": "OS type: must be exactly 'Linux' or 'Windows' (capitalized, from list_components osType field)"
+        "description": "OS type: must be exactly 'Linux' or 'Windows' (from selected catalog instructions.osType, or derived from instructions.type)"
       },
       "resource_bundle_id": {
         "type": "string",
@@ -139,28 +139,6 @@ tool_list_os_templates_parameters: |
       }
     },
     "required": ["os_type", "resource_bundle_id"]
-  }
-tool_list_components_name: "smartcmp_list_components"
-tool_list_components_description: "Silent backend lookup for request workflow. Get component type info including typeName, osType, and cloudEntryTypeIds for a service. IMPORTANT: you MUST pass source_key from the selected service card's sourceKey field (from list_services _internal/CATALOG_META). NEVER pass catalog_id or service id. Never narrate this lookup or display its output or metadata to the user."
-tool_list_components_entrypoint: "../shared/scripts/list_components.py"
-tool_list_components_groups:
-  - cmp
-  - request
-tool_list_components_capability_class: "provider:smartcmp"
-tool_list_components_priority: 120
-tool_list_components_result_mode: "tool_only_ok"
-tool_list_components_cli_positional:
-  - source_key
-tool_list_components_parameters: |
-  {
-    "type": "object",
-    "properties": {
-      "source_key": {
-        "type": "string",
-        "description": "Service source key from list_services CATALOG_META (e.g. resource.iaas.machine.instance.abstract)"
-      }
-    },
-    "required": ["source_key"]
   }
 tool_list_applications_name: "smartcmp_list_applications"
 tool_list_applications_description: "List applications/projects for a business group. Returns application IDs for request submission."
@@ -222,7 +200,7 @@ tool_list_images_parameters: |
     "required": ["resource_bundle_id", "logic_template_id", "cloud_entry_type_id"]
   }
 tool_submit_name: "smartcmp_submit_request"
-tool_submit_description: "Submit resource request to SmartCMP. Pass the complete request JSON body as the 'json_body' parameter."
+tool_submit_description: "Submit resource request to SmartCMP. Pass the complete request JSON body as the 'json_body' parameter. Reuse the selected catalog metadata, including catalogId and catalogName when they are available."
 tool_submit_entrypoint: "scripts/submit.py"
 tool_submit_groups:
   - cmp
@@ -235,12 +213,12 @@ tool_submit_parameters: |
   {
     "type": "object",
     "properties": {
-      "json": {
+      "json_body": {
         "type": "string",
-        "description": "Complete request body as a JSON string. Must include catalogName, userLoginId, businessGroupName, name, and resourceSpecs (for cloud) or genericRequest (for ticket)."
+        "description": "Complete request body as a JSON string. Reuse the selected catalog metadata from list_services. Include catalogId and catalogName when available, plus userLoginId, businessGroupName or businessGroupId, name, and resourceSpecs (for cloud) or genericRequest (for ticket)."
       }
     },
-    "required": ["json"]
+    "required": ["json_body"]
   }
 ---
 
@@ -248,9 +226,79 @@ tool_submit_parameters: |
 
 Submit cloud resource, application environment, or ticket/work order requests through the service catalog.
 
+## Authoritative Workflow
+
+This section overrides any legacy mention of `list_components.py` later in this file.
+
+### Cloud request metadata source
+
+For cloud requests, use the selected catalog card metadata from `list_services` as the source of truth:
+
+- `instructions.node` -> request `node`
+- `instructions.type` -> request `type` and resource-pool lookup `node_type`
+- `instructions.osType` -> OS template lookup `os_type`
+- if `instructions.osType` is absent, derive `Windows` when `type` or `node` contains `windows`; otherwise derive `Linux`
+- selected catalog `id` -> request `catalogId`
+- selected catalog `name` -> request `catalogName`
+
+Before every follow-up decision, reread the saved selected catalog metadata from the earlier
+`list_services` `_internal` payload. If earlier assistant prose conflicts with the selected
+catalog `instructions` or `params`, the catalog metadata wins.
+
+Do not call `list_components.py`.
+
+### Parameter processing rules
+
+Process `params` in order and apply only these rules:
+
+- `source` exists and `defaultValue` is empty -> call the mapped lookup tool and wait for user selection
+- `source` exists and `defaultValue` is non-empty -> use the default silently
+- `source` is empty and `defaultValue` is non-empty -> use the default silently
+- `source` is empty, `defaultValue` is empty, `required=true` -> ask the user
+- `source` is empty, `defaultValue` is empty, `required=false` -> skip it
+
+Enforcement:
+
+- Only the current parameter's explicit `source` may trigger a lookup tool.
+- If a parameter does not declare `source: "list:applications"`, do NOT call
+  `smartcmp_list_applications`.
+- If `resourceBundleName`, `logicTemplateName`, `templateId`, or any other parameter has a
+  non-empty `defaultValue`, use that value silently and do NOT call another list tool for it.
+
+Mapped lookups:
+
+- `list:business_groups` -> `smartcmp_list_business_groups(catalog_id=<selected catalog id>)`
+- `list:applications` -> `smartcmp_list_applications(business_group_id=<selected business group id>)`
+- `list:resource_pools` -> `smartcmp_list_resource_pools(business_group_id=<selected business group id>, source_key=<selected sourceKey>, node_type=<instructions.type>)`
+- `list:os_templates` -> `smartcmp_list_os_templates(os_type=<instructions.osType or derived value>, resource_bundle_id=<selected resource pool id>)`
+- `list:list_images` / `list:images` -> `smartcmp_list_images(resource_bundle_id=<selected resource pool id>, logic_template_id=<selected os template id>, cloud_entry_type_id=<selected resource pool cloudEntryTypeId>)`
+
+### Submit contract
+
+The submit tool now accepts `json_body`.
+
+When building a cloud request:
+
+- put `catalogId`, `catalogName`, `userLoginId`, `businessGroupName` or `businessGroupId`, `resourceBundleName`, and `name` at the top level
+- put `node`, `type`, and all collected cloud parameters inside `resourceSpecs[0]`
+- never auto-submit before showing a final summary and asking `请确认以上信息是否正确？（是/否）`
+
+Before any submit call, always show the constructed request body to the user.
+
+Display order:
+
+1. a short Chinese summary
+2. a heading `JSON 预览`
+3. a fenced `json` code block containing the constructed request body
+4. the confirmation question `请确认以上信息是否正确？（是/否）`
+
+The preview must reflect the real structure and resolved values that will be submitted, including applied defaults, selected list values, nested `resourceSpecs` placement, and top-level request fields.
+
+For sensitive fields such as `credentialPassword`, mask the preview value as `"******"` by default, but keep the real value in the actual `json_body` sent to `smartcmp_submit_request`.
+
 ---
 
-## Workflow Overview
+## Legacy Workflow Notes (Deprecated)
 
 ```
 [Trigger] User expresses intent to "request resources"
@@ -417,7 +465,7 @@ This flow is **strictly driven by the `params` array** from the selected service
 ### Overview
 
 ```
-[R1] Get component info (list_components.py) -> get typeName, node, cloudEntryTypeIds
+[R1] Read embedded component metadata from selected catalog instructions
     |
     v
 [R2] Process params array in order:
@@ -438,25 +486,19 @@ This flow is **strictly driven by the `params` array** from the selected service
 
 ### R1: Get Component Info [Silent Execute]
 
-```bash
-python ../shared/scripts/list_components.py <sourceKey>
-```
+There is no backend component-lookup tool in the new workflow.
 
-**IMPORTANT:** `smartcmp_list_components` / `list_components.py` only accepts `source_key`.
-That `source_key` is the selected service card's `sourceKey` field from `list_services`
-metadata. NEVER pass `catalog_id`, service `id`, or the user's numeric selection.
+Read the selected catalog instructions silently and extract:
 
-This is a hidden backend step for cloud-resource requests:
-- Call `smartcmp_list_components(source_key=<selected_source_key>)` immediately after the
-  user selects the service card.
-- Do NOT announce this lookup to the user.
-- Do NOT tell the user you are checking component info, node types, or backend metadata.
-- Do NOT display component details to the user unless the user explicitly asks.
+- `instructions.type` → request `type` and resource-pool lookup `node_type`
+- `instructions.node` → request `node`
+- `instructions.osType` → OS template lookup `os_type`
+- `instructions.cloudEntryTypeIds` → if explicitly empty and the catalog does not use resource pools, set `useResourceBundle: false`
 
-Parse the `_internal` field silently. NEVER display to user. Extract:
-- `typeName` → for `type` field in request body
-- `node` → for `node` field in request body
-- `cloudEntryTypeIds` → if empty, set `useResourceBundle: false` in request body
+If `instructions.osType` is absent, derive it from `instructions.type` or `instructions.node`:
+
+- contains `windows` → `Windows`
+- otherwise → `Linux`
 
 Proceed to R2 directly without user interaction.
 
@@ -472,15 +514,15 @@ Read the `params` array from the selected service's `_internal` metadata. Proces
 |---------------|-------------|------------------|
 | `list:business_groups` | `smartcmp_list_business_groups` | catalog_id (from selected service id) |
 | `list:applications` | `smartcmp_list_applications` | business_group_id (from selected business group), keyword (optional) |
-| `list:resource_pools` | `smartcmp_list_resource_pools` | business_group_id, source_key, node_type (from R1 typeName) |
-| `list:os_templates` | `smartcmp_list_os_templates` | os_type (from R1 `osType`; fallback: infer from `typeName`), resource_bundle_id (from selected pool) |
+| `list:resource_pools` | `smartcmp_list_resource_pools` | business_group_id, source_key, node_type (from selected catalog instructions.type) |
+| `list:os_templates` | `smartcmp_list_os_templates` | os_type (from selected catalog instructions.osType; fallback: infer from selected catalog instructions.type), resource_bundle_id (from selected pool) |
 | `list:list_images` or `list:images` | `smartcmp_list_images` | resource_bundle_id (from selected pool), logic_template_id (from selected OS template), cloud_entry_type_id (from the same selected pool's `cloudEntryTypeId`; use the actual selected value, never hardcode a platform) |
 
 #### Parameter Decision Rules
 
 | Condition | Action | Example |
 |-----------|--------|--------|
-| `source: "list:xxx"` AND `defaultValue: null` | Call the mapped tool, show list to user, ask to select. **STOP and wait.** | businessGroupId, resourceBundleName, logicTemplateName |
+| `source: "list:xxx"` AND `defaultValue: null` | Call the mapped tool, show list to user, ask to select. **STOP and wait.** | businessGroupId, projectId |
 | `source: "list:xxx"` AND `defaultValue` has value | Use default value silently. Do NOT call tool. | - |
 | `source: null` AND `defaultValue` has value | Use default value silently. Do NOT ask user. | computeProfileName="微型计算", cpu=1, memory=1 |
 | `source: null` AND `defaultValue: null` AND `required: true` | **Ask user to input this value.** Show prompt: "请输入{label}". **STOP and wait.** | name, credentialUser, credentialPassword |
@@ -489,6 +531,12 @@ Read the `params` array from the selected service's `_internal` metadata. Proces
 #### Example: Linux VM params processing
 
 Given this params array:
+
+> IMPORTANT: this example is illustrative only. On every real run, the currently selected
+> catalog card wins. If the selected catalog already gives `resourceBundleName`,
+> `logicTemplateName`, `templateId`, or similar fields a non-empty `defaultValue`, use that
+> default silently and do not call the related lookup tool.
+
 ```
 name           -> source=null, default=null, required=true   → ASK user: "请输入资源名称"
 businessGroupId -> source=list:business_groups, default=null → CALL list_business_groups, show list, ask user to select
@@ -507,12 +555,23 @@ subnetId       -> required=false, default=null               → SKIP
 securityGroupIds -> required=false, default=null             → SKIP
 ```
 
+For the current built-in Linux VM card, it is valid for:
+
+- `resourceBundleName` to come from a silent default such as `vsphere资源池`
+- `logicTemplateName` to come from a silent default such as `Centos`
+- `templateId` to come from a silent default such as `vm-121`
+
+When the actual selected card has those defaults, do not ask the user and do not call
+`smartcmp_list_resource_pools`, `smartcmp_list_os_templates`, `smartcmp_list_images`, or
+`smartcmp_list_applications` unless the current parameter explicitly declares the matching
+`source` value.
+
 **CRITICAL RULES:**
 - **ONLY call tools that appear in the params `source` field.** Do NOT call tools not listed.
 - **Process parameters one at a time.** After each tool call or user input request, STOP and wait.
 - **You CAN batch multiple user-input questions** into one prompt (e.g., ask name + username + password together).
 - If a param has `source: "list:applications"`, call `smartcmp_list_applications` after `businessGroupId` is known, show the numbered list, and STOP for user selection.
-- For `smartcmp_list_components`, always pass `source_key=<selected service card sourceKey>`. Never pass `catalog_id`.
+- Use selected catalog `instructions.type` as the `node_type` argument for `smartcmp_list_resource_pools`.
 - For `smartcmp_list_images`, always pass the saved `cloudEntryTypeId` from the user's selected resource pool. Do not invent, omit, or hardcode the platform identifier.
 
 ---
@@ -521,15 +580,16 @@ securityGroupIds -> required=false, default=null             → SKIP
 
 **Core Rules:**
 
-1. `type` = complete `typeName` (from R1)
-2. `node` = last segment after the last dot in `typeName` (from R1's `node` field)
-3. If `cloudEntryTypeIds` is empty: add `"useResourceBundle": false`, do NOT include `resourceBundleName`
-4. If `cloudEntryTypeIds` is not empty: include `resourceBundleName` at top level
+1. `type` = selected catalog `instructions.type`
+2. `node` = selected catalog `instructions.node`
+3. If `cloudEntryTypeIds` is explicitly empty: add `"useResourceBundle": false`, do NOT include `resourceBundleName`
+4. If a resource pool is selected or defaulted: include `resourceBundleName` at top level
 
 **Request Body Template:**
 
 ```json
 {
+    "catalogId": "<service id from CATALOG_META>",
     "catalogName": "<service name from CATALOG_META>",
     "userLoginId": "<current user login ID>",
     "businessGroupName": "<selected business group name>",
@@ -537,12 +597,11 @@ securityGroupIds -> required=false, default=null             → SKIP
     "name": "<user-provided resource name>",
     "resourceSpecs": [
         {
-            "node": "<node from R1>",
-            "type": "<typeName from R1>",
-            "useResourceBundle": false,  // only if cloudEntryTypeIds is empty
-            "params": {
-                // all other collected params (cpu, memory, networkId, etc.)
-            }
+            "node": "<selected catalog instructions.node>",
+            "type": "<selected catalog instructions.type>",
+            "useResourceBundle": false,  // only when cloudEntryTypeIds is explicitly empty
+            "cpu": 2,
+            "memory": 4096
         }
     ]
 }
@@ -573,7 +632,6 @@ python scripts/submit.py --file request.json
 | `../shared/scripts/list_applications.py` | List applications/projects | `<bgId> [keyword]` |
 | `../shared/scripts/list_resource_pools.py` | List resource pools | `<bgId> <sourceKey> <nodeType>` |
 | `../shared/scripts/list_os_templates.py` | List OS templates | `<osType> <resourceBundleId>` |
-| `../shared/scripts/list_components.py` | Get component type info | `<sourceKey>` |
 | `scripts/submit.py` | Submit request | `--file <json_file>` |
 
 ---
@@ -592,10 +650,11 @@ python scripts/submit.py --file request.json
 5. **Ask for required manual input.** If a param has `source: null`, `defaultValue: null`, and `required: true`, you MUST ask the user for that value and STOP.
 6. **Never skip required list selections.** If a param has `source: "list:xxx"` and `defaultValue: null`, you MUST call the mapped tool and STOP for user selection.
 7. **Never auto-submit.** Must get user confirmation before submission.
-8. **Set node and type correctly.** `type` = complete typeName, `node` = last segment of typeName.
-9. **resourceBundleName required:** When `cloudEntryTypeIds` is not empty (from list_components), request body top level **must** include `resourceBundleName` field.
-10. **Preserve selected card metadata.** Once the user selects a service card, keep using that card's saved `sourceKey`, `id`, `serviceCategory`, and `params` throughout the whole request flow.
-11. **Component lookup is silent.** For cloud-resource requests, `smartcmp_list_components(source_key=<selected sourceKey>)` is a hidden backend step and should not be narrated or shown to the user.
+8. **Set node and type correctly.** `type` must come from selected catalog `instructions.type`, and `node` must come from selected catalog `instructions.node`.
+9. **resourceBundleName required:** When the request uses a selected or defaulted resource pool, the request body top level **must** include `resourceBundleName`.
+10. **Preserve selected card metadata.** Once the user selects a service card, keep using that card's saved `sourceKey`, `id`, `name`, `serviceCategory`, `instructions`, and `params` throughout the whole request flow.
+11. **No component lookup step.** For cloud-resource requests, use the selected catalog instructions metadata directly. Do not call `smartcmp_list_components`.
+12. **Always prefer explicit catalog defaults.** If the selected catalog `params` already provide a non-empty `defaultValue`, use that value silently instead of asking the user or calling another list tool.
 
 ---
 

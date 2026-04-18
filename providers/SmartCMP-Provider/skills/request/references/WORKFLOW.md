@@ -4,6 +4,46 @@ Detailed step-by-step workflow for submitting requests to SmartCMP.
 
 ---
 
+## Authoritative Flow
+
+This section supersedes any later legacy mention of `list_components.py` in this file.
+
+### Ticket Flow
+
+```text
+list_services
+  -> select catalog
+  -> list_business_groups
+  -> collect ticket fields
+  -> confirm
+  -> submit
+```
+
+### Cloud Resource Flow
+
+```text
+list_services
+  -> select catalog
+  -> read instructions.node / instructions.type / instructions.osType silently
+  -> list_business_groups (if requested by params)
+  -> list_resource_pools (if requested by params)
+  -> list_os_templates (if requested by params)
+  -> list_images (if requested by params)
+  -> collect remaining manual fields
+  -> confirm
+  -> submit
+```
+
+Rules:
+
+1. `instructions.type` replaces the old component lookup and is the `nodeType` input for `list_resource_pools.py`.
+2. `instructions.osType` is preferred for OS-template lookup; derive `Linux` or `Windows` only when `osType` is absent.
+3. If a cloud catalog card is missing `instructions.node` or `instructions.type`, fix the catalog card. Do not bring back `list_components.py`.
+4. Before the final submit step, always show a short summary plus `JSON 预览` with the constructed request body in a fenced `json` block, then ask `请确认以上信息是否正确？（是/否）`.
+5. Mask preview secrets such as `credentialPassword` as `"******"` unless the user explicitly asks to reveal them.
+
+---
+
 ## Prerequisites
 
 Set environment variables before running any script:
@@ -82,9 +122,9 @@ export CMP_PASSWORD="<password>"
 │       ├── Output: businessGroupId                                   │
 │       │                                                             │
 │       ▼                                                             │
-│  [3] list_components.py <sourceKey>                                 │
+│  [3] read selected catalog instructions.type / node / osType        │
 │       │                                                             │
-│       ├── Output: typeName, osType                                  │
+│       ├── Output: embedded component metadata                        │
 │       │                                                             │
 │       ▼                                                             │
 │  [4] list_resource_pools.py <businessGroupId> <sourceKey> <type>    │
@@ -108,7 +148,6 @@ export CMP_PASSWORD="<password>"
 |--------|----------------|--------|
 | `list_services.py` | (none) | - |
 | `list_business_groups.py` | `catalogId` | `list_services.py` output |
-| `list_components.py` | `sourceKey` | `list_services.py` output |
 | `list_resource_pools.py` | `businessGroupId`, `sourceKey`, `nodeType` | Previous outputs |
 | `list_os_templates.py` | `osType`, `resourceBundleId` | Previous outputs |
 | `submit.py` | JSON file with all collected IDs | All above |
@@ -124,6 +163,7 @@ export CMP_PASSWORD="<password>"
 | NO output redirect | Never use `>`, `>>`, `2>&1` |
 | NO guessing | Only use values from script outputs or user inputs |
 | Always confirm | Show summary before submit, wait for user approval |
+| Show JSON preview | Show the constructed request body in a fenced `json` block before asking for confirmation |
 
 ---
 
@@ -242,7 +282,7 @@ Status: INITIALING
 ## Section B: Cloud resource flow
 
 ```
-[B1] list_components.py (silent) → Record typeName, osType
+[B1] Read selected catalog instructions (silent) → Record type, node, osType
     ↓
 [B2] Parse description JSON → Determine required params
     ↓
@@ -259,26 +299,21 @@ Status: INITIALING
 [B5] submit.py → Show result → [End]
 ```
 
-### B1: Get component type (silent)
+### B1: Read embedded component metadata (silent)
 
-```bash
-python ../shared/scripts/list_components.py <sourceKey>
-```
+There is no `list_components.py` step in the refactored workflow.
 
-**Output format:**
-```
-##COMPONENT_META_START##
-{"sourceKey":"resource.infra.server_room","typeName":"resource.infra.server_room","id":"xxx","name":"机房","node":"server_room","cloudEntryTypeIds":""}
-##COMPONENT_META_END##
-```
+Read the selected catalog instructions silently and record:
+- `instructions.type` → request `type`
+- `instructions.node` → request `node`
+- `instructions.osType` → OS template lookup `osType`
+- `instructions.cloudEntryTypeIds` → if explicitly empty, set `"useResourceBundle": false`
 
-Parse silently and record:
-- `typeName` → Used as `type` field in request body (e.g., `resource.infra.server_room`)
-- `node` → Used as `node` field in request body (e.g., `server_room`)
-- `cloudEntryTypeIds` → If empty string, must add `"useResourceBundle": false`
-- `osType` → `Linux` or `Windows` (detect from typeName)
+If `instructions.osType` is absent:
+- derive `Windows` when `instructions.type` or `instructions.node` contains `windows`
+- otherwise derive `Linux`
 
-**Do NOT show to user. Continue immediately.**
+**Do NOT show this metadata to the user. Continue immediately.**
 
 ### B2: Parse description
 
@@ -322,7 +357,7 @@ python ../shared/scripts/list_resource_pools.py <businessGroupId> <sourceKey> <n
 Arguments:
 - `businessGroupId`: from B3a
 - `sourceKey`: from CATALOG_META
-- `nodeType`: from B1 (typeName)
+- `nodeType`: from selected catalog `instructions.type`
 
 **Ask:** "请选择资源池"  
 **STOP.**
@@ -334,7 +369,7 @@ python ../shared/scripts/list_os_templates.py <osType> <resourceBundleId>
 ```
 
 Arguments:
-- `osType`: from B1 (Linux or Windows)
+- `osType`: from selected catalog `instructions.osType`, or derived from selected catalog `instructions.type`
 - `resourceBundleId`: from B3b
 
 **Ask:** "请选择操作系统模板"  
@@ -355,8 +390,8 @@ Arguments:
 
 **Key rules for building request body:**
 
-1. `type` = Complete `typeName` from B1 (e.g., `resource.infra.server_room`)
-2. `node` = Last segment of `typeName` from B1 (e.g., `server_room`)
+1. `type` = selected catalog `instructions.type`
+2. `node` = selected catalog `instructions.node`
 3. If `cloudEntryTypeIds` is empty string → Add `"useResourceBundle": false`
 
 Build JSON:
@@ -369,8 +404,8 @@ Build JSON:
   "resourceSpecs": [
     {
       "useResourceBundle": false,
-      "node": "<node from B1>",
-      "type": "<typeName from B1>",
+      "node": "<node from selected catalog instructions>",
+      "type": "<type from selected catalog instructions>",
       "params": {
         "<param_key>": "<param_value from description or user>"
       }
@@ -441,7 +476,6 @@ python scripts/submit.py --file request.json
 | `list_business_groups.py` | `<catalogId>` | businessGroupId, name |
 | `list_resource_pools.py` | `<bgId> <sourceKey> <nodeType>` | resourceBundleId, name |
 | `list_os_templates.py` | `<osType> <rbId>` | logicTemplateId, name |
-| `list_components.py` | `<sourceKey>` | typeName, osType |
 | `submit.py` | `--file <json>` | requestId, state |
 
 ---

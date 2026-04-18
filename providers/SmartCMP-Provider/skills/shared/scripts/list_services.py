@@ -57,6 +57,28 @@ def _normalize_param(raw_param: dict) -> dict:
 
     return normalized
 
+
+def _normalize_instructions(raw_instructions: dict) -> dict:
+    """Preserve workflow-driving instruction metadata for the request skill."""
+    normalized: dict = {}
+    for key in ("node", "type", "osType", "cloudEntryTypeIds"):
+        value = raw_instructions.get(key)
+        if value is None:
+            continue
+        if isinstance(value, str):
+            if not value.strip():
+                continue
+            normalized[key] = value.strip()
+            continue
+        normalized[key] = value
+
+    params_list = raw_instructions.get("parameters", [])
+    if isinstance(params_list, list):
+        normalized_params = [_normalize_param(p) for p in params_list if isinstance(p, dict)]
+        normalized["parameters"] = normalized_params
+
+    return normalized
+
 keyword = sys.argv[1] if len(sys.argv) > 1 else ""
 url = f"{BASE_URL}/catalogs/published"
 params = {"query": "", "states": "PUBLISHED", "page": 1, "size": 50, "sort": "catalogIndex,asc"}
@@ -100,11 +122,15 @@ for i, c in enumerate(items):
     if raw_instructions:
         try:
             instr = json.loads(raw_instructions)
-            params_list = instr.get("parameters", [])
-            if isinstance(params_list, list):
-                normalized_params = [_normalize_param(p) for p in params_list if isinstance(p, dict)]
-                entry["instructions"] = {"parameters": normalized_params}
-                entry["params"] = normalized_params
+            if isinstance(instr, dict):
+                normalized_instructions = _normalize_instructions(instr)
+                if normalized_instructions:
+                    entry["instructions"] = normalized_instructions
+                    entry["params"] = list(normalized_instructions.get("parameters", []) or [])
+                    for key in ("node", "type", "osType", "cloudEntryTypeIds"):
+                        value = normalized_instructions.get(key)
+                        if value is not None:
+                            entry[key] = value
         except (json.JSONDecodeError, TypeError):
             pass
     meta.append(entry)

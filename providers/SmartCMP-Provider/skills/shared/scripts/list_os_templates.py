@@ -5,7 +5,8 @@ Usage:
   python list_os_templates.py <OS_TYPE> <RESOURCE_BUNDLE_ID>
 
 Arguments:
-  OS_TYPE              "Linux" or "Windows" (determined by caller from typeName)
+  OS_TYPE              "Linux" or "Windows" (from selected catalog instructions.osType,
+                       or derived by caller from selected catalog instructions.type)
   RESOURCE_BUNDLE_ID   Resource bundle ID from list_resource_pools.py
 
 Output:
