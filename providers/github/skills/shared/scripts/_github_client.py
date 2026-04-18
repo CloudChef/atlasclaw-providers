@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import httpx
@@ -56,6 +57,17 @@ def load_github_connection(extra: dict[str, Any]) -> tuple[str, str]:
 
     base_url = str(provider_instance.get("base_url", "https://api.github.com")).rstrip("/")
     user_token = str(provider_instance.get("user_token", "")).strip()
+
+    if not user_token:
+        raise RuntimeError("GitHub provider config missing required field: user_token")
+
+    return base_url or "https://api.github.com", user_token
+
+
+def load_github_connection_from_env(env: dict[str, str] | None = None) -> tuple[str, str]:
+    resolved_env = env if isinstance(env, dict) else os.environ
+    base_url = str(resolved_env.get("BASE_URL", "https://api.github.com") or "").strip().rstrip("/")
+    user_token = str(resolved_env.get("USER_TOKEN", "") or "").strip()
 
     if not user_token:
         raise RuntimeError("GitHub provider config missing required field: user_token")

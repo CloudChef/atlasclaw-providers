@@ -1,69 +1,50 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared" / "scripts"))
 
-from pydantic_ai import RunContext
-
-from app.atlasclaw.core.deps import SkillDeps
-from app.atlasclaw.skills.registry import SkillMetadata
-from app.atlasclaw.tools.base import ToolResult
-
-from _github_client import create_github_client, load_github_connection, split_repo_full_name
-
-
-SKILL_METADATA = SkillMetadata(
-    name="github_pr_checks",
-    description="Inspect CI checks for a GitHub pull request.",
-    category="provider:github",
-    provider_type="github",
-    instance_required=True,
-    location="provider",
-    source="provider",
-    group_ids=["github", "checks"],
-    capability_class="provider:github",
-    priority=100,
-    result_mode="tool_only_ok",
+from _github_client import (
+    create_github_client,
+    load_github_connection,
+    load_github_connection_from_env,
+    split_repo_full_name,
 )
+from _tool_result import emit_cli_result, tool_error, tool_text
 
 
-async def handler(ctx: RunContext[SkillDeps], repo: str, pr_number: int) -> dict:
+def _fetch_checks(base_url: str, user_token: str, repo: str, pr_number: int) -> dict[str, Any]:
     normalized_repo = str(repo or "").strip()
     if not normalized_repo:
-        return ToolResult.error("GitHub repo is required and must be provided as owner/repo.").to_dict()
+        raise RuntimeError("GitHub repo is required and must be provided as owner/repo.")
 
-    try:
-        owner, name = split_repo_full_name(normalized_repo)
-    except RuntimeError as exc:
-        return ToolResult.error(str(exc)).to_dict()
-
-    extra = ctx.deps.extra if isinstance(ctx.deps.extra, dict) else {}
-    base_url, user_token = load_github_connection(extra)
+    owner, name = split_repo_full_name(normalized_repo)
 
     with create_github_client(base_url, user_token) as client:
         pr_resp = client.get(f"/repos/{owner}/{name}/pulls/{int(pr_number)}")
         if pr_resp.status_code != 200:
-            return ToolResult.error(
+            raise RuntimeError(
                 f"GitHub PR lookup failed: {pr_resp.status_code} {pr_resp.text[:300]}"
-            ).to_dict()
+            )
         pr_payload = pr_resp.json()
         head_sha = str(((pr_payload.get("head") or {}).get("sha")) or "").strip()
         if not head_sha:
-            return ToolResult.error("GitHub PR lookup returned no head SHA.").to_dict()
+            raise RuntimeError("GitHub PR lookup returned no head SHA.")
 
         checks_resp = client.get(f"/repos/{owner}/{name}/commits/{head_sha}/check-runs")
         if checks_resp.status_code != 200:
-            return ToolResult.error(
+            raise RuntimeError(
                 f"GitHub check-runs lookup failed: {checks_resp.status_code} {checks_resp.text[:300]}"
-            ).to_dict()
+            )
         status_resp = client.get(f"/repos/{owner}/{name}/commits/{head_sha}/status")
         if status_resp.status_code != 200:
-            return ToolResult.error(
+            raise RuntimeError(
                 f"GitHub commit status lookup failed: {status_resp.status_code} {status_resp.text[:300]}"
-            ).to_dict()
+            )
 
         check_runs = (checks_resp.json() or {}).get("check_runs", [])
         combined_status = status_resp.json() or {}
@@ -89,18 +70,55 @@ async def handler(ctx: RunContext[SkillDeps], repo: str, pr_number: int) -> dict
             }
         )
 
+    return {
+        "repo": normalized_repo,
+        "pr_number": int(pr_number),
+        "head_sha": head_sha,
+        "checks": checks,
+    }
+
+
+def _format_result(payload: dict[str, Any]) -> dict[str, Any]:
     summary = [
-        f"PR #{int(pr_number)} checks for {normalized_repo}:",
+        f"PR #{payload['pr_number']} checks for {payload['repo']}:",
     ]
-    for item in checks:
+    for item in payload["checks"]:
         summary.append(f"- {item['name']}: {item['conclusion'] or item['status']}")
 
-    return ToolResult.text(
+    return tool_text(
         "\n".join(summary),
-        details={
-            "repo": normalized_repo,
-            "pr_number": int(pr_number),
-            "head_sha": head_sha,
-            "checks": checks,
-        },
-    ).to_dict()
+        details=payload,
+    )
+
+
+def _ctx_extra(ctx: Any) -> dict[str, Any]:
+    deps = getattr(ctx, "deps", None)
+    extra = getattr(deps, "extra", None)
+    return extra if isinstance(extra, dict) else {}
+
+
+async def handler(ctx: Any, repo: str, pr_number: int) -> dict[str, Any]:
+    try:
+        base_url, user_token = load_github_connection(_ctx_extra(ctx))
+        payload = _fetch_checks(base_url, user_token, repo, pr_number)
+    except RuntimeError as exc:
+        return tool_error(str(exc))
+    return _format_result(payload)
+
+
+def main(argv: list[str] | None = None) -> int:
+    _ = argv
+    try:
+        base_url, user_token = load_github_connection_from_env()
+        repo = str(os.environ.get("REPO", "") or "").strip()
+        pr_number = int(str(os.environ.get("PR_NUMBER", "") or "").strip())
+        result = _format_result(_fetch_checks(base_url, user_token, repo, pr_number))
+    except RuntimeError as exc:
+        result = tool_error(str(exc))
+    except ValueError:
+        result = tool_error("GitHub PR checks require PR_NUMBER to be an integer.")
+    return emit_cli_result(result)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

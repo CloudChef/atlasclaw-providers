@@ -1,58 +1,42 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared" / "scripts"))
 
-from pydantic_ai import RunContext
-
-from app.atlasclaw.core.deps import SkillDeps
-from app.atlasclaw.skills.registry import SkillMetadata
-from app.atlasclaw.tools.base import ToolResult
-
-from _github_client import create_github_client, load_github_connection, split_repo_full_name
-
-
-SKILL_METADATA = SkillMetadata(
-    name="github_run_list",
-    description="List recent GitHub Actions workflow runs for a repository.",
-    category="provider:github",
-    provider_type="github",
-    instance_required=True,
-    location="provider",
-    source="provider",
-    group_ids=["github", "runs"],
-    capability_class="provider:github",
-    priority=105,
-    result_mode="tool_only_ok",
+from _github_client import (
+    create_github_client,
+    load_github_connection,
+    load_github_connection_from_env,
+    split_repo_full_name,
 )
+from _tool_result import emit_cli_result, tool_error, tool_text
 
 
-async def handler(ctx: RunContext[SkillDeps], repo: str, limit: int = 10) -> dict:
+def _bounded_limit(limit: int) -> int:
+    return max(1, min(int(limit), 20))
+
+
+def _fetch_runs(base_url: str, user_token: str, repo: str, limit: int) -> dict[str, Any]:
     normalized_repo = str(repo or "").strip()
     if not normalized_repo:
-        return ToolResult.error("GitHub repo is required and must be provided as owner/repo.").to_dict()
+        raise RuntimeError("GitHub repo is required and must be provided as owner/repo.")
 
-    try:
-        owner, name = split_repo_full_name(normalized_repo)
-    except RuntimeError as exc:
-        return ToolResult.error(str(exc)).to_dict()
-
-    extra = ctx.deps.extra if isinstance(ctx.deps.extra, dict) else {}
-    base_url, user_token = load_github_connection(extra)
-    bounded_limit = max(1, min(int(limit), 20))
+    owner, name = split_repo_full_name(normalized_repo)
 
     with create_github_client(base_url, user_token) as client:
         resp = client.get(
             f"/repos/{owner}/{name}/actions/runs",
-            params={"per_page": bounded_limit, "page": 1},
+            params={"per_page": _bounded_limit(limit), "page": 1},
         )
         if resp.status_code != 200:
-            return ToolResult.error(
+            raise RuntimeError(
                 f"GitHub workflow run listing failed: {resp.status_code} {resp.text[:300]}"
-            ).to_dict()
+            )
         payload = resp.json() or {}
 
     runs = [
@@ -68,11 +52,48 @@ async def handler(ctx: RunContext[SkillDeps], repo: str, limit: int = 10) -> dic
         if item.get("id") is not None
     ]
 
-    lines = [f"Recent workflow runs for {normalized_repo}:"]
-    for item in runs:
+    return {"repo": normalized_repo, "runs": runs}
+
+
+def _format_result(payload: dict[str, Any]) -> dict[str, Any]:
+    lines = [f"Recent workflow runs for {payload['repo']}:"]
+    for item in payload["runs"]:
         lines.append(f"- {item['run_id']}: {item['name']} [{item['conclusion'] or item['status']}]")
 
-    return ToolResult.text(
+    return tool_text(
         "\n".join(lines),
-        details={"repo": normalized_repo, "runs": runs},
-    ).to_dict()
+        details=payload,
+    )
+
+
+def _ctx_extra(ctx: Any) -> dict[str, Any]:
+    deps = getattr(ctx, "deps", None)
+    extra = getattr(deps, "extra", None)
+    return extra if isinstance(extra, dict) else {}
+
+
+async def handler(ctx: Any, repo: str, limit: int = 10) -> dict[str, Any]:
+    try:
+        base_url, user_token = load_github_connection(_ctx_extra(ctx))
+        payload = _fetch_runs(base_url, user_token, repo, limit)
+    except RuntimeError as exc:
+        return tool_error(str(exc))
+    return _format_result(payload)
+
+
+def main(argv: list[str] | None = None) -> int:
+    _ = argv
+    try:
+        base_url, user_token = load_github_connection_from_env()
+        repo = str(os.environ.get("REPO", "") or "").strip()
+        limit = int(str(os.environ.get("LIMIT", "10") or "10"))
+        result = _format_result(_fetch_runs(base_url, user_token, repo, limit))
+    except RuntimeError as exc:
+        result = tool_error(str(exc))
+    except ValueError:
+        result = tool_error("GitHub workflow run listing requires LIMIT to be an integer.")
+    return emit_cli_result(result)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
