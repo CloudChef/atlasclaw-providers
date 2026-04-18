@@ -209,6 +209,8 @@ tool_submit_capability_class: "provider:smartcmp"
 tool_submit_priority: 160
 tool_submit_result_mode: "tool_only_ok"
 tool_submit_cli_positional: []
+tool_submit_cli_flag_overrides:
+  json_body: "--json"
 tool_submit_parameters: |
   {
     "type": "object",
