@@ -23,9 +23,11 @@ Examples:
 API Reference:
   POST /generic-request/submit
 """
-import sys
-import json
 import argparse
+import json
+import os
+import sys
+
 import requests
 
 # Import shared utilities (handles URL normalization, SSL warnings)
@@ -37,6 +39,41 @@ except ImportError:
     from _common import require_config, create_headers
 
 BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()
+
+
+def _load_runtime_cookies() -> dict:
+    raw = os.environ.get("ATLASCLAW_COOKIES", "").strip()
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _enrich_request_body(body: object) -> object:
+    if not isinstance(body, dict):
+        return body
+
+    enriched = dict(body)
+    if enriched.get("userId") and enriched.get("userLoginId"):
+        return enriched
+
+    cookies = _load_runtime_cookies()
+    cookie_user_id = str(cookies.get("userId", "") or "").strip()
+    if cookie_user_id and not enriched.get("userId"):
+        enriched["userId"] = cookie_user_id
+
+    cookie_login_id = str(cookies.get("userLoginId", "") or "").strip()
+    if cookie_login_id and not enriched.get("userLoginId"):
+        enriched["userLoginId"] = cookie_login_id
+
+    runtime_user_id = str(os.environ.get("ATLASCLAW_USER_ID", "") or "").strip()
+    if runtime_user_id and not enriched.get("userLoginId"):
+        enriched["userLoginId"] = runtime_user_id
+
+    return enriched
 
 # ── Parse arguments ───────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser(description='Submit request to SmartCMP')
@@ -58,6 +95,8 @@ except json.JSONDecodeError as e:
 except FileNotFoundError:
     print(f"[ERROR] File not found: {args.file}")
     sys.exit(1)
+
+body = _enrich_request_body(body)
 
 # ── Submit request ────────────────────────────────────────────────────────────
 url = f"{BASE_URL}/generic-request/submit"

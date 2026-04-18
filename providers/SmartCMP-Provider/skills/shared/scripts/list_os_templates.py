@@ -73,9 +73,6 @@ except requests.exceptions.RequestException as e:
 
 templates = data if isinstance(data, list) else data.get("content", data.get("data", []))
 
-print(f"\nOS Templates  (osType={os_type}, resourceBundleId={resource_bundle_id})")
-print("=" * 60)
-
 if not templates:
     print("[INFO] No OS templates found.")
     sys.exit(0)
