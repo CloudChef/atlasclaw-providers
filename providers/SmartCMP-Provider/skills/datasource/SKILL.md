@@ -1,6 +1,6 @@
 ---
 name: "datasource"
-description: "Discovery skill. Browse available services, business groups, resource pools, applications, OS templates, and images before submitting a request."
+description: "Discovery skill. Browse available services, applications, OS templates, images, and generic resource details before submitting a request. For standalone 查看所有业务组, 查询资源池, 查看所有资源, 查看所有云主机, or 查看某个云主机详情 requests, prefer the dedicated business-group, resource-pool, or resource skill."
 provider_type: "smartcmp"
 instance_required: "true"
 
@@ -8,8 +8,6 @@ instance_required: "true"
 triggers:
   - list services
   - list catalogs
-  - show business groups
-  - list resource pools
   - list applications
   - list OS templates
   - list images
@@ -19,7 +17,7 @@ triggers:
 
 use_when:
   - User wants to browse or explore available options before taking action
-  - User asks about available services, business groups, resource pools, applications, templates, or images
+  - User asks about available services, applications, templates, images, or resource details
   - User needs reference data to prepare a request but does not want to submit yet
   - User wants resource details by resource ID before analysis or troubleshooting
 
@@ -27,16 +25,20 @@ avoid_when:
   - User wants to submit a provisioning request (use request skill)
   - User wants to approve or reject requests (use approval skill)
   - User wants autonomous request processing (use request-decomposition-agent)
+  - User wants a direct all-business-groups, all-resource-pools, all-resources, all-virtual-machines, or cloud-host detail/attribute analysis flow (use business-group, resource-pool, or resource)
 
 examples:
   - "Show available service catalogs"
-  - "List business groups for catalog X"
-  - "What resource pools are available?"
+  - "List applications for business group X"
   - "List OS templates for VM provisioning"
+  - "Show resource details for resource ID X"
 
 related:
   - request
   - approval
+  - business-group
+  - resource-pool
+  - resource
 ---
 
 # datasource
@@ -45,7 +47,10 @@ Reference data discovery skill (read-only).
 
 ## Purpose
 
-Query and browse reference data as standalone read-only operations. Use when user wants to explore available options without submitting a request.
+Query and browse reference data as standalone read-only operations. Use when
+user wants to explore available options without submitting a request. Prefer
+the dedicated `business-group` or `resource-pool` skill for standalone
+directory listings of all business groups or all resource pools.
 
 ## Trigger Conditions
 
@@ -54,13 +59,15 @@ Activate this skill when user intent matches:
 | Intent | Keywords |
 |--------|----------|
 | View catalogs | "show catalogs", "list services", "available services" |
-| List business groups | "list business groups", "show BGs", "available BGs" |
-| Check resource pools | "list resource pools", "available pools" |
 | List applications | "list applications", "show apps" |
 | List OS templates | "list OS templates", "available OS" |
 | List images | "list images", "available images" |
+| Show resource details | "resource details", "show resource", "analyze resource data" |
 
-**NOT for**: Resource provisioning → use `request` skill instead.
+**NOT for**: Resource provisioning -> use `request` skill instead.
+**NOT for**: Direct "查看所有业务组", "查询资源池", "查看所有资源",
+"查看所有云主机", or "查看某个云主机详情" requests -> use `business-group`,
+`resource-pool`, or `resource`.
 
 ## Scripts
 
@@ -71,7 +78,7 @@ All scripts are located in `../shared/scripts/`:
 | `list_services.py` | List published service catalogs | `[KEYWORD]` |
 | `list_business_groups.py` | List business groups for a catalog | `<CATALOG_ID>` |
 | `list_components.py` | Get component type (nodeType) | `<SOURCE_KEY>` |
-| `list_resource_pools.py` | List resource pools | `<BG_ID> <SOURCE_KEY> <NODE_TYPE>` |
+| `list_resource_pools.py` | List resource pools for a selected business group and component type | `<BG_ID> <SOURCE_KEY> <NODE_TYPE>` |
 | `list_applications.py` | List applications | `<BG_ID> [KEYWORD]` |
 | `list_os_templates.py` | List OS templates (VM only) | `<OS_TYPE> <RESOURCE_BUNDLE_ID>` |
 | `list_cloud_entry_types.py` | Get cloud entry types | (no args) |
@@ -128,25 +135,20 @@ python ../shared/scripts/list_services.py
 
 **Output:** Numbered list + `##CATALOG_META_START## ... ##CATALOG_META_END##`
 
-### Example 2: List Business Groups
+### Example 2: List Applications
 
-**User:** "List business groups for Linux VM"
+**User:** "List applications for business group X"
 
 ```bash
-# Get catalog ID from previous step
-python ../shared/scripts/list_business_groups.py <catalogId>
+python ../shared/scripts/list_applications.py <bgId>
 ```
 
-### Example 3: List Resource Pools
+### Example 3: List OS Templates
 
-**User:** "What resource pools are available?"
+**User:** "List OS templates for VM provisioning"
 
 ```bash
-# Requires 3 arguments: bgId, sourceKey, nodeType
-python ../shared/scripts/list_resource_pools.py \
-  47673d8d-6b3f-41e1-8ec0-c37e082d9020 \
-  resource.iaas.machine.instance.abstract \
-  cloudchef.nodes.Compute
+python ../shared/scripts/list_os_templates.py <osType> <resourceBundleId>
 ```
 
 ### Example 4: Show Resource Details
@@ -161,17 +163,16 @@ python ../shared/scripts/list_resource.py <resource_id>
 
 ```
 list_services.py
-      ↓ (catalogId, sourceKey)
-      ├── list_business_groups.py <catalogId>
-      │         ↓ (bgId)
-      │         └── list_applications.py <bgId>
-      │
-      └── list_components.py <sourceKey>
-                ↓ (typeName = nodeType)
-                └── list_resource_pools.py <bgId> <sourceKey> <nodeType>
-                          ↓ (resourceBundleId, cloudEntryTypeId)
-                          ├── list_os_templates.py <osType> <resourceBundleId>
-                          └── list_images.py <rbId> <templateId> <cloudEntryTypeId>
+  -> (catalogId, sourceKey)
+  -> list_business_groups.py <catalogId>
+     -> (bgId)
+     -> list_applications.py <bgId>
+  -> list_components.py <sourceKey>
+     -> (typeName = nodeType)
+     -> list_resource_pools.py <bgId> <sourceKey> <nodeType>
+        -> (resourceBundleId, cloudEntryTypeId)
+        -> list_os_templates.py <osType> <resourceBundleId>
+        -> list_images.py <rbId> <templateId> <cloudEntryTypeId>
 ```
 
 ## Output Meta Blocks
@@ -187,9 +188,12 @@ list_services.py
 
 ## Critical Rules
 
-> All operations are **read-only** — no data is created or modified.
+> All operations are **read-only** - no data is created or modified.
 
 > Scripts are shared with the `request` skill.
+
+> Standalone directory queries for all business groups or all resource pools
+> belong to the `business-group`, `resource-pool`, and `resource` skills.
 
 > On error (`[ERROR]`), report to user immediately; do NOT self-debug.
 
@@ -202,4 +206,4 @@ list_services.py
 
 ## References
 
-- [WORKFLOW.md](references/WORKFLOW.md) — Detailed script usage and query flows
+- [WORKFLOW.md](references/WORKFLOW.md) - Detailed script usage and query flows

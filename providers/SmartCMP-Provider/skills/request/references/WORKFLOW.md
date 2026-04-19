@@ -25,11 +25,7 @@ list_services
 list_services
   -> select catalog
   -> read instructions.node / instructions.type / instructions.osType silently
-  -> list_business_groups (if requested by params)
-  -> list_resource_pools (if requested by params)
-  -> list_os_templates (if requested by params)
-  -> list_images (if requested by params)
-  -> collect remaining manual fields
+  -> iterate instructions.parameters using the decision table
   -> confirm
   -> submit
 ```
@@ -39,8 +35,9 @@ Rules:
 1. `instructions.type` replaces the old component lookup and is the `nodeType` input for `list_resource_pools.py`.
 2. `instructions.osType` is preferred for OS-template lookup; derive `Linux` or `Windows` only when `osType` is absent.
 3. If a cloud catalog card is missing `instructions.node` or `instructions.type`, fix the catalog card. Do not bring back `list_components.py`.
-4. Before the final submit step, always show a short summary plus `JSON 预览` with the constructed request body in a fenced `json` block, then ask `请确认以上信息是否正确？（是/否）`.
-5. Mask preview secrets such as `credentialPassword` as `"******"` unless the user explicitly asks to reveal them.
+4. **Parameter-driven:** For each parameter in `instructions.parameters`, check its `source` and `defaultValue` fields. Only call a lookup tool when `source` is non-empty AND `defaultValue` is empty. Use defaults silently otherwise. See SKILL.md "Parameter-Driven Decision Table" for the full rule set.
+5. Before the final submit step, always show a short summary plus `JSON 预览` with the constructed request body in a fenced `json` block, then ask `请确认以上信息是否正确？（是/否）`.
+6. Mask preview secrets such as `credentialPassword` as `"******"` unless the user explicitly asks to reveal them.
 
 ---
 
@@ -284,15 +281,16 @@ Status: INITIALING
 ```
 [B1] Read selected catalog instructions (silent) → Record type, node, osType
     ↓
-[B2] Parse description JSON → Determine required params
+[B2] Parse instructions.parameters → Build parameter action plan using decision table
     ↓
-[B3a] list_business_groups.py (if needed) → STOP
-    ↓
-[B3b] list_resource_pools.py (if needed) → STOP
-    ↓
-[B3c] list_os_templates.py (if needed) → STOP
-    ↓
-[B3d] Ask remaining required fields → STOP
+[B3] Process parameters in order using the decision table:
+     For each parameter:
+       - source non-empty + defaultValue empty → call mapped lookup tool → STOP, wait for user
+       - source non-empty + defaultValue non-empty → use default silently
+       - source empty + defaultValue non-empty → use default silently
+       - source empty + defaultValue empty + required → ask user → STOP
+       - source empty + defaultValue empty + not required → skip
+     If user's initial message specifies values (e.g. "2c4g"), override defaults
     ↓
 [B4] Build resourceSpecs JSON → Show summary → STOP
     ↓
@@ -315,76 +313,18 @@ If `instructions.osType` is absent:
 
 **Do NOT show this metadata to the user. Continue immediately.**
 
-### B2: Parse description
+### B2: Parse parameters
 
-The `description` field contains parameter definitions:
+The `instructions.parameters` list contains parameter definitions with `source` and
+`defaultValue` fields. Apply the decision table from SKILL.md strictly. Do NOT infer
+lookups from field names.
 
-```json
-{
-  "parameters": [
-    {"key": "businessGroupId", "source": "list:business_groups", "defaultValue": null},
-    {"key": "cpu", "source": null, "defaultValue": 2},
-    {"key": "name", "source": null, "defaultValue": null, "required": true}
-  ]
-}
-```
+### B3: Process parameters (dynamic, parameter-driven)
 
-**Decision table:**
-
-| source | defaultValue | Action |
-|--------|--------------|--------|
-| `list:business_groups` | null | → B3a |
-| `list:resource_pools` | null | → B3b |
-| `list:os_templates` | null | → B3c |
-| null | has value | Use default, skip asking |
-| null | null + required | → B3d |
-
-### B3a: Business group
-
-```bash
-python ../shared/scripts/list_business_groups.py <catalogId>
-```
-
-**Ask:** "请选择业务组"  
-**STOP.**
-
-### B3b: Resource pool
-
-```bash
-python ../shared/scripts/list_resource_pools.py <businessGroupId> <sourceKey> <nodeType>
-```
-
-Arguments:
-- `businessGroupId`: from B3a
-- `sourceKey`: from CATALOG_META
-- `nodeType`: from selected catalog `instructions.type`
-
-**Ask:** "请选择资源池"  
-**STOP.**
-
-### B3c: OS template
-
-```bash
-python ../shared/scripts/list_os_templates.py <osType> <resourceBundleId>
-```
-
-Arguments:
-- `osType`: from selected catalog `instructions.osType`, or derived from selected catalog `instructions.type`
-- `resourceBundleId`: from B3b
-
-**Ask:** "请选择操作系统模板"  
-**STOP.**
-
-### B3d: Other required fields
-
-**Ask:**
-```
-请提供以下信息：
-1. 资源名称：
-2. [其他必填字段]
-```
-
-**STOP.**
+Process each parameter from `instructions.parameters` in order. For each one, apply the
+decision table. Only call a lookup tool when `source` is explicitly declared AND
+`defaultValue` is empty. Group user questions for required fields with no default into a
+single prompt when possible.
 
 ### B4: Build and confirm
 

@@ -243,7 +243,11 @@ def run_tests():
         "skills/alarm/scripts/list_alerts.py",
         "skills/alarm/scripts/analyze_alert.py",
         "skills/alarm/scripts/operate_alert.py",
+        "skills/business-group/scripts/list_all_business_groups.py",
         "skills/request/scripts/submit.py",
+        "skills/resource/scripts/analyze_resource_detail.py",
+        "skills/resource/scripts/list_resources.py",
+        "skills/resource-pool/scripts/list_all_resource_pools.py",
         "skills/cost-optimization/scripts/_cost_common.py",
         "skills/cost-optimization/scripts/_analysis.py",
         "skills/cost-optimization/scripts/list_recommendations.py",
@@ -275,6 +279,19 @@ def run_tests():
             catalog_id = meta[0].get("id")
             source_key = meta[0].get("sourceKey")
             print(f"       {Colors.GRAY}Found {len(meta)} catalog(s), using first: {meta[0].get('name')}{Colors.RESET}")
+
+    success, output = run_script("skills/business-group/scripts/list_all_business_groups.py")
+    print_result("list_all_business_groups.py", success, f"Exit code: {0 if success else 1}")
+
+    success, output = run_script("skills/resource-pool/scripts/list_all_resource_pools.py")
+    print_result("list_all_resource_pools.py", success, f"Exit code: {0 if success else 1}")
+
+    success, output = run_script("skills/resource/scripts/list_resources.py")
+    print_result("list_resources.py", success, f"Exit code: {0 if success else 1}")
+    print_skip(
+        "analyze_resource_detail.py",
+        "Skipped by default because refresh-status may trigger a backend refresh and requires a known resource ID",
+    )
     
     # list_business_groups.py
     if catalog_id:
@@ -473,10 +490,13 @@ def run_tests():
     skill_dirs = [
         "skills/approval",
         "skills/alarm",
+        "skills/business-group",
         "skills/datasource",
         "skills/request",
         "skills/preapproval-agent",
         "skills/request-decomposition-agent",
+        "skills/resource",
+        "skills/resource-pool",
         "skills/cost-optimization",
     ]
     

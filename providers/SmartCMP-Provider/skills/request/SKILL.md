@@ -1,4 +1,4 @@
----
+﻿---
 name: "request"
 description: "Self-service request skill. Request cloud resources, application environments, or ticket/work order services. Keywords: request, provision, deploy, create VM, apply resources, submit ticket, 申请资源, 创建虚拟机, 提交工单."
 provider_type: "smartcmp"
@@ -228,466 +228,149 @@ tool_submit_parameters: |
 
 Submit cloud resource, application environment, or ticket/work order requests through the service catalog.
 
-## Authoritative Workflow
+## Workflow Contract
 
-This section overrides any legacy mention of `list_components.py` later in this file.
+Use this skill only for self-service request submission. When this skill is selected for the
+current turn, the runtime may attach a **Current Workflow Context** section above the loaded
+skill body. That section contains structured metadata from recent lookup tools in the same
+conversation.
 
-### Cloud request metadata source
+Rules:
 
-For cloud requests, use the selected catalog card metadata from `list_services` as the source of truth:
+- Treat the current turn's workflow context as the authoritative source for previously selected
+  catalog cards, business groups, resource pools, templates, images, and other hidden IDs.
+- Never rely on stale prose summaries when the structured workflow context disagrees.
+- Do not display raw workflow metadata, IDs, source keys, or internal JSON to the user.
+- Do not call `list_components.py`.
 
+## Service Selection
+
+1. Call `smartcmp_list_services`.
+2. Show only the numbered catalog names and the selection prompt.
+3. After the user selects a catalog, use the selected catalog metadata from the current turn's
+   workflow context to decide the next step.
+
+## Cloud Request Rules
+
+For cloud requests, the selected catalog metadata from `smartcmp_list_services` is the source
+of truth:
+
+- selected catalog `id` -> `catalogId`
+- selected catalog `name` -> `catalogName`
 - `instructions.node` -> request `node`
-- `instructions.type` -> request `type` and resource-pool lookup `node_type`
+- `instructions.type` -> request `type`
 - `instructions.osType` -> OS template lookup `os_type`
-- if `instructions.osType` is absent, derive `Windows` when `type` or `node` contains `windows`; otherwise derive `Linux`
-- selected catalog `id` -> request `catalogId`
-- selected catalog `name` -> request `catalogName`
+- if `instructions.osType` is absent, derive `Windows` when `type` or `node` contains
+  `windows`; otherwise derive `Linux`
+- `instructions.parameters` or `params` -> ordered request parameter list
 
-Before every follow-up decision, reread the saved selected catalog metadata from the earlier
-`list_services` `_internal` payload. If earlier assistant prose conflicts with the selected
-catalog `instructions` or `params`, the catalog metadata wins.
+### CRITICAL: Parameter-Driven Decision Table
 
-Do not call `list_components.py`.
+**STOP and read before calling ANY lookup tool.** You MUST check each parameter's `source`
+field in `instructions.parameters`. Only call a lookup tool when the parameter explicitly
+declares a `source` value AND its `defaultValue` is empty. Never infer a lookup from field
+names alone.
 
-### Parameter processing rules
+Process parameters in order. For each parameter, apply exactly one rule:
 
-Process `params` in order and apply only these rules:
+| # | Condition | Action |
+|---|-----------|--------|
+| 1 | `source` is non-empty AND `defaultValue` is empty | Call the mapped lookup tool, show result, wait for user selection |
+| 2 | `source` is non-empty AND `defaultValue` is non-empty | Use the default silently, do NOT call the lookup tool |
+| 3 | `source` is empty AND `defaultValue` is non-empty | Use the default silently |
+| 4 | `source` is empty AND `defaultValue` is empty AND `required=true` | Ask the user for input |
+| 5 | `source` is empty AND `defaultValue` is empty AND `required=false` | Skip this parameter |
 
-- `source` exists and `defaultValue` is empty -> call the mapped lookup tool and wait for user selection
-- `source` exists and `defaultValue` is non-empty -> use the default silently
-- `source` is empty and `defaultValue` is non-empty -> use the default silently
-- `source` is empty, `defaultValue` is empty, `required=true` -> ask the user
-- `source` is empty, `defaultValue` is empty, `required=false` -> skip it
+**User-specified values override defaults.** If the user's initial message includes specs
+(e.g. "2c4g" means cpu=2, memory=4GB), use those values instead of `defaultValue`.
 
-Enforcement:
+### Forbidden actions
 
-- Only the current parameter's explicit `source` may trigger a lookup tool.
-- If a parameter does not declare `source: "list:applications"`, do NOT call
-  `smartcmp_list_applications`.
-- If `resourceBundleName`, `logicTemplateName`, `templateId`, or any other parameter has a
-  non-empty `defaultValue`, use that value silently and do NOT call another list tool for it.
+- If `instructions.parameters` does NOT contain any parameter with
+  `source: "list:resource_pools"`, do NOT call `smartcmp_list_resource_pools`.
+- If `instructions.parameters` does NOT contain any parameter with
+  `source: "list:os_templates"`, do NOT call `smartcmp_list_os_templates`.
+- If `instructions.parameters` does NOT contain any parameter with
+  `source: "list:images"` or `source: "list:list_images"`, do NOT call `smartcmp_list_images`.
+- If `instructions.parameters` does NOT contain any parameter with
+  `source: "list:applications"`, do NOT call `smartcmp_list_applications`.
+- If a parameter like `resourceBundleName`, `logicTemplateName`, `templateId`, `networkId`,
+  `cpu`, `memory`, or any other field already has a non-empty `defaultValue` and no `source`,
+  use that value silently. Do NOT call a related list tool.
 
-Mapped lookups:
+### Mapped lookups (only when triggered by source field)
 
 - `list:business_groups` -> `smartcmp_list_business_groups(catalog_id=<selected catalog id>)`
 - `list:applications` -> `smartcmp_list_applications(business_group_id=<selected business group id>)`
 - `list:resource_pools` -> `smartcmp_list_resource_pools(business_group_id=<selected business group id>, source_key=<selected sourceKey>, node_type=<instructions.type>)`
 - `list:os_templates` -> `smartcmp_list_os_templates(os_type=<instructions.osType or derived value>, resource_bundle_id=<selected resource pool id>)`
-- `list:list_images` / `list:images` -> `smartcmp_list_images(resource_bundle_id=<selected resource pool id>, logic_template_id=<selected os template id>, cloud_entry_type_id=<selected resource pool cloudEntryTypeId>)`
-
-### Submit contract
-
-The submit tool now accepts `json_body`.
-
-When building a cloud request:
-
-- put `catalogId`, `catalogName`, `userLoginId`, `businessGroupName` or `businessGroupId`, `resourceBundleName`, and `name` at the top level
-- put `node`, `type`, and all collected cloud parameters inside `resourceSpecs[0]`
-- never auto-submit before showing a final summary and asking `请确认以上信息是否正确？（是/否）`
-
-Before any submit call, always show the constructed request body to the user.
-
-Display order:
-
-1. a short Chinese summary
-2. a heading `JSON 预览`
-3. a fenced `json` code block containing the constructed request body
-4. the confirmation question `请确认以上信息是否正确？（是/否）`
-
-The preview must reflect the real structure and resolved values that will be submitted, including applied defaults, selected list values, nested `resourceSpecs` placement, and top-level request fields.
-
-For sensitive fields such as `credentialPassword`, mask the preview value as `"******"` by default, but keep the real value in the actual `json_body` sent to `smartcmp_submit_request`.
-
----
-
-## Legacy Workflow Notes (Deprecated)
-
-```
-[Trigger] User expresses intent to "request resources"
-    |
-    v
-[Step 1] Execute list_services.py -> Display service list -> STOP wait for user selection
-    |
-    v
-[Step 2] User selects service -> Check serviceCategory field
-    |
-    +---> serviceCategory === "GENERIC_SERVICE" ---> [Ticket Flow]
-    |
-    +---> serviceCategory !== "GENERIC_SERVICE" ---> [Cloud Resource Flow]
-```
+- `list:list_images` or `list:images` -> `smartcmp_list_images(resource_bundle_id=<selected resource pool id>, logic_template_id=<selected os template id>, cloud_entry_type_id=<selected resource pool cloudEntryTypeId>)`
 
----
+## Ticket / Work Order Rules
 
-## Step 1: List Available Services [Execute]
+When the selected catalog is a generic or problem-service request, collect only the fields
+required by that catalog metadata. Do not reuse cloud-only fields such as `resourceSpecs`,
+`node`, or `type` unless the selected catalog metadata explicitly requires them.
 
-```bash
-python ../shared/scripts/list_services.py
-```
+## Submit Contract
 
-**Output Example:**
+The submit tool accepts `json_body`.
 
-The tool returns a JSON result with two key fields:
-- `output`: The user-visible text (numbered list + selection prompt)
-- `_internal`: Machine-readable metadata (catalog IDs, params, etc.)
+### Step 1: Show preview and ask for confirmation
 
-The `output` field looks like:
-```
-Found 3 published catalog(s):
+1. Show a short Chinese summary.
+2. Show a heading `JSON 预览`.
+3. Show a fenced `json` block with the exact request body that will be submitted.
+4. Ask `请确认以上信息是否正确？（是/否）`.
+5. **STOP and wait for the user's answer. Do NOT call `smartcmp_submit_request` yet.**
 
-  [1] Linux VM
-  [2] Issue Ticket
-  [3] Server Room
+### Step 2: After user confirms
 
-请选择您要申请的服务（输入编号）：
-```
+When the user replies "是", "yes", "确认", or any affirmative answer:
 
-When presenting service cards to the user:
-- Show only the numbered catalog names from the `output` field.
-- Do NOT display `_internal` metadata such as `id`, `sourceKey`, `serviceCategory`,
-  `instructions`, or `params`.
+- **Immediately call `smartcmp_submit_request`** with the constructed `json_body`.
+- Do NOT show the summary or JSON preview again.
+- Do NOT ask for confirmation again.
+- The submit tool call is the ONLY correct action after user confirmation.
 
-The `_internal` field contains JSON like:
-```json
-[{
-  "index": 1,
-  "id": "xxx",
-  "name": "Linux VM",
-  "sourceKey": "resource.iaas...",
-  "serviceCategory": "VM",
-  "instructions": {
-    "parameters": [
-      {
-        "key": "name",
-        "label": "Resource Name",
-        "source": null,
-        "defaultValue": null,
-        "required": true
-      }
-    ]
-  },
-  "params": [
-    {
-      "key": "name",
-      "label": "Resource Name",
-      "source": null,
-      "defaultValue": null,
-      "required": true
-    }
-  ]
-}]
-```
+When the user replies "否", "no", or any negative answer:
 
-**IMPORTANT:** The `_internal` field is for your reference ONLY. Parse it silently to extract IDs, params, serviceCategory. NEVER display `_internal` content to the user.
+- Ask what they want to change and go back to collecting that parameter.
 
-**Action:** Display ONLY the numbered list and the selection prompt to user. Ask user to select.
+### Preview rules
 
-**STOP - Wait for user input**
+- The preview must reflect the real structure and resolved values that will be submitted.
+- Mask sensitive values such as `credentialPassword` as `"******"` in the preview.
+- Keep the real value in the actual `json_body` passed to `smartcmp_submit_request`.
 
----
+### Cloud request structure
 
-## Step 2: Determine Service Type [Decision]
+- top level: `catalogId`, `catalogName`, `userLoginId`, `businessGroupName` or
+  `businessGroupId`, `resourceBundleName`, `name`
+- nested: `resourceSpecs[0]` contains `node`, `type`, and collected cloud parameters
 
-After user selection, find the corresponding item from the `_internal` metadata and check `serviceCategory` field:
+### Ticket request structure
 
-Immediately save the selected service card metadata into working variables for the
-rest of the workflow, including:
-- `selected_catalog_id` = selected card `id`
-- `selected_source_key` = selected card `sourceKey`
-- `selected_service_category` = selected card `serviceCategory`
-- `selected_params` = selected card `params`
+- top level: `catalogId`, `catalogName`, `userLoginId`, `businessGroupName` or
+  `businessGroupId`, `name`
+- nested: `genericRequest` with only `description` field
+- **FORBIDDEN**: Do NOT invent or add any fields that are not defined in
+  `instructions.parameters` or the examples above. Fields like `impactScope`,
+  `expectedResolutionTime`, `additionalRequirements`, `priority`, `category`,
+  `urgency`, `contactName`, `contactPhone`, `email` etc. must NOT appear in the
+  JSON body unless they are explicitly listed in the catalog's
+  `instructions.parameters`. If a user mentions extra info (e.g. urgency,
+  timeline), include it naturally in the `description` text instead of
+  fabricating new JSON fields.
 
-Do this silently. Do NOT display these metadata fields to the user.
+## Interaction Rules
 
-| serviceCategory Value | Service Type | Flow |
-|----------------------|--------------|------|
-| `GENERIC_SERVICE` | Ticket/Manual Request | [Ticket Flow](#ticket-flow-generic_service) |
-| Any other value | Cloud Resource | [Cloud Resource Flow](#cloud-resource-flow) |
+- Execute only one user-facing step per turn.
+- After showing a numbered list, stop and wait for the user's selection.
+- After asking for manual input, stop and wait for the user's answer.
+- **After the user confirms the JSON preview with "是", immediately call
+  `smartcmp_submit_request`. Do NOT repeat the preview or ask again.**
+- Never claim a request was submitted unless `smartcmp_submit_request` actually executed in the
+  current turn.
+- Never display raw `_internal` metadata or hidden JSON to the user.
 
----
-
-## Ticket Flow (GENERIC_SERVICE)
-
-Use this flow when `serviceCategory === "GENERIC_SERVICE"`.
-
-### T1: Get Business Groups [Execute]
-
-```bash
-python ../shared/scripts/list_business_groups.py <catalogId>
-```
-
-**Action:** Display business group list, ask: "Please select a business group"
-
-**STOP - Wait for user selection**
-
-### T2: Collect Ticket Info [Ask]
-
-Ask user:
-```
-Please provide the following information:
-1. Ticket name:
-2. Ticket description:
-```
-
-**STOP - Wait for user input**
-
-### T3: Build Request Body [Build]
-
-```json
-{
-    "catalogName": "<name from CATALOG_META>",
-    "userLoginId": "<current user login ID>",
-    "businessGroupId": "<from T1 selection>",
-    "name": "<from T2 user input>",
-    "genericRequest": {
-        "description": "<from T2 user input>"
-    }
-}
-```
-
-**Action:** Display confirmation to user, ask: "Please confirm if the above information is correct? (yes/no)"
-
-**STOP - Wait for user confirmation**
-
-### T4: Submit [Execute]
-
-```bash
-python scripts/submit.py --file request.json
-```
-
-**Complete** - Display request ID and status to user.
-
----
-
-## Cloud Resource Flow
-
-Use this flow when `serviceCategory !== "GENERIC_SERVICE"`.
-
-This flow is **strictly driven by the `params` array** from the selected service's `_internal` metadata. That `params` array is a normalized copy of `instructions.parameters`, and each item preserves the original `key`, `label`, `source`, `defaultValue`, and `required` fields.
-
-### Overview
-
-```
-[R1] Read embedded component metadata from selected catalog instructions
-    |
-    v
-[R2] Process params array in order:
-    For each param:
-      - source = "list:xxx" -> call corresponding tool, ask user to select
-      - source = null, defaultValue != null -> use default silently
-      - source = null, defaultValue = null, required = true -> ask user to input
-      - required = false, defaultValue = null -> skip
-    |
-    v
-[R3] Build request body with all collected values
-    |
-    v
-[R4] Confirm with user -> Submit
-```
-
----
-
-### R1: Get Component Info [Silent Execute]
-
-There is no backend component-lookup tool in the new workflow.
-
-Read the selected catalog instructions silently and extract:
-
-- `instructions.type` → request `type` and resource-pool lookup `node_type`
-- `instructions.node` → request `node`
-- `instructions.osType` → OS template lookup `os_type`
-- `instructions.cloudEntryTypeIds` → if explicitly empty and the catalog does not use resource pools, set `useResourceBundle: false`
-
-If `instructions.osType` is absent, derive it from `instructions.type` or `instructions.node`:
-
-- contains `windows` → `Windows`
-- otherwise → `Linux`
-
-Proceed to R2 directly without user interaction.
-
----
-
-### R2: Process Params Array Step by Step
-
-Read the `params` array from the selected service's `_internal` metadata. Process each parameter **in order**. For each parameter, follow these rules:
-
-#### Source-to-Tool Mapping
-
-| `source` value | Tool to call | Parameters needed |
-|---------------|-------------|------------------|
-| `list:business_groups` | `smartcmp_list_business_groups` | catalog_id (from selected service id) |
-| `list:applications` | `smartcmp_list_applications` | business_group_id (from selected business group), keyword (optional) |
-| `list:resource_pools` | `smartcmp_list_resource_pools` | business_group_id, source_key, node_type (from selected catalog instructions.type) |
-| `list:os_templates` | `smartcmp_list_os_templates` | os_type (from selected catalog instructions.osType; fallback: infer from selected catalog instructions.type), resource_bundle_id (from selected pool) |
-| `list:list_images` or `list:images` | `smartcmp_list_images` | resource_bundle_id (from selected pool), logic_template_id (from selected OS template), cloud_entry_type_id (from the same selected pool's `cloudEntryTypeId`; use the actual selected value, never hardcode a platform) |
-
-#### Parameter Decision Rules
-
-| Condition | Action | Example |
-|-----------|--------|--------|
-| `source: "list:xxx"` AND `defaultValue: null` | Call the mapped tool, show list to user, ask to select. **STOP and wait.** | businessGroupId, projectId |
-| `source: "list:xxx"` AND `defaultValue` has value | Use default value silently. Do NOT call tool. | - |
-| `source: null` AND `defaultValue` has value | Use default value silently. Do NOT ask user. | computeProfileName="微型计算", cpu=1, memory=1 |
-| `source: null` AND `defaultValue: null` AND `required: true` | **Ask user to input this value.** Show prompt: "请输入{label}". **STOP and wait.** | name, credentialUser, credentialPassword |
-| `source: null` AND `defaultValue: null` AND `required: false` | Skip this parameter. Do not ask user. | dataDisks, subnetId, securityGroupIds |
-
-#### Example: Linux VM params processing
-
-Given this params array:
-
-> IMPORTANT: this example is illustrative only. On every real run, the currently selected
-> catalog card wins. If the selected catalog already gives `resourceBundleName`,
-> `logicTemplateName`, `templateId`, or similar fields a non-empty `defaultValue`, use that
-> default silently and do not call the related lookup tool.
-
-```
-name           -> source=null, default=null, required=true   → ASK user: "请输入资源名称"
-businessGroupId -> source=list:business_groups, default=null → CALL list_business_groups, show list, ask user to select
-resourceBundleName -> source=list:resource_pools, default=null → CALL list_resource_pools, show list, ask user to select
-computeProfileName -> source=null, default="微型计算"       → USE default silently
-logicTemplateName -> source=list:os_templates, default=null  → CALL list_os_templates, show list, ask user to select
-templateId     -> source=list:list_images, default=null      → CALL list_images, show list, ask user to select
-credentialUser -> source=null, default=null, required=true   → ASK user: "请输入用户名"
-credentialPassword -> source=null, default=null, required=true → ASK user: "请输入密码"
-networkId      -> source=null, default="network-79"          → USE default silently
-cpu            -> source=null, default=1                     → USE default silently
-memory         -> source=null, default=1                     → USE default silently
-systemDisk.size -> source=null, default=50, required=false   → USE default silently
-dataDisks      -> required=false, default=null               → SKIP
-subnetId       -> required=false, default=null               → SKIP
-securityGroupIds -> required=false, default=null             → SKIP
-```
-
-For the current built-in Linux VM card, it is valid for:
-
-- `resourceBundleName` to come from a silent default such as `vsphere资源池`
-- `logicTemplateName` to come from a silent default such as `Centos`
-- `templateId` to come from a silent default such as `vm-121`
-
-When the actual selected card has those defaults, do not ask the user and do not call
-`smartcmp_list_resource_pools`, `smartcmp_list_os_templates`, `smartcmp_list_images`, or
-`smartcmp_list_applications` unless the current parameter explicitly declares the matching
-`source` value.
-
-**CRITICAL RULES:**
-- **ONLY call tools that appear in the params `source` field.** Do NOT call tools not listed.
-- **Process parameters one at a time.** After each tool call or user input request, STOP and wait.
-- **You CAN batch multiple user-input questions** into one prompt (e.g., ask name + username + password together).
-- If a param has `source: "list:applications"`, call `smartcmp_list_applications` after `businessGroupId` is known, show the numbered list, and STOP for user selection.
-- Use selected catalog `instructions.type` as the `node_type` argument for `smartcmp_list_resource_pools`.
-- For `smartcmp_list_images`, always pass the saved `cloudEntryTypeId` from the user's selected resource pool. Do not invent, omit, or hardcode the platform identifier.
-
----
-
-### R3: Build Request Body [Build]
-
-**Core Rules:**
-
-1. `type` = selected catalog `instructions.type`
-2. `node` = selected catalog `instructions.node`
-3. If `cloudEntryTypeIds` is explicitly empty: add `"useResourceBundle": false`, do NOT include `resourceBundleName`
-4. If a resource pool is selected or defaulted: include `resourceBundleName` at top level
-
-**Request Body Template:**
-
-```json
-{
-    "catalogId": "<service id from CATALOG_META>",
-    "catalogName": "<service name from CATALOG_META>",
-    "userLoginId": "<current user login ID>",
-    "businessGroupName": "<selected business group name>",
-    "resourceBundleName": "<selected resource pool name, omit if useResourceBundle=false>",
-    "name": "<user-provided resource name>",
-    "resourceSpecs": [
-        {
-            "node": "<selected catalog instructions.node>",
-            "type": "<selected catalog instructions.type>",
-            "useResourceBundle": false,  // only when cloudEntryTypeIds is explicitly empty
-            "cpu": 2,
-            "memory": 4096
-        }
-    ]
-}
-```
-
-**Action:** Display confirmation to user in Chinese. Ask: "请确认以上信息是否正确？（是/否）"
-
-**STOP - Wait for user confirmation**
-
----
-
-### R4: Submit [Execute]
-
-```bash
-python scripts/submit.py --file request.json
-```
-
-**Complete** - Display request ID and status to user.
-
----
-
-## Scripts Reference
-
-| Script | Purpose | Parameters |
-|--------|---------|------------|
-| `../shared/scripts/list_services.py` | List service catalogs | `[keyword]` |
-| `../shared/scripts/list_business_groups.py` | List business groups | `<catalogId>` |
-| `../shared/scripts/list_applications.py` | List applications/projects | `<bgId> [keyword]` |
-| `../shared/scripts/list_resource_pools.py` | List resource pools | `<bgId> <sourceKey> <nodeType>` |
-| `../shared/scripts/list_os_templates.py` | List OS templates | `<osType> <resourceBundleId>` |
-| `scripts/submit.py` | Submit request | `--file <json_file>` |
-
----
-
-## Critical Rules
-
-1. **Display rules (MOST IMPORTANT):**
-   - When showing tool output to user, ONLY display the numbered list and the selection prompt (e.g. "请选择...").
-   - NEVER display `_internal` field content, META data, Index, Id, Source Key, Service Category, Params, cloudEntryTypeId, or any JSON/technical data to the user.
-   - The `_internal` field in tool results contains metadata for your reference only. Parse it silently to extract IDs for subsequent tool calls.
-   - After each list, ALWAYS ask user to select with a clear Chinese prompt like "请选择您要申请的服务（输入编号）".
-   - STOP and wait for user response after showing each list. Do NOT proceed automatically.
-2. **Params-driven workflow:** The `params` array from the selected service's `_internal` metadata is the ONLY source of truth for what tools to call and what to ask the user. Do NOT call tools not declared in params.
-3. **Execute only one action per turn.** After displaying output or asking question, MUST STOP and wait for user response.
-4. **Never fabricate data.** Only use values from script output or user input.
-5. **Ask for required manual input.** If a param has `source: null`, `defaultValue: null`, and `required: true`, you MUST ask the user for that value and STOP.
-6. **Never skip required list selections.** If a param has `source: "list:xxx"` and `defaultValue: null`, you MUST call the mapped tool and STOP for user selection.
-7. **Never auto-submit.** Must get user confirmation before submission.
-8. **Set node and type correctly.** `type` must come from selected catalog `instructions.type`, and `node` must come from selected catalog `instructions.node`.
-9. **resourceBundleName required:** When the request uses a selected or defaulted resource pool, the request body top level **must** include `resourceBundleName`.
-10. **Preserve selected card metadata.** Once the user selects a service card, keep using that card's saved `sourceKey`, `id`, `name`, `serviceCategory`, `instructions`, and `params` throughout the whole request flow.
-11. **No component lookup step.** For cloud-resource requests, use the selected catalog instructions metadata directly. Do not call `smartcmp_list_components`.
-12. **Always prefer explicit catalog defaults.** If the selected catalog `params` already provide a non-empty `defaultValue`, use that value silently instead of asking the user or calling another list tool.
-
----
-
-## PowerShell Environment Notes
-
-> **Important:** PowerShell encoding and parameter passing may cause request failures.
-
-### Use Python to Write JSON Files (Avoid BOM)
-
-```powershell
-# [Wrong] PowerShell adds BOM
-$body | ConvertTo-Json | Out-File -FilePath request.json -Encoding utf8
-
-# [Correct] Use Python to write JSON
-python -c "import json; data = {...}; open('request.json', 'w', encoding='utf-8').write(json.dumps(data, ensure_ascii=False, indent=2))"
-```
-
-### Always Use --file Parameter
-
-```powershell
-# [Wrong] JSON will be corrupted
-python submit.py --json '{"name": "test"}'
-
-# [Correct] Use file input
-python submit.py --file request.json
-```
-
----
-
-## References
-
-- [WORKFLOW.md](references/WORKFLOW.md) - Detailed step-by-step workflow
-- [PARAMS.md](references/PARAMS.md) - Parameter placement rules
-- [EXAMPLES.md](references/EXAMPLES.md) - Request body examples

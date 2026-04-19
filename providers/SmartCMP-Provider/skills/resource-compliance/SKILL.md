@@ -23,11 +23,13 @@ use_when:
 
 avoid_when:
   - User wants to browse general catalog data only (use datasource skill)
+  - User wants to browse a resource list, virtual-machine list, or cloud-host detail/attribute view only (use resource skill)
   - User wants to submit a provisioning request (use request skill)
   - User wants to approve or reject requests (use approval skill)
 
 related:
   - datasource
+  - resource
 ---
 
 # resource-compliance

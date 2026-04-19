@@ -7,7 +7,8 @@ SmartCMP Provider is a service provider module for AtlasClaw, integrating with S
 - **Resource Requests** - Submit cloud resource or application provisioning requests via SmartCMP
 - **Approval Management** - View pending approvals, approve or reject requests
 - **Alarm Management** - List alerts, analyze one alert, and run explicit alert status operations
-- **Data Queries** - Query service catalogs, business groups, resource pools, and other reference data
+- **Directory Queries** - List all business groups, resource pools, resources, or cloud hosts from the same UI directory endpoints used by CMP
+- **Data Queries** - Query service catalogs, applications, templates, images, and other reference data
 - **Intelligent Agents** - Automated pre-approval and request decomposition capabilities
 - **Cost Optimization** - Review optimization recommendations, analyze savings, execute SmartCMP-native fixes, and track remediation progress
 - **Resource Compliance** - Fetch resources by ID, reuse the shared normalized resource view, and analyze lifecycle, patch, security, and configuration posture
@@ -169,12 +170,11 @@ python skills/alarm/scripts/operate_alert.py <alert_id> --action mute
 ### datasource - Data Source Queries
 
 Read-only queries for SmartCMP reference data, used for browsing, discovering
-available resources, and looking up existing resources by ID.
+available resources, and looking up existing resources by ID. Standalone
+business-group, resource-pool, and resource listings now have their own dedicated skills.
 
 **Supported Queries:**
 - Service catalogs
-- Business groups
-- Resource pools
 - Application lists
 - OS templates
 - Images
@@ -194,6 +194,74 @@ python skills/shared/scripts/list_resource_pools.py <bgId> <sourceKey> <nodeType
 
 # Show resource details and normalized resource view by ID
 python skills/shared/scripts/list_resource.py <resource_id>
+```
+
+### business-group - Business Group Directory
+
+Read-only listing of all SmartCMP business groups through the standalone CMP UI
+directory endpoint.
+
+**Use Cases:**
+- 查看所有业务组
+- 列出所有业务组
+- Query business groups by keyword without entering the request workflow
+
+**Examples:**
+```bash
+# List all business groups
+python skills/business-group/scripts/list_all_business_groups.py
+
+# Filter business groups
+python skills/business-group/scripts/list_all_business_groups.py production
+```
+
+### resource-pool - Resource Pool Directory
+
+Read-only listing of all SmartCMP resource pools through the standalone CMP UI
+directory endpoint.
+
+**Use Cases:**
+- 查询可用的资源池
+- 查询资源池
+- 列出所有的资源池
+- Query resource pools by keyword without entering the request workflow
+
+**Examples:**
+```bash
+# List all resource pools
+python skills/resource-pool/scripts/list_all_resource_pools.py
+
+# Filter resource pools
+python skills/resource-pool/scripts/list_all_resource_pools.py production
+```
+
+### resource - Resource Directory
+
+Read-mostly listing and inspection of SmartCMP resources or cloud hosts through
+the standalone CMP UI list endpoints.
+
+**Use Cases:**
+- 查看我的云资源
+- 查看所有资源
+- 查看我的云主机
+- 查看所有云主机
+- 查看某个云主机详情
+- 分析某个云主机属性
+- Query resources or virtual machines by keyword without entering the request workflow
+
+**Examples:**
+```bash
+# List all resources
+python skills/resource/scripts/list_resources.py
+
+# List all cloud hosts
+python skills/resource/scripts/list_resources.py --scope virtual_machines
+
+# Filter cloud hosts
+python skills/resource/scripts/list_resources.py --scope virtual_machines --query-value production
+
+# Refresh and analyze one cloud host
+python skills/resource/scripts/analyze_resource_detail.py <resource_id>
 ```
 
 ### request - Resource Requests
@@ -315,6 +383,9 @@ SmartCMP-Provider/
 │   │   ├── scripts/                 # Alarm listing, analysis, and operations
 │   │   ├── references/
 │   │   └── SKILL.md
+│   ├── business-group/              # Standalone business-group directory skill
+│   │   ├── scripts/
+│   │   └── SKILL.md
 │   ├── cost-optimization/           # Cost optimization skill
 │   │   ├── references/
 │   │   ├── scripts/
@@ -331,6 +402,12 @@ SmartCMP-Provider/
 │   │   └── SKILL.md
 │   ├── request-decomposition-agent/ # Request decomposition agent
 │   │   ├── references/
+│   │   └── SKILL.md
+│   ├── resource/                    # Standalone resource directory skill
+│   │   ├── scripts/
+│   │   └── SKILL.md
+│   ├── resource-pool/               # Standalone resource-pool directory skill
+│   │   ├── scripts/
 │   │   └── SKILL.md
 │   ├── resource-compliance/         # Resource compliance analysis skill
 │   │   ├── references/

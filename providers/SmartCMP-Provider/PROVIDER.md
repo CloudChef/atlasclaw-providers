@@ -34,7 +34,7 @@ keywords:
   - CMP
 
 capabilities:
-  - Browse available services, business groups, resource pools, templates, and other reference data before making a request
+  - Browse available services, business groups, resource pools, resources, cloud hosts, host details, templates, and other reference data before making a request
   - Submit self-service requests for virtual machines, cloud resources, application environments, or ticket/work order services
   - View pending approvals and approve or reject service requests
   - List alerts, analyze alert context, and update alert status with remediation guidance
@@ -47,7 +47,7 @@ capabilities:
 use_when:
   - User wants to request a VM, database, application environment, or other service catalog item
   - User wants to submit a ticket or work order for infrastructure or support needs
-  - User asks what services, business groups, or resource pools are available before making a request
+  - User asks what services, business groups, resource pools, resources, or cloud hosts are available before making a request
   - User needs to approve or reject a request
   - User wants to check pending approvals
   - User wants to inspect, analyze, or operate on resource alarms
@@ -71,7 +71,7 @@ Cloud management platform provider for self-service resource requests, approvals
    - **Option 1**: Extract session cookie from SmartCMP web console (see [Cookie Extraction](#cookie-extraction))
    - **Option 2**: Set up auto-login credentials (recommended)
 2. Set environment variables (see [Environment Variables](#environment-variables))
-3. Use skills: `datasource` → `request` → `approval` → `alarm` → `cost-optimization` → `resource-compliance`
+3. Use skills: `business-group` / `resource-pool` / `resource` / `datasource` → `request` → `approval` → `alarm` → `cost-optimization` → `resource-compliance`
 
 ## Connection Parameters
 
@@ -281,7 +281,10 @@ CMP_URL=https://cmp.example.com
 
 | Skill | Type | Description | Key Operations |
 |-------|------|-------------|----------------|
-| `datasource` | Data Query | Read-only reference data queries and resource lookup by ID | `list_services`, `list_business_groups`, `list_resource_pools`, `list_resource` |
+| `business-group` | Directory Query | Standalone listing of all business groups from the CMP UI directory endpoint | `smartcmp_list_all_business_groups` |
+| `resource-pool` | Directory Query | Standalone listing of all resource pools from the CMP UI directory endpoint | `smartcmp_list_all_resource_pools` |
+| `resource` | Directory Query | Standalone listing of all resources or all cloud hosts, plus one-host detail analysis via refresh-status | `smartcmp_list_resources`, `smartcmp_analyze_resource_detail` |
+| `datasource` | Data Query | Read-only reference data queries and resource lookup by ID for service discovery and request workflows | `list_services`, `list_business_groups`, `list_resource_pools`, `list_resource` |
 | `request` | Provisioning | Cloud resource provisioning requests | `list_components`, `submit` |
 | `approval` | Workflow | Approval workflow management | `list_pending`, `approve`, `reject` |
 | `alarm` | Monitoring | Alarm alert listing, analysis, and status operations | `list_alerts`, `analyze_alert`, `operate_alert` |
@@ -295,9 +298,48 @@ CMP_URL=https://cmp.example.com
 All example commands below assume your current directory is
 `providers/SmartCMP-Provider/`.
 
+#### business-group
+
+List all business groups directly from the CMP UI directory endpoint. Use this
+when the user says "查看所有业务组" or "列出所有业务组" and does not want to enter the
+request workflow.
+
+```bash
+python skills/business-group/scripts/list_all_business_groups.py             # List all business groups
+python skills/business-group/scripts/list_all_business_groups.py <keyword>   # Filter business groups
+```
+
+#### resource-pool
+
+List all resource pools directly from the CMP UI directory endpoint. Use this
+when the user says "查询可用的资源池", "查询资源池", or "列出所有的资源池" and does
+not want to enter the request workflow.
+
+```bash
+python skills/resource-pool/scripts/list_all_resource_pools.py              # List all resource pools
+python skills/resource-pool/scripts/list_all_resource_pools.py <keyword>    # Filter resource pools
+```
+
+#### resource
+
+List all resources or all cloud hosts directly from the CMP UI list endpoint,
+and inspect one cloud host by resource ID with the refresh-status endpoint.
+Use this when the user says "查看我的云资源", "查看所有资源", "查看我的云主机",
+"查看所有云主机", "查看某个云主机详情", or "分析某个云主机属性".
+
+```bash
+python skills/resource/scripts/list_resources.py                                     # List all resources
+python skills/resource/scripts/list_resources.py --scope virtual_machines            # List all cloud hosts
+python skills/resource/scripts/list_resources.py --scope virtual_machines --query-value production
+python skills/resource/scripts/analyze_resource_detail.py <resource_id>              # Refresh and analyze one cloud host
+```
+
 #### datasource
 
-Query reference data (read-only). Use before `request` skill to discover available resources.
+Query reference data (read-only). Use before `request` skill to discover
+available services, applications, templates, images, or resource details.
+Standalone directory queries for all business groups and all resource pools now
+have dedicated skills, and list-style resource browsing belongs to `resource`.
 
 ```bash
 python skills/shared/scripts/list_services.py                         # List service catalogs
