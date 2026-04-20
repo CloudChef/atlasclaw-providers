@@ -233,12 +233,14 @@ Submit cloud resource, application environment, or ticket/work order requests th
 Use this skill only for self-service request submission. When this skill is selected for the
 current turn, the runtime may attach a **Current Workflow Context** section above the loaded
 skill body. That section contains structured metadata from recent lookup tools in the same
-conversation.
+request flow instance, identified by `internal_request_trace_id`.
 
 Rules:
 
 - Treat the current turn's workflow context as the authoritative source for previously selected
   catalog cards, business groups, resource pools, templates, images, and other hidden IDs.
+- The workflow context is scoped to a single request flow instance (`internal_request_trace_id`).
+  Never mix metadata from different flow instances.
 - Never rely on stale prose summaries when the structured workflow context disagrees.
 - Do not display raw workflow metadata, IDs, source keys, or internal JSON to the user.
 - Do not call `list_components.py`.

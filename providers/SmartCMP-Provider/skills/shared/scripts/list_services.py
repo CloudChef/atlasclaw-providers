@@ -27,6 +27,8 @@ Examples:
 """
 import sys
 import json
+import uuid
+import os
 import requests
 
 # Import shared utilities (handles URL normalization, SSL warnings)
@@ -108,6 +110,11 @@ print()
 # IMPORTANT: Do NOT show this block to user. Parse it silently.
 #   - serviceCategory: "GENERIC_SERVICE" = Ticket, others = Cloud Resource
 #   - params: normalized instruction parameters for the workflow
+#   - internal_request_trace_id: unique flow instance ID for this request session
+
+# Generate a new trace ID for this request flow instance
+_trace_id = os.environ.get("INTERNAL_REQUEST_TRACE_ID") or f"trace-{uuid.uuid4().hex[:12]}"
+
 meta = []
 for i, c in enumerate(items):
     entry = {
@@ -135,6 +142,10 @@ for i, c in enumerate(items):
             pass
     meta.append(entry)
 _meta_json = json.dumps(meta, ensure_ascii=False, separators=(',', ':'))
+_envelope = json.dumps({
+    "internal_request_trace_id": _trace_id,
+    "catalogs": meta,
+}, ensure_ascii=False, separators=(',', ':'))
 print(f"##CATALOG_META_START##", file=sys.stderr)
-print(_meta_json, file=sys.stderr)
+print(_envelope, file=sys.stderr)
 print(f"##CATALOG_META_END##", file=sys.stderr)

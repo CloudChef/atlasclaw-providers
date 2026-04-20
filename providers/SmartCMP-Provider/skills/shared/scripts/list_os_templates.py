@@ -90,6 +90,7 @@ print("请选择OS模板（输入编号）：")
 print()
 
 # -- META block (agent reads silently, do NOT display to user) -----------------
+_trace_id = os.environ.get("INTERNAL_REQUEST_TRACE_ID", "")
 meta = [
     {
         "index": i + 1,
@@ -98,7 +99,10 @@ meta = [
     }
     for i, t in enumerate(templates)
 ]
-_meta_json = json.dumps(meta, ensure_ascii=False, separators=(',', ':'))
+_envelope = {"os_templates": meta}
+if _trace_id:
+    _envelope["internal_request_trace_id"] = _trace_id
+_meta_json = json.dumps(_envelope, ensure_ascii=False, separators=(',', ':'))
 print("##OS_TEMPLATE_META_START##", file=sys.stderr)
 print(_meta_json, file=sys.stderr)
 print("##OS_TEMPLATE_META_END##", file=sys.stderr)

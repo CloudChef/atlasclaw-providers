@@ -191,6 +191,7 @@ print("请选择镜像（输入编号）：")
 print()
 
 # ── META block (agent reads silently, do NOT display to user) ─────────────────
+_trace_id = os.environ.get("INTERNAL_REQUEST_TRACE_ID", "")
 meta = [
     {
         "index": i + 1,
@@ -199,7 +200,10 @@ meta = [
     }
     for i, img in enumerate(items)
 ]
-_meta_json = json.dumps(meta, ensure_ascii=False, separators=(',', ':'))
+_envelope = {"images": meta}
+if _trace_id:
+    _envelope["internal_request_trace_id"] = _trace_id
+_meta_json = json.dumps(_envelope, ensure_ascii=False, separators=(',', ':'))
 print("##IMAGE_META_START##", file=sys.stderr)
 print(_meta_json, file=sys.stderr)
 print("##IMAGE_META_END##", file=sys.stderr)

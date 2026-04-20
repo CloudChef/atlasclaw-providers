@@ -101,7 +101,8 @@ if not os_type:
         os_type = "Linux"
 
 # Structured block — agent reads this via stderr (not shown to user)
-_comp_meta = json.dumps({
+_trace_id = os.environ.get("INTERNAL_REQUEST_TRACE_ID", "")
+_comp_meta_dict = {
     "sourceKey": source_key,
     "typeName": type_name,
     "id": comp_id,
@@ -109,7 +110,10 @@ _comp_meta = json.dumps({
     "node": node_name,
     "cloudEntryTypeIds": cloud_entry_type_ids,
     "osType": os_type,
-}, ensure_ascii=False, separators=(',', ':'))
+}
+if _trace_id:
+    _comp_meta_dict["internal_request_trace_id"] = _trace_id
+_comp_meta = json.dumps(_comp_meta_dict, ensure_ascii=False, separators=(',', ':'))
 print("##COMPONENT_META_START##", file=sys.stderr)
 print(_comp_meta, file=sys.stderr)
 print("##COMPONENT_META_END##", file=sys.stderr)
