@@ -135,17 +135,18 @@ without calling any lookup tools. For each parameter, apply this rule:
 
 | # | Condition | Action |
 |---|-----------|--------|
-| 1 | User's message specifies this value (e.g. "2c4g" → cpu=2, memory=4096) | Use user value |
+| 1 | User's message specifies this value (e.g. "2c4g" → cpu=2, memory=4) | Use user value |
 | 2 | Parameter has a non-empty `defaultValue` | Use the default silently |
 | 3 | Parameter is `name` (resource name) AND not provided | Generate a reasonable name like `vm-<timestamp>` or ask user |
 | 4 | Parameter is `credentialUsername` or `credentialPassword` AND required AND no default | Ask user for these |
 | 5 | Everything else with empty default | Omit from request body, or use empty string |
 
 **Spec parsing rules:**
-- "2c4g" → cpu=2, memory=4096 (MB) or memory=4 (GB, check unit from param definition)
-- "4c8g" → cpu=4, memory=8192 (MB)
-- "8核16G" → cpu=8, memory=16384 (MB)
-- If memory unit in instructions.parameters shows MB, convert GB to MB (multiply by 1024)
+- The `memory` parameter unit in SmartCMP is **GB** (not MB). Always use the GB number directly.
+- "2c4g" → cpu=2, memory=4
+- "4c8g" → cpu=4, memory=8
+- "8核16G" → cpu=8, memory=16
+- Do NOT convert to MB. The API expects the integer GB value as-is.
 
 **Key principle:** Never call lookup tools for business groups, resource pools, OS templates,
 or images. Use `defaultValue` from the catalog's `instructions.parameters` for all of these.
