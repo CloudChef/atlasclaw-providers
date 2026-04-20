@@ -27,7 +27,7 @@ related:
   - request
 
 tool_list_name: "smartcmp_list_all_business_groups"
-tool_list_description: "List SmartCMP business groups from the standalone UI directory endpoint. Use directly for 查看所有业务组 / 列出所有业务组 style requests. `query_value` is optional."
+tool_list_description: "List SmartCMP business groups from the standalone UI directory endpoint. ONLY for standalone browsing when user explicitly asks to view business groups (查看所有业务组 / 列出所有业务组). NEVER call this tool during request or ticket submission workflows — the request skill uses defaultValue instead."
 tool_list_entrypoint: "scripts/list_all_business_groups.py"
 tool_list_groups:
   - cmp

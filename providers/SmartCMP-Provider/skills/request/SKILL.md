@@ -43,12 +43,11 @@ related:
 
 # === Tool Registration ===
 tool_list_services_name: "smartcmp_list_services"
-tool_list_services_description: "List available service catalogs from SmartCMP. Show only the numbered catalog list to the user. Treat returned _internal metadata such as id, sourceKey, serviceCategory, instructions, and params as hidden backend state only; never display or narrate those fields."
+tool_list_services_description: "List available service catalogs from SmartCMP. After receiving the catalog list, check whether the user's original message clearly matches a specific catalog. If so, auto-select it and proceed without asking. Otherwise show the numbered list. Keep returned _internal metadata for workflow use only; do not show those fields to the user."
 tool_list_services_entrypoint: "../shared/scripts/list_services.py"
 tool_list_services_group: "cmp"
 tool_list_services_capability_class: "provider:smartcmp"
 tool_list_services_priority: 100
-tool_list_services_result_mode: "tool_only_ok"
 tool_list_services_parameters: |
   {
     "type": "object",
@@ -58,146 +57,6 @@ tool_list_services_parameters: |
         "description": "Optional keyword to filter services"
       }
     }
-  }
-tool_list_business_groups_name: "smartcmp_list_business_groups"
-tool_list_business_groups_description: "List business groups for a catalog. IMPORTANT: You MUST pass catalog_id from the previous list_services output (e.g. BUILD-IN-CATALOG-LINUX-VM)."
-tool_list_business_groups_entrypoint: "../shared/scripts/list_business_groups.py"
-tool_list_business_groups_groups:
-  - cmp
-  - request
-tool_list_business_groups_capability_class: "provider:smartcmp"
-tool_list_business_groups_priority: 105
-tool_list_business_groups_result_mode: "tool_only_ok"
-tool_list_business_groups_cli_positional:
-  - catalog_id
-tool_list_business_groups_parameters: |
-  {
-    "type": "object",
-    "properties": {
-      "catalog_id": {
-        "type": "string",
-        "description": "Catalog ID from list_services output (e.g. BUILD-IN-CATALOG-LINUX-VM)"
-      }
-    },
-    "required": ["catalog_id"]
-  }
-tool_list_resource_pools_name: "smartcmp_list_resource_pools"
-tool_list_resource_pools_description: "List resource pools for VM provisioning. Requires business_group_id from list_business_groups, source_key from the selected catalog metadata, and node_type from the selected catalog instructions.type field."
-tool_list_resource_pools_entrypoint: "../shared/scripts/list_resource_pools.py"
-tool_list_resource_pools_groups:
-  - cmp
-  - request
-tool_list_resource_pools_capability_class: "provider:smartcmp"
-tool_list_resource_pools_priority: 110
-tool_list_resource_pools_result_mode: "tool_only_ok"
-tool_list_resource_pools_cli_positional:
-  - business_group_id
-  - source_key
-  - node_type
-tool_list_resource_pools_parameters: |
-  {
-    "type": "object",
-    "properties": {
-      "business_group_id": {
-        "type": "string",
-        "description": "Business group ID from list_business_groups output"
-      },
-      "source_key": {
-        "type": "string",
-        "description": "Service source key from list_services CATALOG_META (e.g. resource.iaas.machine.instance.abstract)"
-      },
-      "node_type": {
-        "type": "string",
-        "description": "Selected catalog instructions.type value (for example cloudchef.nodes.Compute)"
-      }
-    },
-    "required": ["business_group_id", "source_key", "node_type"]
-  }
-tool_list_os_templates_name: "smartcmp_list_os_templates"
-tool_list_os_templates_description: "List OS templates. IMPORTANT: os_type MUST be 'Linux' or 'Windows' from selected catalog instructions.osType, or derived from the selected catalog instructions.type when osType is absent. resource_bundle_id comes from list_resource_pools metadata."
-tool_list_os_templates_entrypoint: "../shared/scripts/list_os_templates.py"
-tool_list_os_templates_groups:
-  - cmp
-  - request
-tool_list_os_templates_capability_class: "provider:smartcmp"
-tool_list_os_templates_priority: 115
-tool_list_os_templates_result_mode: "tool_only_ok"
-tool_list_os_templates_cli_positional:
-  - os_type
-  - resource_bundle_id
-tool_list_os_templates_parameters: |
-  {
-    "type": "object",
-    "properties": {
-      "os_type": {
-        "type": "string",
-        "description": "OS type: must be exactly 'Linux' or 'Windows' (from selected catalog instructions.osType, or derived from instructions.type)"
-      },
-      "resource_bundle_id": {
-        "type": "string",
-        "description": "Resource bundle ID from list_resource_pools output"
-      }
-    },
-    "required": ["os_type", "resource_bundle_id"]
-  }
-tool_list_applications_name: "smartcmp_list_applications"
-tool_list_applications_description: "List applications/projects for a business group. Returns application IDs for request submission."
-tool_list_applications_entrypoint: "../shared/scripts/list_applications.py"
-tool_list_applications_groups:
-  - cmp
-  - request
-tool_list_applications_capability_class: "provider:smartcmp"
-tool_list_applications_priority: 125
-tool_list_applications_result_mode: "tool_only_ok"
-tool_list_applications_cli_positional:
-  - business_group_id
-  - keyword
-tool_list_applications_parameters: |
-  {
-    "type": "object",
-    "properties": {
-      "business_group_id": {
-        "type": "string",
-        "description": "Business group ID from list_business_groups output"
-      },
-      "keyword": {
-        "type": "string",
-        "description": "Optional keyword to filter applications by name"
-      }
-    },
-    "required": ["business_group_id"]
-  }
-tool_list_images_name: "smartcmp_list_images"
-tool_list_images_description: "List available VM images for the selected resource pool and OS template. IMPORTANT: pass resource_bundle_id from the selected resource pool, logic_template_id from the selected OS template, and cloud_entry_type_id from the same selected resource pool's cloudEntryTypeId. Build the lookup from the actual selected platform value; never hardcode vSphere or any single cloud platform."
-tool_list_images_entrypoint: "../shared/scripts/list_images.py"
-tool_list_images_groups:
-  - cmp
-  - request
-tool_list_images_capability_class: "provider:smartcmp"
-tool_list_images_priority: 130
-tool_list_images_result_mode: "tool_only_ok"
-tool_list_images_cli_positional:
-  - resource_bundle_id
-  - logic_template_id
-  - cloud_entry_type_id
-tool_list_images_parameters: |
-  {
-    "type": "object",
-    "properties": {
-      "resource_bundle_id": {
-        "type": "string",
-        "description": "Resource bundle ID from list_resource_pools output"
-      },
-      "logic_template_id": {
-        "type": "string",
-        "description": "Logic template ID from list_os_templates output"
-      },
-      "cloud_entry_type_id": {
-        "type": "string",
-        "description": "Cloud entry type ID from list_resource_pools RESOURCE_POOL_META (cloudEntryTypeId)"
-      }
-    },
-    "required": ["resource_bundle_id", "logic_template_id", "cloud_entry_type_id"]
   }
 tool_submit_name: "smartcmp_submit_request"
 tool_submit_description: "Submit resource request to SmartCMP. Pass the complete request JSON body as the 'json_body' parameter. Reuse the selected catalog metadata, including catalogId and catalogName when they are available."
@@ -228,29 +87,35 @@ tool_submit_parameters: |
 
 Submit cloud resource, application environment, or ticket/work order requests through the service catalog.
 
-## Workflow Contract
+## Flow (3 turns max)
 
-Use this skill only for self-service request submission. When this skill is selected for the
-current turn, the runtime may attach a **Current Workflow Context** section above the loaded
-skill body. That section contains structured metadata from recent lookup tools in the same
-request flow instance, identified by `internal_request_trace_id`.
+Only two tools exist: `smartcmp_list_services` and `smartcmp_submit_request`.
+Never call any other tool during the request workflow.
 
-Rules:
-
-- Treat the current turn's workflow context as the authoritative source for previously selected
-  catalog cards, business groups, resource pools, templates, images, and other hidden IDs.
-- The workflow context is scoped to a single request flow instance (`internal_request_trace_id`).
-  Never mix metadata from different flow instances.
-- Never rely on stale prose summaries when the structured workflow context disagrees.
-- Do not display raw workflow metadata, IDs, source keys, or internal JSON to the user.
-- Do not call `list_components.py`.
+1. **Turn 1:** Call `smartcmp_list_services` → auto-select catalog → tell user what was selected
+2. **Turn 2:** Build complete request body using catalog defaults + user specs → show JSON
+   preview → ask for confirmation
+3. **Turn 3:** User confirms → call `smartcmp_submit_request`
 
 ## Service Selection
 
 1. Call `smartcmp_list_services`.
-2. Show only the numbered catalog names and the selection prompt.
-3. After the user selects a catalog, use the selected catalog metadata from the current turn's
-   workflow context to decide the next step.
+2. **Auto-select when user intent is clear:** After receiving the catalog list, check whether
+   the user's original message clearly indicates a specific service type:
+   - User mentions "linux" / "Linux VM" / "linux云主机" / "云主机" (without "windows") →
+     auto-select the catalog whose name contains "Linux VM" (not "Linux VM - 复制").
+   - User mentions "windows" / "Windows VM" / "windows云主机" → auto-select "Windows VM".
+   - User mentions "工单" / "ticket" / "问题" → auto-select the catalog whose
+     `serviceCategory` is `"GENERIC_SERVICE"` (e.g. "问题工单").
+   - User mentions "k8s" / "kubernetes" / "容器" → auto-select "App on Kubernetes".
+   - User mentions "机房" → auto-select "机房".
+   - User says only "申请云资源" / "申请资源" without specifying OS type → ambiguous, show the
+     full list and ask.
+   - **When auto-selecting: DO NOT show the raw catalog list.** Output a brief confirmation
+     like "已为您自动选择 Linux VM，正在为您构建申请参数..." and STOP this turn.
+   - If the intent is ambiguous or matches multiple catalogs, show the full numbered list and
+     ask for selection.
+3. After the catalog is selected, proceed to Parameter Resolution.
 
 ## Cloud Request Rules
 
@@ -261,52 +126,44 @@ of truth:
 - selected catalog `name` -> `catalogName`
 - `instructions.node` -> request `node`
 - `instructions.type` -> request `type`
-- `instructions.osType` -> OS template lookup `os_type`
-- if `instructions.osType` is absent, derive `Windows` when `type` or `node` contains
-  `windows`; otherwise derive `Linux`
 - `instructions.parameters` or `params` -> ordered request parameter list
 
-### CRITICAL: Parameter-Driven Decision Table
+### Parameter Resolution (No Lookup Tools)
 
-**STOP and read before calling ANY lookup tool.** You MUST check each parameter's `source`
-field in `instructions.parameters`. Only call a lookup tool when the parameter explicitly
-declares a `source` value AND its `defaultValue` is empty. Never infer a lookup from field
-names alone.
-
-Process parameters in order. For each parameter, apply exactly one rule:
+After selecting a catalog, resolve ALL parameters directly from `instructions.parameters`
+without calling any lookup tools. For each parameter, apply this rule:
 
 | # | Condition | Action |
 |---|-----------|--------|
-| 1 | `source` is non-empty AND `defaultValue` is empty | Call the mapped lookup tool, show result, wait for user selection |
-| 2 | `source` is non-empty AND `defaultValue` is non-empty | Use the default silently, do NOT call the lookup tool |
-| 3 | `source` is empty AND `defaultValue` is non-empty | Use the default silently |
-| 4 | `source` is empty AND `defaultValue` is empty AND `required=true` | Ask the user for input |
-| 5 | `source` is empty AND `defaultValue` is empty AND `required=false` | Skip this parameter |
+| 1 | User's message specifies this value (e.g. "2c4g" → cpu=2, memory=4096) | Use user value |
+| 2 | Parameter has a non-empty `defaultValue` | Use the default silently |
+| 3 | Parameter is `name` (resource name) AND not provided | Generate a reasonable name like `vm-<timestamp>` or ask user |
+| 4 | Parameter is `credentialUsername` or `credentialPassword` AND required AND no default | Ask user for these |
+| 5 | Everything else with empty default | Omit from request body, or use empty string |
 
-**User-specified values override defaults.** If the user's initial message includes specs
-(e.g. "2c4g" means cpu=2, memory=4GB), use those values instead of `defaultValue`.
+**Spec parsing rules:**
+- "2c4g" → cpu=2, memory=4096 (MB) or memory=4 (GB, check unit from param definition)
+- "4c8g" → cpu=4, memory=8192 (MB)
+- "8核16G" → cpu=8, memory=16384 (MB)
+- If memory unit in instructions.parameters shows MB, convert GB to MB (multiply by 1024)
 
-### Forbidden actions
+**Key principle:** Never call lookup tools for business groups, resource pools, OS templates,
+or images. Use `defaultValue` from the catalog's `instructions.parameters` for all of these.
+If a parameter has `source: "list:xxx"` but also has a `defaultValue`, use the default.
+If a parameter has `source: "list:xxx"` but NO `defaultValue`, omit it from the request body.
 
-- If `instructions.parameters` does NOT contain any parameter with
-  `source: "list:resource_pools"`, do NOT call `smartcmp_list_resource_pools`.
-- If `instructions.parameters` does NOT contain any parameter with
-  `source: "list:os_templates"`, do NOT call `smartcmp_list_os_templates`.
-- If `instructions.parameters` does NOT contain any parameter with
-  `source: "list:images"` or `source: "list:list_images"`, do NOT call `smartcmp_list_images`.
-- If `instructions.parameters` does NOT contain any parameter with
-  `source: "list:applications"`, do NOT call `smartcmp_list_applications`.
-- If a parameter like `resourceBundleName`, `logicTemplateName`, `templateId`, `networkId`,
-  `cpu`, `memory`, or any other field already has a non-empty `defaultValue` and no `source`,
-  use that value silently. Do NOT call a related list tool.
+### What to ask the user (at most)
 
-### Mapped lookups (only when triggered by source field)
+Only ask the user if ALL of these are true:
+- The parameter is required
+- The parameter has no defaultValue
+- The user's original message does not contain the answer
 
-- `list:business_groups` -> `smartcmp_list_business_groups(catalog_id=<selected catalog id>)`
-- `list:applications` -> `smartcmp_list_applications(business_group_id=<selected business group id>)`
-- `list:resource_pools` -> `smartcmp_list_resource_pools(business_group_id=<selected business group id>, source_key=<selected sourceKey>, node_type=<instructions.type>)`
-- `list:os_templates` -> `smartcmp_list_os_templates(os_type=<instructions.osType or derived value>, resource_bundle_id=<selected resource pool id>)`
-- `list:list_images` or `list:images` -> `smartcmp_list_images(resource_bundle_id=<selected resource pool id>, logic_template_id=<selected os template id>, cloud_entry_type_id=<selected resource pool cloudEntryTypeId>)`
+In practice, you should ask at most for:
+- Resource name (`name`) — if not derivable from context
+- Credentials (`credentialUsername`, `credentialPassword`) — if required and no defaults
+
+Combine all questions into a single message. Do not ask one at a time.
 
 ## Ticket / Work Order Rules
 
@@ -314,17 +171,22 @@ When the selected catalog is a generic or problem-service request, collect only 
 required by that catalog metadata. Do not reuse cloud-only fields such as `resourceSpecs`,
 `node`, or `type` unless the selected catalog metadata explicitly requires them.
 
+For ticket requests, ask only for:
+- `description` — the user's problem description (can derive from their original message)
+- `name` — request name (can auto-generate)
+
 ## Submit Contract
 
 The submit tool accepts `json_body`.
 
 ### Step 1: Show preview and ask for confirmation
 
-1. Show a short Chinese summary.
+1. Show a short Chinese summary of the request.
 2. Show a heading `JSON 预览`.
 3. Show a fenced `json` block with the exact request body that will be submitted.
-4. Ask `请确认以上信息是否正确？（是/否）`.
-5. **STOP and wait for the user's answer. Do NOT call `smartcmp_submit_request` yet.**
+4. Mask sensitive values such as `credentialPassword` as `"******"` in the preview.
+5. Ask `请确认以上信息是否正确？（是/否）`.
+6. **STOP and wait for the user's answer. Do NOT call `smartcmp_submit_request` yet.**
 
 ### Step 2: After user confirms
 
@@ -333,17 +195,10 @@ When the user replies "是", "yes", "确认", or any affirmative answer:
 - **Immediately call `smartcmp_submit_request`** with the constructed `json_body`.
 - Do NOT show the summary or JSON preview again.
 - Do NOT ask for confirmation again.
-- The submit tool call is the ONLY correct action after user confirmation.
 
 When the user replies "否", "no", or any negative answer:
 
 - Ask what they want to change and go back to collecting that parameter.
-
-### Preview rules
-
-- The preview must reflect the real structure and resolved values that will be submitted.
-- Mask sensitive values such as `credentialPassword` as `"******"` in the preview.
-- Keep the real value in the actual `json_body` passed to `smartcmp_submit_request`.
 
 ### Cloud request structure
 
@@ -369,12 +224,14 @@ When the user replies "否", "no", or any negative answer:
 
 ## Interaction Rules
 
-- Execute only one user-facing step per turn.
-- After showing a numbered list, stop and wait for the user's selection.
-- After asking for manual input, stop and wait for the user's answer.
-- **After the user confirms the JSON preview with "是", immediately call
-  `smartcmp_submit_request`. Do NOT repeat the preview or ask again.**
-- Never claim a request was submitted unless `smartcmp_submit_request` actually executed in the
-  current turn.
+- **Execute only one tool call per turn.** After calling any tool, stop and generate your
+  response. Do NOT chain multiple tool calls in a single turn.
+- **When auto-selecting a catalog:** Do NOT echo or repeat the raw tool output. Write your
+  own brief confirmation message and STOP.
+- If the user provides all needed info upfront (e.g. "申请2c4g的linux云主机"), you should
+  be able to complete the request in 3 turns: select catalog → show preview → submit.
+- After the user confirms the JSON preview, immediately call `smartcmp_submit_request`.
+- Never claim a request was submitted unless `smartcmp_submit_request` actually executed.
 - Never display raw `_internal` metadata or hidden JSON to the user.
+
 

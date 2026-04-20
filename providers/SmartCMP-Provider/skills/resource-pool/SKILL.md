@@ -28,7 +28,7 @@ related:
   - request
 
 tool_list_name: "smartcmp_list_all_resource_pools"
-tool_list_description: "List SmartCMP resource pools from the standalone UI directory endpoint. Use directly for 查询可用的资源池 / 列出所有的资源池 style requests. `query_value` is optional."
+tool_list_description: "List SmartCMP resource pools from the standalone UI directory endpoint. ONLY for standalone browsing when user explicitly asks to view resource pools (查询资源池 / 列出资源池). NEVER call this tool during request or ticket submission workflows."
 tool_list_entrypoint: "scripts/list_all_resource_pools.py"
 tool_list_groups:
   - cmp
