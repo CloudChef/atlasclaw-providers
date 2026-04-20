@@ -96,15 +96,6 @@ if resp.status_code != 200:
 result = resp.json()
 items = result.get("content", [])
 total = result.get("totalElements", len(items))
-print(f"Found {total} published catalog(s):\n")
-
-# ── User-visible list (name only) ─────────────────────────────────────────
-for i, c in enumerate(items):
-    name = c.get("nameZh") or c.get("name", "N/A")
-    print(f"  [{i+1}] {name}")
-print()
-print("请选择您要申请的服务（输入编号）：")
-print()
 
 # ── Machine-readable metadata (agent reads silently, do NOT display to user)
 # IMPORTANT: Do NOT show this block to user. Parse it silently.
@@ -141,7 +132,12 @@ for i, c in enumerate(items):
         except (json.JSONDecodeError, TypeError):
             pass
     meta.append(entry)
-_meta_json = json.dumps(meta, ensure_ascii=False, separators=(',', ':'))
+
+# ── User-visible output (brief summary only) ─────────────────────────────
+# Only print a short summary to stdout. The LLM will format the catalog list
+# for the user based on the metadata, applying auto-selection when appropriate.
+print(f"Found {total} published catalog(s).")
+
 _envelope = json.dumps({
     "internal_request_trace_id": _trace_id,
     "catalogs": meta,

@@ -14,8 +14,16 @@ triggers:
   - 申请资源
   - 创建虚拟机
   - 提交工单
+  - 申请工单
   - 申请机房
   - 申请服务
+  - 提工单
+  - 报工单
+  - 问题工单
+  - 事件工单
+  - 申请云主机
+  - 申请linux
+  - 申请windows
 
 use_when:
   - User wants to request a VM, cloud resource, database, or application environment
@@ -43,7 +51,7 @@ related:
 
 # === Tool Registration ===
 tool_list_services_name: "smartcmp_list_services"
-tool_list_services_description: "List available service catalogs from SmartCMP. After receiving the catalog list, check whether the user's original message clearly matches a specific catalog. If so, auto-select it and proceed without asking. Otherwise show the numbered list. Keep returned _internal metadata for workflow use only; do not show those fields to the user."
+tool_list_services_description: "List available service catalogs from SmartCMP. Call this tool ONLY ONCE at the beginning of the workflow. If you already have a catalogId from a previous call, do NOT call this tool again — proceed directly to building the request body and calling smartcmp_submit_request. After receiving the catalog list, check whether the user's original message clearly matches a specific catalog. If so, auto-select it and proceed without asking. Otherwise show the numbered list. Keep returned _internal metadata for workflow use only; do not show those fields to the user."
 tool_list_services_entrypoint: "../shared/scripts/list_services.py"
 tool_list_services_group: "cmp"
 tool_list_services_capability_class: "provider:smartcmp"
@@ -59,7 +67,7 @@ tool_list_services_parameters: |
     }
   }
 tool_submit_name: "smartcmp_submit_request"
-tool_submit_description: "Submit resource request to SmartCMP. CRITICAL RULES: (1) NEVER claim a request was submitted or succeeded without actually calling this tool — fabricating submission results is strictly forbidden. (2) Before calling this tool, show the user a JSON preview and wait for confirmation. (3) The json_body parameter is REQUIRED — without it the tool WILL fail. (4) For tickets, json_body MUST follow this exact structure: {catalogId, catalogName, userLoginId, businessGroupName, name, genericRequest:{description}}. For cloud, use: {catalogId, catalogName, userLoginId, businessGroupName, name, resourceSpecs:[{node, type, cpu, memory, ...}]}. (5) FORBIDDEN top-level fields: description, serviceCategory, priority, category, requestor, parameters — never add these."
+tool_submit_description: "Submit resource request to SmartCMP. CRITICAL RULES: (1) NEVER claim a request was submitted or succeeded without actually calling this tool — fabricating submission results is strictly forbidden. (2) Before calling this tool, show the user a JSON preview and wait for confirmation. (3) The json_body parameter is REQUIRED — without it the tool WILL fail. (4) catalogId MUST be the UUID id from the catalog metadata (e.g. '19b87cb1-3425-4535-83f5-50c300899095'), NEVER use sourceKey or name strings like 'BUILD-IN-CATALOG-LINUX-VM'. (5) For tickets: {catalogId, catalogName, userLoginId, businessGroupName, name, genericRequest:{description}}. For cloud: {catalogId, catalogName, userLoginId, businessGroupName, name, resourceBundleName, resourceSpecs:[{node, type, computeProfileName, cpu, memory, logicTemplateId, credentialUser, credentialPassword, networkId, systemDisk:{size}}]}. resourceBundleName goes at TOP LEVEL, NOT inside resourceSpecs. systemDisk must be nested object {size:N}, NOT dot notation. (6) FORBIDDEN: never put name/businessGroupName/resourceBundleName/logicTemplateName inside resourceSpecs. FORBIDDEN top-level fields: description, serviceCategory, priority, category, requestor, parameters."
 tool_submit_entrypoint: "scripts/submit.py"
 tool_submit_groups:
   - cmp
@@ -122,7 +130,7 @@ Never call any other tool during the request workflow.
 For cloud requests, the selected catalog metadata from `smartcmp_list_services` is the source
 of truth:
 
-- selected catalog `id` -> `catalogId`
+- selected catalog `id` -> `catalogId` (**MUST be UUID**, e.g. `"19b87cb1-3425-4535-83f5-50c300899095"`. NEVER use `sourceKey` like `"BUILD-IN-CATALOG-LINUX-VM"`)
 - selected catalog `name` -> `catalogName`
 - `instructions.node` -> request `node`
 - `instructions.type` -> request `type`
@@ -203,11 +211,41 @@ When the user replies "否", "no", or any negative answer:
 
 ### Cloud request structure
 
-- top level: `catalogId`, `catalogName`, `userLoginId`, `businessGroupName` or
+- top level: `catalogId` (UUID), `catalogName`, `userLoginId`, `businessGroupName` or
   `businessGroupId`, `resourceBundleName`, `name`
+- **`resourceBundleName` MUST be at top level, NEVER inside `resourceSpecs`.**
 - nested: `resourceSpecs` **MUST be a JSON array** `[{...}]`, never a plain object.
-  `resourceSpecs[0]` contains `node`, `type`, and collected cloud parameters.
-  Example: `"resourceSpecs": [{"node": "Compute", "type": "cloudchef.nodes.Compute", ...}]`
+  `resourceSpecs[0]` contains ONLY compute parameters: `node`, `type`, `computeProfileName`,
+  `cpu`, `memory`, `logicTemplateId`, `credentialUser`, `credentialPassword`, `networkId`,
+  `systemDisk`.
+- **NEVER put `name`, `businessGroupName`, `resourceBundleName`, or `logicTemplateName` inside
+  `resourceSpecs`.** These either belong at top level or should not be included.
+- `systemDisk` MUST be a nested object: `"systemDisk": {"size": 50}`, NEVER use dot notation
+  like `"systemDisk.size": 50`.
+- Example:
+  ```json
+  {
+    "catalogName": "Linux VM",
+    "businessGroupName": "ABI",
+    "userLoginId": "admin",
+    "name": "myvm",
+    "resourceBundleName": "vsphere资源池",
+    "resourceSpecs": [
+      {
+        "computeProfileName": "test",
+        "cpu": 2,
+        "memory": 4,
+        "node": "Compute",
+        "type": "cloudchef.nodes.Compute",
+        "logicTemplateId": "vm-531",
+        "credentialUser": "root",
+        "credentialPassword": "P@ssw0rd",
+        "networkId": "network-31",
+        "systemDisk": { "size": 50 }
+      }
+    ]
+  }
+  ```
 
 ### Ticket request structure
 
@@ -225,6 +263,9 @@ When the user replies "否", "no", or any negative answer:
 
 ## Interaction Rules
 
+- **`smartcmp_list_services` must be called AT MOST ONCE per conversation.** Once you have the
+  catalogId, never call it again — go straight to building the JSON and calling
+  `smartcmp_submit_request`.
 - **Execute only one tool call per turn.** After calling any tool, stop and generate your
   response. Do NOT chain multiple tool calls in a single turn.
 - **When auto-selecting a catalog:** Do NOT echo or repeat the raw tool output. Write your

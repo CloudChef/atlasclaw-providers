@@ -140,23 +140,53 @@ except json.JSONDecodeError:
     sys.exit(1)
 
 # -- Output result -------------------------------------------------------------
-print(f"Status: {resp.status_code}")
+catalog_name = body.get("catalogName", "")
+request_name = body.get("name", "")
 
-if isinstance(result, list):
-    for r in result:
+if resp.status_code == 200:
+    if isinstance(result, list) and result:
+        r = result[0]
         req_id = r.get('id', 'N/A')
         state = r.get('state', 'N/A')
         error = r.get('errorMessage', '')
-        print(f"  Request ID: {req_id}")
-        print(f"  State: {state}")
         if error:
+            print(f"[FAILED] 提交失败")
             print(f"  Error: {error}")
-        print()
-elif isinstance(result, dict):
-    if 'id' in result:
-        print(f"  Request ID: {result.get('id', 'N/A')}")
-        print(f"  State: {result.get('state', 'N/A')}")
-    if 'message' in result or 'error' in result:
-        print(f"  Message: {result.get('message', result.get('error', ''))}")
+        else:
+            print(f"[SUCCESS] 申请已提交")
+            print(f"  Request ID: {req_id}")
+            print(f"  State: {state}")
+            if catalog_name:
+                print(f"  Catalog: {catalog_name}")
+            if request_name:
+                print(f"  Name: {request_name}")
+        # Print remaining items if any
+        for r in result[1:]:
+            print(f"  ---")
+            print(f"  Request ID: {r.get('id', 'N/A')}")
+            print(f"  State: {r.get('state', 'N/A')}")
+            if r.get('errorMessage'):
+                print(f"  Error: {r['errorMessage']}")
+    elif isinstance(result, dict):
+        if 'id' in result:
+            print(f"[SUCCESS] 申请已提交")
+            print(f"  Request ID: {result.get('id', 'N/A')}")
+            print(f"  State: {result.get('state', 'N/A')}")
+            if catalog_name:
+                print(f"  Catalog: {catalog_name}")
+            if request_name:
+                print(f"  Name: {request_name}")
+        elif 'message' in result or 'error' in result:
+            print(f"[FAILED] 提交失败")
+            print(f"  Message: {result.get('message', result.get('error', ''))}")
+        else:
+            print(f"Status: 200")
+            print(f"  Response: {result}")
+    else:
+        print(f"[SUCCESS] 申请已提交")
 else:
-    print(f"  Response: {result}")
+    print(f"[FAILED] HTTP {resp.status_code}")
+    if isinstance(result, dict):
+        print(f"  Message: {result.get('message', result.get('error', json.dumps(result, ensure_ascii=False)))}")
+    else:
+        print(f"  Response: {result}")
