@@ -59,7 +59,7 @@ tool_list_services_parameters: |
     }
   }
 tool_submit_name: "smartcmp_submit_request"
-tool_submit_description: "Submit resource request to SmartCMP. Pass the complete request JSON body as the 'json_body' parameter. Reuse the selected catalog metadata, including catalogId and catalogName when they are available."
+tool_submit_description: "Submit resource request to SmartCMP. CRITICAL RULES: (1) NEVER claim a request was submitted or succeeded without actually calling this tool — fabricating submission results is strictly forbidden. (2) Before calling this tool, show the user a JSON preview and wait for confirmation. (3) The json_body parameter is REQUIRED — without it the tool WILL fail. (4) For tickets, json_body MUST follow this exact structure: {catalogId, catalogName, userLoginId, businessGroupName, name, genericRequest:{description}}. For cloud, use: {catalogId, catalogName, userLoginId, businessGroupName, name, resourceSpecs:[{node, type, cpu, memory, ...}]}. (5) FORBIDDEN top-level fields: description, serviceCategory, priority, category, requestor, parameters — never add these."
 tool_submit_entrypoint: "scripts/submit.py"
 tool_submit_groups:
   - cmp
@@ -76,7 +76,7 @@ tool_submit_parameters: |
     "properties": {
       "json_body": {
         "type": "string",
-        "description": "Complete request body as a JSON string. Reuse the selected catalog metadata from list_services. Include catalogId and catalogName when available, plus userLoginId, businessGroupName or businessGroupId, name, and resourceSpecs (for cloud) or genericRequest (for ticket)."
+        "description": "REQUIRED. The complete request JSON as a string. For cloud: include catalogId, catalogName, userLoginId, businessGroupName, name, and resourceSpecs array [{node, type, cpu, memory, ...}]. For tickets: include catalogId, catalogName, userLoginId, businessGroupName, name, and genericRequest {description}. FORBIDDEN fields: never add priority, category, requestor, parameters, impactScope, urgency, contactName, or any field not listed above. DO NOT omit this parameter."
       }
     },
     "required": ["json_body"]

@@ -23,11 +23,10 @@ Examples:
 API Reference:
   POST /generic-request/submit
 """
-import argparse
+import sys
 import json
 import os
-import sys
-
+import argparse
 import requests
 
 # Import shared utilities (handles URL normalization, SSL warnings)
@@ -75,20 +74,40 @@ def _enrich_request_body(body: object) -> object:
 
     return enriched
 
-# ── Parse arguments ───────────────────────────────────────────────────────────
+# -- Parse arguments -----------------------------------------------------------
 parser = argparse.ArgumentParser(description='Submit request to SmartCMP')
-group = parser.add_mutually_exclusive_group(required=True)
+group = parser.add_mutually_exclusive_group(required=False)
 group.add_argument('--file', '-f', help='Path to JSON file containing request body')
-group.add_argument('--json', '-j', help='JSON string (avoid in PowerShell)')
+group.add_argument('--json', '-j', '--json-body', help='JSON string (avoid in PowerShell)')
 args = parser.parse_args()
 
-# ── Load request body ─────────────────────────────────────────────────────────
+if not args.file and not args.json:
+    print("ERROR: No request body provided.")
+    print("You must pass the json_body parameter with the complete request JSON.")
+    print('For cloud resources: {"catalogId":"...","catalogName":"Linux VM","userLoginId":"admin","businessGroupName":"ABI","name":"vm-01","resourceSpecs":[{"node":"Compute","type":"cloudchef.nodes.Compute","cpu":2,"memory":4}]}')
+    print('For tickets: {"catalogId":"...","catalogName":"ticket","userLoginId":"admin","businessGroupName":"my-group","name":"ticket-title","genericRequest":{"description":"problem description"}}')
+    print("FORBIDDEN fields: Do NOT add priority, category, requestor, parameters, impactScope, urgency, contactName, or any field not shown above.")
+    print("First show the user a JSON preview, get their confirmation, then call this tool with the json_body parameter set to the confirmed JSON string.")
+    sys.exit(0)
+
+# -- Load request body ---------------------------------------------------------
+def _sanitize_json_string(s: str) -> str:
+    """Replace smart/curly quotes with standard ASCII quotes."""
+    return (s
+        .replace('\u201c', '"')   # left double curly quote
+        .replace('\u201d', '"')   # right double curly quote
+        .replace('\u2018', "'")   # left single curly quote
+        .replace('\u2019', "'")   # right single curly quote
+        .replace('\uff02', '"')   # fullwidth quotation mark
+    )
+
 try:
     if args.file:
         with open(args.file, 'r', encoding='utf-8') as f:
             body = json.load(f)
     else:
-        body = json.loads(args.json)
+        raw_json = _sanitize_json_string(args.json)
+        body = json.loads(raw_json)
 except json.JSONDecodeError as e:
     print(f"[ERROR] Invalid JSON: {e}")
     sys.exit(1)
@@ -98,7 +117,7 @@ except FileNotFoundError:
 
 body = _enrich_request_body(body)
 
-# ── Normalize resourceSpecs to array ─────────────────────────────────────────
+# -- Normalize resourceSpecs to array -----------------------------------------
 # SmartCMP backend expects resourceSpecs as an array (ArrayList<ResourceSpec>).
 # LLMs sometimes send it as a single object; wrap it defensively.
 if isinstance(body, dict) and "resourceSpecs" in body:
@@ -106,7 +125,7 @@ if isinstance(body, dict) and "resourceSpecs" in body:
     if isinstance(specs, dict):
         body["resourceSpecs"] = [specs]
 
-# ── Submit request ────────────────────────────────────────────────────────────
+# -- Submit request ------------------------------------------------------------
 url = f"{BASE_URL}/generic-request/submit"
 headers = create_headers(AUTH_TOKEN)
 
@@ -120,7 +139,7 @@ except json.JSONDecodeError:
     print(f"[ERROR] Invalid response: {resp.text}")
     sys.exit(1)
 
-# ── Output result ─────────────────────────────────────────────────────────────
+# -- Output result -------------------------------------------------------------
 print(f"Status: {resp.status_code}")
 
 if isinstance(result, list):
