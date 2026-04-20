@@ -347,7 +347,9 @@ When the user replies "否", "no", or any negative answer:
 
 - top level: `catalogId`, `catalogName`, `userLoginId`, `businessGroupName` or
   `businessGroupId`, `resourceBundleName`, `name`
-- nested: `resourceSpecs[0]` contains `node`, `type`, and collected cloud parameters
+- nested: `resourceSpecs` **MUST be a JSON array** `[{...}]`, never a plain object.
+  `resourceSpecs[0]` contains `node`, `type`, and collected cloud parameters.
+  Example: `"resourceSpecs": [{"node": "Compute", "type": "cloudchef.nodes.Compute", ...}]`
 
 ### Ticket request structure
 

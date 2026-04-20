@@ -98,6 +98,14 @@ except FileNotFoundError:
 
 body = _enrich_request_body(body)
 
+# ── Normalize resourceSpecs to array ─────────────────────────────────────────
+# SmartCMP backend expects resourceSpecs as an array (ArrayList<ResourceSpec>).
+# LLMs sometimes send it as a single object; wrap it defensively.
+if isinstance(body, dict) and "resourceSpecs" in body:
+    specs = body["resourceSpecs"]
+    if isinstance(specs, dict):
+        body["resourceSpecs"] = [specs]
+
 # ── Submit request ────────────────────────────────────────────────────────────
 url = f"{BASE_URL}/generic-request/submit"
 headers = create_headers(AUTH_TOKEN)
