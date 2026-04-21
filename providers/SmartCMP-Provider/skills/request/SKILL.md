@@ -3,6 +3,7 @@ name: "request"
 description: "Self-service request skill. Request cloud resources, application environments, or ticket/work order services. Keywords: request, provision, deploy, create VM, apply resources, submit ticket, 申请资源, 创建虚拟机, 提交工单."
 provider_type: "smartcmp"
 instance_required: "true"
+workflow_role: "request_parent"
 
 # === LLM Context Fields ===
 triggers:
@@ -37,13 +38,12 @@ avoid_when:
   - User describes requirements in natural language without specific parameters (use request-decomposition-agent)
 
 examples:
-  - "Create a new VM with 2c4g"
+  - "Create a new VM with 4 CPU and 8GB RAM"
   - "Provision cloud resources for my project"
   - "Deploy a Linux VM in production environment"
   - "Submit a request for 3 virtual machines"
   - "提交一个问题工单"
   - "申请一个机房资源"
-  - "申请2c4g的linux云主机"
 
 related:
   - datasource
@@ -85,24 +85,77 @@ tool_submit_parameters: |
     "properties": {
       "json_body": {
         "type": "string",
-        "description": "REQUIRED. The complete request JSON as a string. For cloud: include catalogId, catalogName, userLoginId, businessGroupName, name, resourceBundleName, and resourceSpecs array. For tickets: include catalogId, catalogName, userLoginId, businessGroupName, name, and genericRequest {description}. FORBIDDEN fields: never add priority, category, requestor, parameters, impactScope, urgency, contactName, or any field not listed above. DO NOT omit this parameter."
+        "description": "REQUIRED. The complete request JSON as a string. For cloud: include catalogId, catalogName, userLoginId, businessGroupName, name, and resourceSpecs array [{node, type, cpu, memory, ...}]. For tickets: include catalogId, catalogName, userLoginId, businessGroupName, name, and genericRequest {description}. FORBIDDEN fields: never add priority, category, requestor, parameters, impactScope, urgency, contactName, or any field not listed above. DO NOT omit this parameter."
       }
     },
     "required": ["json_body"]
   }
+tool_submit_success_contract:
+  type: "identifier_presence"
+  fields:
+    - "id"
+    - "requestId"
+    - "request_id"
+    - "workflowId"
+    - "workflow_id"
+  text_labels:
+    - "Request ID"
+    - "Workflow ID"
 ---
 
 # request
 
 Submit cloud resource, application environment, or ticket/work order requests through the service catalog.
 
-## Flow (3 turns max)
+## Flow
 
-Only two tools exist: `smartcmp_list_services` and `smartcmp_submit_request`.
+Request submission uses `smartcmp_list_services` and
+`smartcmp_submit_request`. Business-group scope discovery must be decided from
+datasource business-group results, not by assumption.
 
-1. **Turn 1:** Call `smartcmp_list_services` → auto-select catalog → tell user what was selected
-2. **Turn 2:** Build request body from catalog defaults + user specs → show JSON preview → ask confirmation
-3. **Turn 3:** User confirms → call `smartcmp_submit_request`
+1. Call `smartcmp_list_services` → auto-select or ask for the target catalog
+2. If `businessGroupName` is not already fixed by user input or a single
+   catalog default, call datasource business-group listing
+   (`smartcmp_list_all_business_groups`) to determine whether the user has one
+   or multiple available business groups
+3. If datasource returns exactly one business group, use it silently; if it
+   returns multiple, ask the user to choose one before building the preview
+4. Show JSON preview and wait for confirmation
+5. User confirms → call `smartcmp_submit_request`
+
+## Terminology Mapping
+
+SmartCMP uses `business group` as the platform field name, but users may
+describe the same request scope as `tenant`, `租户`, `部门`, `BU`,
+`Department`, `项目`, or `Project`.
+
+- When the user uses one of these terms for request scope, resolve it to
+  `businessGroupName`.
+- Keep the request payload field name exactly as `businessGroupName` even if
+  you reply using the user's wording.
+- If `tenant` clearly refers to AtlasClaw auth or platform tenancy rather than
+  the SmartCMP request scope, clarify before using it in the request body.
+
+## Business-Group Resolution
+
+`businessGroupName` is not always a question that should be asked explicitly.
+The request skill must determine whether the user has one or multiple available
+business groups by using datasource business-group listing first.
+
+Handle it with these rules:
+
+- Use datasource `smartcmp_list_all_business_groups` to get the actual
+  available business-group list whenever the count is not already fixed by
+  request context.
+- If datasource returns exactly one business group, use it silently. Do not ask
+  the user to fill it again.
+- If datasource returns multiple business groups, ask the user which one to
+  apply under before building the JSON preview.
+- If the user already specified a tenant / 租户 / 部门 / BU / 项目 and it
+  clearly matches one available business group, use it directly instead of
+  asking again.
+- Keep the selection question short and concrete, preferably as a numbered list
+  of available business-group names.
 
 ## Service Selection
 
@@ -116,37 +169,6 @@ Only two tools exist: `smartcmp_list_services` and `smartcmp_submit_request`.
    - Ambiguous → show numbered list and ask
 3. **When auto-selecting:** Output brief confirmation like "已为您自动选择 Linux VM" and STOP.
 
-## Spec Parsing: computeProfileName
-
-When the user provides a resource spec like "2c4g", "4c8g", "8核16G", this describes the compute
-profile, NOT separate cpu/memory fields. The spec MUST be written into the `computeProfileName`
-field as a **lowercase string**.
-
-### Parsing Rules
-
-| User Input | computeProfileName Value |
-|-----------|-------------------------|
-| "2c4g" | `"2c4g"` |
-| "4c8g" | `"4c8g"` |
-| "4C8G" | `"4c8g"` (lowercase) |
-| "8核16G" | `"8c16g"` (convert to NcNg format, lowercase) |
-| "2核4G内存" | `"2c4g"` |
-| "1c1g" | `"1c1g"` |
-
-**Key rules:**
-- Extract the CPU count and memory GB from user input
-- Format as `<cpu>c<memory>g` — always lowercase, no spaces
-- Chinese formats like "N核MG" → convert to `NcMg`
-- **Do NOT create separate `cpu` or `memory` fields.** The spec goes into `computeProfileName` only.
-- If the user does not provide a spec, use the `defaultValue` from catalog params for `computeProfileName`.
-
-### Examples
-
-- User: "申请2c4g的linux云主机" → `"computeProfileName": "2c4g"`
-- User: "帮我申请一台4C8G的虚拟机" → `"computeProfileName": "4c8g"`
-- User: "申请8核16G的服务器" → `"computeProfileName": "8c16g"`
-- User: "申请一台linux云主机" (no spec) → use `defaultValue` from params
-
 ## Field Placement (MUST follow)
 
 Use the EXACT parameter keys from catalog metadata. Do NOT rename, merge, or invent field names.
@@ -155,24 +177,45 @@ Use the EXACT parameter keys from catalog metadata. Do NOT rename, merge, or inv
 |-------|----------|-------------|
 | `catalogId` | **top-level** | catalog metadata `id` field (**MUST be UUID**, never sourceKey) |
 | `catalogName` | **top-level** | catalog metadata `name` field |
-| `businessGroupName` | **top-level** | params `defaultValue` |
+| `businessGroupName` | **top-level** | User-selected or auto-resolved from datasource business-group list; if catalog/request context proves exactly one valid value, use that value silently |
 | `userLoginId` | **top-level** | params `defaultValue` |
 | `name` | **top-level** | user input or auto-generate `vm-<timestamp>` |
-| `resourceBundleName` | **top-level** | params `defaultValue` |
+| `resourceBundleName` | **top-level** | Only when user explicitly chose a resource pool or a dedicated runtime lookup resolved it. If catalog metadata marks it `runtimeDefaultOnly`, omit it from the payload and let CMP runtime form choose the default. |
 | `node` | resourceSpecs | `instructions.node` (e.g. `"Compute"`) |
 | `type` | resourceSpecs | `instructions.type` (e.g. `"cloudchef.nodes.Compute"`) |
-| `computeProfileName` | resourceSpecs | **user spec converted to lowercase NcNg format**, or params `defaultValue` if no spec given |
-| `logicTemplateName` | resourceSpecs | params `defaultValue` (OS template name) |
-| `templateId` | resourceSpecs | params `defaultValue` (image ID, e.g. `"vm-531"`) |
+| `computeProfileName` | resourceSpecs | Only when user explicitly chose a compute profile or a dedicated runtime lookup resolved it. If catalog metadata marks it `runtimeDefaultOnly`, omit it from the payload. |
+| `cpu` | resourceSpecs | user input or params `defaultValue` |
+| `memory` | resourceSpecs | user input or params `defaultValue`. **MUST be integer GB, NEVER convert to MB** (e.g. "8g" → `8`, NOT `8192`) |
+| `logicTemplateName` | resourceSpecs | Use user choice or explicit runtime lookup. If catalog metadata marks it `runtimeDefaultOnly`, omit it from the payload and let CMP runtime form apply the real default. |
+| `templateId` | resourceSpecs | Use user choice or explicit runtime lookup. If catalog metadata marks it `runtimeDefaultOnly`, omit it from the payload. |
 | `credentialUser` | resourceSpecs | user input or params `defaultValue` |
 | `credentialPassword` | resourceSpecs | user input (ask if no default) |
-| `networkId` | resourceSpecs | params `defaultValue` |
-| `systemDisk` | resourceSpecs | **nested object** `{"size": N}` |
+| `networkId` | resourceSpecs | Use user choice or explicit runtime lookup. If catalog metadata marks it `runtimeDefaultOnly`, omit it from the payload. |
+| `systemDisk` | resourceSpecs | **nested object** `{"size": N}`. If only a `runtimeDefaultOnly` catalog default exists, omit the field and let CMP runtime form choose. |
 
-**FORBIDDEN inside resourceSpecs:** `name`, `businessGroupName`, `resourceBundleName`, `cpu`, `memory`
+**FORBIDDEN inside resourceSpecs:** `name`, `businessGroupName`, `resourceBundleName`
 **FORBIDDEN top-level:** `description`, `serviceCategory`, `priority`, `category`, `requestor`, `parameters`
 
-## Correct Example (vSphere Linux VM with user spec "2c4g")
+## Runtime Default Guard
+
+Some SmartCMP catalogs expose stale or design-time `defaultValue` fields through
+`/catalogs/published`, while the real submit form applies different runtime
+defaults in the UI. Because of that:
+
+- If a parameter is marked `runtimeDefaultOnly: true` in catalog metadata, do
+  **NOT** serialize that value into the request body.
+- Treat `runtimeDefaultOnly` values as UI hints only.
+- For those fields, either:
+  - omit them and let CMP runtime form apply the real default, or
+  - ask the user to choose explicitly, or
+  - resolve them through datasource/resource-pool/image lookups first.
+- This guard especially applies to infrastructure selectors such as
+  `resourceBundleName`, `computeProfileName`, `logicTemplateName`,
+  `templateId`, `networkId`, and `systemDisk.size`.
+- Safe defaults like `userLoginId` may still be used directly when they are not
+  marked `runtimeDefaultOnly`.
+
+## Correct Example (vSphere Linux VM)
 
 > catalogId MUST be a UUID like `a1b2c3d4-...`, taken from catalog metadata `id` field.
 > NEVER use sourceKey like `BUILD-IN-CATALOG-LINUX-VM` as catalogId.
@@ -189,7 +232,9 @@ Use the EXACT parameter keys from catalog metadata. Do NOT rename, merge, or inv
     {
       "node": "Compute",
       "type": "cloudchef.nodes.Compute",
-      "computeProfileName": "2c4g",
+      "computeProfileName": "微型计算",
+      "cpu": 2,
+      "memory": 4,
       "logicTemplateName": "CentOS",
       "templateId": "vm-551",
       "credentialUser": "root",
@@ -209,11 +254,11 @@ Use the EXACT parameter keys from catalog metadata. Do NOT rename, merge, or inv
 ```
 Must be: `"catalogId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"`
 
-**Wrong 2: separate cpu/memory fields instead of computeProfileName**
+**Wrong 2: fields flattened to top-level**
 ```json
-{ "resourceSpecs": [{ "cpu": 2, "memory": 4, "computeProfileName": "test" }] }
+{ "catalogName": "Linux VM", "cpu": 1, "memory": 1, "computeProfileName": "test" }
 ```
-User said "2c4g" → must be `"computeProfileName": "2c4g"`. Do NOT add `cpu` or `memory` fields.
+`cpu`, `memory`, `computeProfileName` MUST be inside `resourceSpecs[]`.
 
 **Wrong 3: top-level fields duplicated inside resourceSpecs**
 ```json
@@ -233,11 +278,11 @@ Must be: `"systemDisk": { "size": 50 }`
 ```
 Use EXACT keys from catalog metadata: `"logicTemplateName"` + `"templateId"` (two separate fields).
 
-**Wrong 6: computeProfileName not lowercase**
+**Wrong 6: memory converted to MB**
 ```json
-{ "resourceSpecs": [{ "computeProfileName": "4C8G" }] }
+{ "resourceSpecs": [{ "cpu": 4, "memory": 8192 }] }
 ```
-Must be lowercase: `"computeProfileName": "4c8g"`
+User said "8g" → must be `"memory": 8` (raw GB integer), NOT 8192.
 
 ## Parameter Resolution (No Lookup Tools)
 
@@ -245,11 +290,17 @@ Resolve ALL parameters from `instructions.parameters` without calling lookup too
 
 | # | Condition | Action |
 |---|-----------|--------|
-| 1 | User provides spec (e.g. "2c4g", "4核8G") | Parse to lowercase NcNg → set `computeProfileName` |
-| 2 | Parameter has non-empty `defaultValue` | Use default silently |
-| 3 | `name` not provided | Generate or ask user |
-| 4 | `credentialUser/Password` required, no default | Ask user |
-| 5 | Everything else, no default | Omit from request body |
+| 1 | User specifies value (e.g. "2c4g" → cpu=2, memory=4) | Use user value |
+| 2 | `businessGroupName` availability is unknown | Call datasource `smartcmp_list_all_business_groups` first to determine actual choices |
+| 3 | Datasource returns exactly one `businessGroupName` | Use it silently |
+| 4 | Datasource returns multiple `businessGroupName` values and user did not choose one yet | Ask the user to choose one |
+| 5 | Other parameter has non-empty `defaultValue` and is **not** marked `runtimeDefaultOnly` | Use default silently |
+| 6 | Parameter is marked `runtimeDefaultOnly: true` | Omit it from payload unless user explicitly chose it or datasource/runtime lookup resolved it |
+| 7 | `name` not provided | Generate or ask user |
+| 8 | `credentialUser/Password` required, no default | Ask user |
+| 9 | Everything else, no default | Omit from request body |
+
+**Spec parsing:** "2c4g" → cpu=2, memory=4. "4c8g" → cpu=4, memory=8. "8核16G" → cpu=8, memory=16. **memory value is ALWAYS the raw GB integer. NEVER multiply by 1024.** `memory: 8` is correct, `memory: 8192` is WRONG.
 
 ## Ticket / Work Order Rules
 
@@ -277,6 +328,8 @@ When `serviceCategory` is `"GENERIC_SERVICE"`:
 ## Interaction Rules
 
 - `smartcmp_list_services` at most ONCE per conversation.
+- Do not assume single vs multiple business groups. Use datasource
+  `smartcmp_list_all_business_groups` when that fact matters.
 - ONE tool call per turn. After any tool call, STOP and respond.
 - When auto-selecting, do NOT echo raw tool output.
 - Never claim submitted unless `smartcmp_submit_request` actually executed.

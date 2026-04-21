@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""List SmartCMP business groups from the standalone UI directory endpoint.
+"""List SmartCMP business-group scopes from the standalone UI directory endpoint.
 
 Usage:
   python list_all_business_groups.py [QUERY_VALUE]
@@ -14,6 +14,10 @@ Output:
   - Numbered list of business-group names (user-visible)
   - ##BUSINESS_GROUP_DIRECTORY_META_START## ... ##BUSINESS_GROUP_DIRECTORY_META_END##
       JSON array: [{index, id, name, code}, ...]
+
+Notes:
+  SmartCMP "business group" is the platform field name. Users may describe the
+  same scope as tenant, department, BU, or project.
 """
 from __future__ import annotations
 

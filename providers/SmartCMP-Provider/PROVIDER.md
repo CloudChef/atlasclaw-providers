@@ -18,6 +18,12 @@ keywords:
   - ticket
   - work order
   - business group
+  - tenant
+  - department
+  - project
+  - 租户
+  - 部门
+  - 项目
   - resource pool
   - approval
   - alarm
@@ -34,7 +40,7 @@ keywords:
   - CMP
 
 capabilities:
-  - Browse available services, business groups, resource pools, resources, cloud hosts, host details, templates, and other reference data before making a request
+  - Browse available services, business-group scopes such as tenant/租户/部门/BU/项目, resource pools, resources, cloud hosts, host details, templates, and other reference data before making a request
   - Start or stop existing cloud resources or virtual machines after resolving their SmartCMP resource IDs
   - Submit self-service requests for virtual machines, cloud resources, application environments, or ticket/work order services
   - View pending approvals and approve or reject service requests
@@ -48,7 +54,7 @@ capabilities:
 use_when:
   - User wants to request a VM, database, application environment, or other service catalog item
   - User wants to submit a ticket or work order for infrastructure or support needs
-  - User asks what services, business groups, resource pools, resources, or cloud hosts are available before making a request
+  - User asks what services, business groups, tenants, departments, projects, resource pools, resources, or cloud hosts are available before making a request
   - User wants to start or stop an existing cloud resource or virtual machine
   - User needs to approve or reject a request
   - User wants to check pending approvals
@@ -73,7 +79,7 @@ Cloud management platform provider for self-service resource requests, approvals
    - **Option 1**: Extract session cookie from SmartCMP web console (see [Cookie Extraction](#cookie-extraction))
    - **Option 2**: Set up auto-login credentials (recommended)
 2. Set environment variables (see [Environment Variables](#environment-variables))
-3. Use skills: `business-group` / `resource-pool` / `resource` / `resource-power` / `datasource` → `request` → `approval` → `alarm` → `cost-optimization` → `resource-compliance`
+3. Use skills: `datasource` / `resource-pool` / `resource` / `resource-power` → `request` → `approval` → `alarm` → `cost-optimization` → `resource-compliance`
 
 ## Connection Parameters
 
@@ -85,7 +91,7 @@ Cloud management platform provider for self-service resource requests, approvals
 | `username` | string | Option 3 | Username for auto-login authentication |
 | `password` | string | Option 3 | Password for auto-login authentication (plaintext or MD5 hash) |
 | `auth_url` | string | No | Explicit authentication URL override. Use for private deployments that should not follow host inference |
-| `default_business_group` | string | No | Default business group ID for requests |
+| `default_business_group` | string | No | Default SmartCMP business-group scope ID for requests (tenant / 部门 / 项目 scope) |
 | `timeout` | number | No | API request timeout in seconds (default: 30) |
 
 > **Note:** Auth URL inference is exact-match only:
@@ -283,11 +289,10 @@ CMP_URL=https://cmp.example.com
 
 | Skill | Type | Description | Key Operations |
 |-------|------|-------------|----------------|
-| `business-group` | Directory Query | Standalone listing of all business groups from the CMP UI directory endpoint | `smartcmp_list_all_business_groups` |
 | `resource-pool` | Directory Query | Standalone listing of all resource pools from the CMP UI directory endpoint | `smartcmp_list_all_resource_pools` |
 | `resource` | Directory Query | Standalone listing of all resources or all cloud hosts, plus one-host detail analysis via refresh-status | `smartcmp_list_resources`, `smartcmp_analyze_resource_detail` |
 | `resource-power` | Day2 Operation | Start or stop existing SmartCMP resources or virtual machines through the native resource-operations endpoint | `smartcmp_operate_resource_power` |
-| `datasource` | Data Query | Read-only reference data queries and resource lookup by ID for service discovery and request workflows | `list_services`, `list_business_groups`, `list_resource_pools`, `list_resource` |
+| `datasource` | Data Query | Read-only reference data queries, standalone business-group scope discovery, and resource lookup by ID for service discovery and request workflows | `smartcmp_list_all_business_groups`, `list_services`, `list_business_groups`, `list_resource_pools`, `list_resource` |
 | `request` | Provisioning | Cloud resource provisioning requests | `list_components`, `submit` |
 | `approval` | Workflow | Approval workflow management | `list_pending`, `approve`, `reject` |
 | `alarm` | Monitoring | Alarm alert listing, analysis, and status operations | `list_alerts`, `analyze_alert`, `operate_alert` |
@@ -300,17 +305,6 @@ CMP_URL=https://cmp.example.com
 
 All example commands below assume your current directory is
 `providers/SmartCMP-Provider/`.
-
-#### business-group
-
-List all business groups directly from the CMP UI directory endpoint. Use this
-when the user says "查看所有业务组" or "列出所有业务组" and does not want to enter the
-request workflow.
-
-```bash
-python skills/business-group/scripts/list_all_business_groups.py             # List all business groups
-python skills/business-group/scripts/list_all_business_groups.py <keyword>   # Filter business groups
-```
 
 #### resource-pool
 
@@ -358,13 +352,16 @@ python skills/resource-power/scripts/operate_resource_power.py <id1> <id2> --act
 #### datasource
 
 Query reference data (read-only). Use before `request` skill to discover
-available services, applications, templates, images, or resource details.
-Standalone directory queries for all business groups and all resource pools now
-have dedicated skills, and list-style resource browsing belongs to `resource`.
+available services, business-group scopes, applications, templates, images, or
+resource details. Treat SmartCMP `business group` as the same scope users may
+call tenant, 租户, 部门, BU, Department, 项目, or Project. Standalone
+resource-pool queries still belong to `resource-pool`, and list-style resource
+browsing belongs to `resource`.
 
 ```bash
+python skills/datasource/scripts/list_all_business_groups.py        # Standalone business-group scopes
 python skills/shared/scripts/list_services.py                         # List service catalogs
-python skills/shared/scripts/list_business_groups.py <catalogId>      # Business groups
+python skills/shared/scripts/list_business_groups.py <catalogId>      # Catalog business groups
 python skills/shared/scripts/list_resource_pools.py <bgId> <key> <type>  # Resource pools
 python skills/shared/scripts/list_applications.py <bgId>              # Applications
 python skills/shared/scripts/list_os_templates.py <osType> <resourceBundleId>  # OS templates
@@ -375,6 +372,12 @@ python skills/shared/scripts/list_resource.py <resource_id>           # Resource
 #### request
 
 Submit cloud resource provisioning requests.
+
+Business-group scope rule: if the user only has one available business group,
+do not assume that directly. First determine the actual scope choices through
+datasource business-group listing. If datasource returns one business group,
+use it silently. Ask the user to choose only when datasource returns multiple
+business groups for the request.
 
 ```bash
 python skills/shared/scripts/list_services.py          # 1. Discover services

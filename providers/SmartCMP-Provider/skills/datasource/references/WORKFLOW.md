@@ -25,7 +25,26 @@ $env:CMP_COOKIE = '<full cookie string>'   # MUST use single quotes
 
 ## Scripts Reference
 
-### 1. List service catalogs
+### 1. List business-group scopes
+
+Treat SmartCMP business groups as a flexible organizational scope. User wording
+such as tenant, 租户, 部门, BU, Department, 项目, or Project should be resolved
+through this same directory flow unless the context clearly refers to another
+tenant system.
+
+```bash
+python scripts/list_all_business_groups.py
+python scripts/list_all_business_groups.py <KEYWORD>   # filter by name
+```
+
+Output: numbered list of business-group names.
+`##BUSINESS_GROUP_DIRECTORY_META##` block contains `{id, name, code}` - parse silently.
+
+**Trigger**: "查看业务组" / "查看租户" / "查看部门" / "查看项目" / "show tenants"
+
+---
+
+### 2. List service catalogs
 
 ```bash
 python ../shared/scripts/list_services.py
@@ -39,7 +58,7 @@ Output: numbered list of catalog names.
 
 ---
 
-### 2. List business groups
+### 3. List catalog business groups
 
 ```bash
 python ../shared/scripts/list_business_groups.py <CATALOG_ID>
@@ -51,7 +70,7 @@ Output: numbered list of business groups for the given catalog.
 
 ---
 
-### 3. Get component type
+### 4. Get component type
 
 ```bash
 python ../shared/scripts/list_components.py <SOURCE_KEY>
@@ -63,7 +82,7 @@ Output: `##COMPONENT_META##` block with `typeName` (= model.typeName).
 
 ---
 
-### 4. List resource pools
+### 5. List resource pools
 
 **IMPORTANT: nodeType is REQUIRED for correct filtering.**
 
@@ -91,7 +110,7 @@ Output: numbered list with `##RESOURCE_POOL_META##` block containing `cloudEntry
 
 ---
 
-### 5. List applications
+### 6. List applications
 
 ```bash
 python ../shared/scripts/list_applications.py <BG_ID>
@@ -103,7 +122,7 @@ Output: numbered list of applications in the business group.
 
 ---
 
-### 6. List OS templates (VM only)
+### 7. List OS templates (VM only)
 
 **Pre-flight checks:**
 1. `sourceKey.lower()` contains `"machine"` → continue; else STOP
@@ -117,7 +136,7 @@ python ../shared/scripts/list_os_templates.py <OS_TYPE> <RESOURCE_BUNDLE_ID>
 
 ---
 
-### 7. List cloud entry types
+### 8. List cloud entry types
 
 ```bash
 python ../shared/scripts/list_cloud_entry_types.py
@@ -129,7 +148,7 @@ Output: `##CLOUD_ENTRY_TYPES_META##` with `group` (PUBLIC_CLOUD | PRIVATE_CLOUD)
 
 ---
 
-### 8. List images (private cloud only)
+### 9. List images (private cloud only)
 
 **Pre-flight:**
 1. Run `list_cloud_entry_types.py` silently
@@ -143,7 +162,7 @@ python ../shared/scripts/list_images.py <RB_ID> <LT_ID> <CLOUD_ENTRY_TYPE_ID>
 
 ---
 
-### 9. List resource details by ID
+### 10. List resource details by ID
 
 ```bash
 python ../shared/scripts/list_resource.py <RESOURCE_ID> [RESOURCE_ID ...]
@@ -159,6 +178,7 @@ Output: summary lines plus `##RESOURCE_META_START## ... ##RESOURCE_META_END##`
 
 | User Intent | Script Sequence |
 |-------------|-----------------|
+| "查看业务组 / 查看租户 / 查看部门 / 查看项目" | `scripts/list_all_business_groups.py [keyword]` |
 | "查看服务目录" | `list_services.py` |
 | "XX服务有哪些业务组" | `list_services.py` → `list_business_groups.py <catalogId>` |
 | "XX业务组有哪些应用" | `list_applications.py <bgId>` |
@@ -173,4 +193,5 @@ Output: summary lines plus `##RESOURCE_META_START## ... ##RESOURCE_META_END##`
 
 - All scripts are **read-only** — no data is modified.
 - Scripts are **shared** with the request skill.
+- Standalone business-group scope discovery is owned by `datasource`.
 - Always parse `##BLOCK##` markers silently, do NOT display raw JSON to user.
