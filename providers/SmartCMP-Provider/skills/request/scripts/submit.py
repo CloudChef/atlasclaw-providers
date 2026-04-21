@@ -516,7 +516,7 @@ if resp.status_code != 200:
 
 records = _extract_request_records(result)
 if not records:
-    print("[FAILED] 提交失败")
+    print("[FAILED] Submission failed")
     print("  Message: SmartCMP returned HTTP 200 but no request record.")
     print(f"  Response: {result}")
     sys.exit(1)
@@ -533,7 +533,7 @@ for index, record in enumerate(records):
 
     if submit_error:
         overall_failed = True
-        print("[FAILED] 提交失败")
+        print("[FAILED] Submission failed")
         if req_id:
             print(f"  Request ID: {req_id}")
         if submit_state:
@@ -543,7 +543,7 @@ for index, record in enumerate(records):
 
     if not req_id or req_id.lower() in {"n/a", "none", "null"}:
         overall_failed = True
-        print("[FAILED] 提交失败")
+        print("[FAILED] Submission failed")
         print("  Message: SmartCMP returned HTTP 200 but no Request ID.")
         continue
 
@@ -554,8 +554,10 @@ for index, record in enumerate(records):
     verified_error = _normalize_value(verified.get("error"))
 
     if not verified.get("ok"):
-        overall_failed = True
-        print("[FAILED] 申请提交后未能在 SmartCMP 中确认")
+        # The submit endpoint already returned a concrete Request ID, so treat
+        # verification gaps as pending rather than a hard failure to avoid
+        # encouraging duplicate submissions.
+        print("[PENDING] Request submitted, but not yet verifiable in SmartCMP")
         print(f"  Request ID: {req_id}")
         if submit_state:
             print(f"  Submit State: {submit_state}")
@@ -563,11 +565,12 @@ for index, record in enumerate(records):
             print(f"  Verify HTTP: {verified.get('status_code')}")
         if verified.get("message"):
             print(f"  Message: {verified.get('message')}")
+        print("  Note: Track this request by Request ID instead of resubmitting it.")
         continue
 
     if verified.get("failed"):
         overall_failed = True
-        print("[FAILED] 申请已创建但初始化失败")
+        print("[FAILED] Request was created but initialization failed")
         print(f"  Request ID: {req_id}")
         print(f"  State: {verified_state}")
         if provision_state:
@@ -582,8 +585,7 @@ for index, record in enumerate(records):
         continue
 
     if not _is_submission_confirmed(verified):
-        overall_failed = True
-        print("[PENDING] 申请已提交，但后台尚未确认进入流程")
+        print("[PENDING] Request submitted, but workflow has not been confirmed yet")
         print(f"  Request ID: {req_id}")
         print(f"  State: {verified_state}")
         if provision_state:
@@ -593,9 +595,10 @@ for index, record in enumerate(records):
         print(
             f"  Message: SmartCMP did not expose a confirmed workflow within {_VERIFY_ATTEMPTS} checks."
         )
+        print("  Note: Track this request by Request ID instead of resubmitting it.")
         continue
 
-    print("[SUCCESS] 申请已提交")
+    print("[SUCCESS] Request submitted")
     print(f"  Request ID: {req_id}")
     print(f"  State: {verified_state}")
     if provision_state:

@@ -131,7 +131,7 @@ def test_list_services_preserves_instruction_fields(monkeypatch):
     assert catalogs[0]["params"][2]["defaultValue"] == 2
 
 
-def test_list_services_marks_runtime_form_defaults_as_non_serializable(monkeypatch):
+def test_list_services_marks_explicit_runtime_defaults_as_non_serializable(monkeypatch):
     instructions = {
         "parameters": [
             {
@@ -140,6 +140,7 @@ def test_list_services_marks_runtime_form_defaults_as_non_serializable(monkeypat
                 "required": False,
                 "source": None,
                 "defaultValue": "vsphere资源池",
+                "runtimeDefaultOnly": True,
             },
             {
                 "key": "computeProfileName",
@@ -147,6 +148,7 @@ def test_list_services_marks_runtime_form_defaults_as_non_serializable(monkeypat
                 "required": False,
                 "source": None,
                 "defaultValue": "微型计算",
+                "metadata": {"runtimeDefaultOnly": True},
             },
             {
                 "key": "networkId",
@@ -183,8 +185,53 @@ def test_list_services_marks_runtime_form_defaults_as_non_serializable(monkeypat
     assert params[0]["runtimeDefaultOnly"] is True
     assert params[1]["defaultValue"] is None
     assert params[1]["runtimeDefaultOnly"] is True
-    assert params[2]["defaultValue"] is None
-    assert params[2]["runtimeDefaultOnly"] is True
+    assert params[2]["defaultValue"] == "network-78"
+    assert "runtimeDefaultOnly" not in params[2]
+
+
+def test_list_services_keeps_plain_defaults_when_runtime_only_flag_is_absent(monkeypatch):
+    instructions = {
+        "parameters": [
+            {
+                "key": "templateId",
+                "label": "Template",
+                "required": False,
+                "source": None,
+                "defaultValue": "vm-531",
+            }
+        ]
+    }
+
+    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        assert url == "https://cmp.example.com/platform-api/catalogs/published"
+        return FakeResponse(
+            {
+                "content": [
+                    {
+                        "id": "catalog-1",
+                        "nameZh": "Linux VM",
+                        "sourceKey": "resource.iaas.machine.instance.abstract",
+                        "serviceCategory": "VM",
+                        "instructions": json.dumps(instructions, ensure_ascii=False),
+                    }
+                ],
+                "totalElements": 1,
+            }
+        )
+
+    _, stderr = run_script(monkeypatch, "list_services.py", [], fake_get=fake_get)
+    payload = extract_meta(stderr, "CATALOG_META")
+    params = payload["catalogs"][0]["params"]
+
+    assert params == [
+        {
+            "key": "templateId",
+            "label": "Template",
+            "required": False,
+            "source": None,
+            "defaultValue": "vm-531",
+        }
+    ]
 
 
 def test_list_applications_emits_meta_and_selection_prompt(monkeypatch):
