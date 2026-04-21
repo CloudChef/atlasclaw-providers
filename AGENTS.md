@@ -34,13 +34,56 @@ Directory responsibilities:
 - `skills/<skill-name>/references/`: API mappings, workflows, and examples kept close to the skill
 - `docs/` and `test/`: provider-specific design notes and verification coverage
 
-## Code Style
+## Code Style Guidelines
 
 - Comments must be in English
 - Prefer wide lines suitable for large screens; avoid over-wrapping
 - Do not split simple logic into many tiny methods unless reuse justifies it
 - Avoid breaking short code across many lines
 - Keep validation pragmatic: validate external input, persistence integrity, and core trading invariants, but do not add layers of redundant defensive checks that do not improve correctness
+
+### Python
+
+**Imports:**
+- Prefer `from __future__ import annotations` in new or heavily edited modules when it improves type annotations
+- Standard library imports first, third-party second, local third
+- Group imports with a blank line between groups
+- Prefer absolute imports for AtlasClaw core packages, but keep same-directory helper imports such as `from _common import ...` when that matches the existing provider script layout
+
+**Formatting:**
+- Keep or add a UTF-8 encoding header when the file already uses it or the file contains non-ASCII content that warrants being explicit
+- 4 spaces for indentation
+- Line length: ~100 characters (be reasonable)
+- Use double quotes for strings unless single quotes avoid escaping
+
+**Types:**
+- Use type hints on public functions and non-trivial helpers
+- Prefer consistency with the surrounding file for `Optional[T]` versus `T | None`; do not churn existing code only to change annotation style
+- Use dataclasses for data containers: `@dataclass`
+- Prefer enums for string constants: `class EventType(str, Enum)`
+
+**Naming Conventions:**
+- `snake_case` for functions, variables, modules
+- `PascalCase` for classes, exceptions
+- `SCREAMING_SNAKE_CASE` for constants
+- Private methods/attributes prefixed with `_`
+
+**Error Handling:**
+- Use specific exception types, not bare `except:`
+- Include error context in exception messages
+- Return result objects for expected failures: `SendResult(success=False, error="timeout")`
+- Use `asyncio.Event` for cancellation signals
+
+**Documentation:**
+- Docstrings use triple quotes on separate lines
+- Include docstrings for all public classes and methods
+- Use Google-style or reStructuredText format
+
+**Async Patterns:**
+- Use async for AtlasClaw runtime entrypoints and other integration points that are already async
+- Standalone helper scripts may stay synchronous when the surrounding implementation and dependencies are synchronous
+- Use `asyncio.Event` for coordination when cancellation or cross-task signaling is needed
+- Properly await coroutines in tests with `@pytest.mark.asyncio`
 
 ## Code Documentation Rules
 
