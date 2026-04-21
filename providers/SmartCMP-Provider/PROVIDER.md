@@ -35,6 +35,7 @@ keywords:
 
 capabilities:
   - Browse available services, business groups, resource pools, resources, cloud hosts, host details, templates, and other reference data before making a request
+  - Start or stop existing cloud resources or virtual machines after resolving their SmartCMP resource IDs
   - Submit self-service requests for virtual machines, cloud resources, application environments, or ticket/work order services
   - View pending approvals and approve or reject service requests
   - List alerts, analyze alert context, and update alert status with remediation guidance
@@ -48,6 +49,7 @@ use_when:
   - User wants to request a VM, database, application environment, or other service catalog item
   - User wants to submit a ticket or work order for infrastructure or support needs
   - User asks what services, business groups, resource pools, resources, or cloud hosts are available before making a request
+  - User wants to start or stop an existing cloud resource or virtual machine
   - User needs to approve or reject a request
   - User wants to check pending approvals
   - User wants to inspect, analyze, or operate on resource alarms
@@ -71,7 +73,7 @@ Cloud management platform provider for self-service resource requests, approvals
    - **Option 1**: Extract session cookie from SmartCMP web console (see [Cookie Extraction](#cookie-extraction))
    - **Option 2**: Set up auto-login credentials (recommended)
 2. Set environment variables (see [Environment Variables](#environment-variables))
-3. Use skills: `business-group` / `resource-pool` / `resource` / `datasource` → `request` → `approval` → `alarm` → `cost-optimization` → `resource-compliance`
+3. Use skills: `business-group` / `resource-pool` / `resource` / `resource-power` / `datasource` → `request` → `approval` → `alarm` → `cost-optimization` → `resource-compliance`
 
 ## Connection Parameters
 
@@ -284,6 +286,7 @@ CMP_URL=https://cmp.example.com
 | `business-group` | Directory Query | Standalone listing of all business groups from the CMP UI directory endpoint | `smartcmp_list_all_business_groups` |
 | `resource-pool` | Directory Query | Standalone listing of all resource pools from the CMP UI directory endpoint | `smartcmp_list_all_resource_pools` |
 | `resource` | Directory Query | Standalone listing of all resources or all cloud hosts, plus one-host detail analysis via refresh-status | `smartcmp_list_resources`, `smartcmp_analyze_resource_detail` |
+| `resource-power` | Day2 Operation | Start or stop existing SmartCMP resources or virtual machines through the native resource-operations endpoint | `smartcmp_operate_resource_power` |
 | `datasource` | Data Query | Read-only reference data queries and resource lookup by ID for service discovery and request workflows | `list_services`, `list_business_groups`, `list_resource_pools`, `list_resource` |
 | `request` | Provisioning | Cloud resource provisioning requests | `list_components`, `submit` |
 | `approval` | Workflow | Approval workflow management | `list_pending`, `approve`, `reject` |
@@ -332,6 +335,24 @@ python skills/resource/scripts/list_resources.py                                
 python skills/resource/scripts/list_resources.py --scope virtual_machines            # List all cloud hosts
 python skills/resource/scripts/list_resources.py --scope virtual_machines --query-value production
 python skills/resource/scripts/analyze_resource_detail.py <resource_id>              # Refresh and analyze one cloud host
+```
+
+The list output includes each resource's current status so power actions can
+reuse the same browse step.
+
+#### resource-power
+
+Start or stop existing SmartCMP resources or virtual machines through the
+native `POST /nodes/resource-operations` endpoint.
+
+Use this when the user says "云资源开机", "云资源关机", "启动云主机", or
+"停止云主机" after the target resource has been resolved to a real SmartCMP
+`resource_id`.
+
+```bash
+python skills/resource-power/scripts/operate_resource_power.py <resource_id> --action stop
+python skills/resource-power/scripts/operate_resource_power.py <resource_id> --action start
+python skills/resource-power/scripts/operate_resource_power.py <id1> <id2> --action stop
 ```
 
 #### datasource

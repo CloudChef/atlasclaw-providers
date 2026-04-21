@@ -92,7 +92,7 @@ def test_list_resources_hits_all_resources_ui_url(monkeypatch):
         "?page=1&size=20&queryValue=&sort=createdDate%2Cdesc&relation=AND&fullMatch=false&category=-1"
     )
     assert "Found 1 resource(s):" in stdout
-    assert "资源A" in stdout
+    assert "资源A | status: started" in stdout
     assert payload[0]["scope"] == "all_resources"
     assert payload[0]["id"] == "res-1"
 
@@ -133,6 +133,6 @@ def test_list_resources_hits_virtual_machine_ui_url(monkeypatch):
         "&groupIds=&isImported=&relation=AND&fullMatch=false"
     )
     assert "Found 1 virtual machine(s):" in stdout
-    assert "云主机A" in stdout
+    assert "云主机A | status: running" in stdout
     assert payload[0]["scope"] == "virtual_machines"
     assert payload[0]["os"] == "Linux"

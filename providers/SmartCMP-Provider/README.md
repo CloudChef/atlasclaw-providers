@@ -8,6 +8,7 @@ SmartCMP Provider is a service provider module for AtlasClaw, integrating with S
 - **Approval Management** - View pending approvals, approve or reject requests
 - **Alarm Management** - List alerts, analyze one alert, and run explicit alert status operations
 - **Directory Queries** - List all business groups, resource pools, resources, or cloud hosts from the same UI directory endpoints used by CMP
+- **Resource Power Operations** - Start or stop existing cloud resources and virtual machines through the SmartCMP day2 endpoint
 - **Data Queries** - Query service catalogs, applications, templates, images, and other reference data
 - **Intelligent Agents** - Automated pre-approval and request decomposition capabilities
 - **Cost Optimization** - Review optimization recommendations, analyze savings, execute SmartCMP-native fixes, and track remediation progress
@@ -262,6 +263,34 @@ python skills/resource/scripts/list_resources.py --scope virtual_machines --quer
 
 # Refresh and analyze one cloud host
 python skills/resource/scripts/analyze_resource_detail.py <resource_id>
+```
+
+The resource list output includes each item's current status so users can tell
+whether a start or stop action is needed.
+
+### resource-power - Resource Power Operations
+
+Focused day2 start/stop operations for existing SmartCMP cloud resources or
+virtual machines.
+
+**Use Cases:**
+- 把某个云资源关机
+- 把某个云主机开机
+- Stop a resource after confirming it is currently running
+- Start a VM after confirming it is currently stopped
+
+**Workflow:**
+1. Use `resource` to list matching resources and review their current status
+2. Map the chosen item to the SmartCMP `resource_id`
+3. Submit the native power operation with `start` or `stop`
+
+**Examples:**
+```bash
+# Stop one resource
+python skills/resource-power/scripts/operate_resource_power.py res-1 --action stop
+
+# Start multiple resources
+python skills/resource-power/scripts/operate_resource_power.py res-1 res-2 --action start
 ```
 
 ### request - Resource Requests

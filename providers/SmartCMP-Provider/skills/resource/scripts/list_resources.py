@@ -11,7 +11,7 @@ Environment:
   SIZE            Optional page size
 
 Output:
-  - Numbered list of resource names (user-visible)
+  - Numbered list of resource names plus status (user-visible)
   - ##RESOURCE_DIRECTORY_META_START## ... ##RESOURCE_DIRECTORY_META_END##
       JSON array with normalized list metadata
 """
@@ -133,6 +133,16 @@ def extract_os(item: dict) -> str:
     )
 
 
+def display_status(item: dict) -> str:
+    return (
+        item.get("status")
+        or item.get("powerState")
+        or item.get("state")
+        or item.get("phase")
+        or "unknown"
+    )
+
+
 def meta_item(index: int, item: dict, scope: str) -> dict:
     return {
         "index": index,
@@ -192,7 +202,7 @@ def main(argv=None) -> int:
 
     print(f"Found {len(items)} {summary_label(scope)}:\n")
     for index, item in enumerate(items, start=1):
-        print(f"  [{index}] {display_name(item)}")
+        print(f"  [{index}] {display_name(item)} | status: {display_status(item)}")
     print()
 
     meta = [meta_item(index, item, scope) for index, item in enumerate(items, start=1)]

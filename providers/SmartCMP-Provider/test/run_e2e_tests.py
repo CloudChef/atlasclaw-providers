@@ -247,6 +247,7 @@ def run_tests():
         "skills/request/scripts/submit.py",
         "skills/resource/scripts/analyze_resource_detail.py",
         "skills/resource/scripts/list_resources.py",
+        "skills/resource-power/scripts/operate_resource_power.py",
         "skills/resource-pool/scripts/list_all_resource_pools.py",
         "skills/cost-optimization/scripts/_cost_common.py",
         "skills/cost-optimization/scripts/_analysis.py",
@@ -292,6 +293,7 @@ def run_tests():
         "analyze_resource_detail.py",
         "Skipped by default because refresh-status may trigger a backend refresh and requires a known resource ID",
     )
+    print_skip("operate_resource_power.py", "Skipped by default to avoid power-operation side effects")
     
     # list_business_groups.py
     if catalog_id:
@@ -496,6 +498,7 @@ def run_tests():
         "skills/preapproval-agent",
         "skills/request-decomposition-agent",
         "skills/resource",
+        "skills/resource-power",
         "skills/resource-pool",
         "skills/cost-optimization",
     ]
@@ -526,6 +529,7 @@ def run_tests():
         "skills/request/references/EXAMPLES.md",
         "skills/preapproval-agent/references/review-guidelines.md",
         "skills/request-decomposition-agent/references/decomposition-guidelines.md",
+        "skills/resource-power/references/WORKFLOW.md",
         "skills/cost-optimization/references/WORKFLOW.md",
     ]
     
