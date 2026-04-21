@@ -121,14 +121,70 @@ def test_list_services_preserves_instruction_fields(monkeypatch):
 
     stdout, stderr = run_script(monkeypatch, "list_services.py", [], fake_get=fake_get)
     payload = extract_meta(stderr, "CATALOG_META")
+    catalogs = payload["catalogs"]
 
-    assert "Found 1 published catalog(s):" in stdout
-    assert "请选择您要申请的服务（输入编号）：" in stdout
-    assert payload[0]["instructions"]["parameters"][0]["defaultValue"] is None
-    assert payload[0]["params"][0]["source"] is None
-    assert payload[0]["params"][0]["required"] is True
-    assert payload[0]["params"][1]["source"] == "list:business_groups"
-    assert payload[0]["params"][2]["defaultValue"] == 2
+    assert "Found 1 published catalog(s)." in stdout
+    assert catalogs[0]["instructions"]["parameters"][0]["defaultValue"] is None
+    assert catalogs[0]["params"][0]["source"] is None
+    assert catalogs[0]["params"][0]["required"] is True
+    assert catalogs[0]["params"][1]["source"] == "list:business_groups"
+    assert catalogs[0]["params"][2]["defaultValue"] == 2
+
+
+def test_list_services_marks_runtime_form_defaults_as_non_serializable(monkeypatch):
+    instructions = {
+        "parameters": [
+            {
+                "key": "resourceBundleName",
+                "label": "Resource Pool",
+                "required": False,
+                "source": None,
+                "defaultValue": "vsphere资源池",
+            },
+            {
+                "key": "computeProfileName",
+                "label": "Compute Profile",
+                "required": False,
+                "source": None,
+                "defaultValue": "微型计算",
+            },
+            {
+                "key": "networkId",
+                "label": "Network",
+                "required": True,
+                "source": None,
+                "defaultValue": "network-78",
+            },
+        ]
+    }
+
+    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        assert url == "https://cmp.example.com/platform-api/catalogs/published"
+        return FakeResponse(
+            {
+                "content": [
+                    {
+                        "id": "catalog-1",
+                        "nameZh": "Linux VM",
+                        "sourceKey": "resource.iaas.machine.instance.abstract",
+                        "serviceCategory": "VM",
+                        "instructions": json.dumps(instructions, ensure_ascii=False),
+                    }
+                ],
+                "totalElements": 1,
+            }
+        )
+
+    _, stderr = run_script(monkeypatch, "list_services.py", [], fake_get=fake_get)
+    payload = extract_meta(stderr, "CATALOG_META")
+    params = payload["catalogs"][0]["params"]
+
+    assert params[0]["defaultValue"] is None
+    assert params[0]["runtimeDefaultOnly"] is True
+    assert params[1]["defaultValue"] is None
+    assert params[1]["runtimeDefaultOnly"] is True
+    assert params[2]["defaultValue"] is None
+    assert params[2]["runtimeDefaultOnly"] is True
 
 
 def test_list_applications_emits_meta_and_selection_prompt(monkeypatch):

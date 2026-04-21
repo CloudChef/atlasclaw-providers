@@ -41,16 +41,32 @@ except ImportError:
 
 BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()
 
+_RUNTIME_FORM_DEFAULT_KEYS = {
+    "resourceBundleName",
+    "computeProfileName",
+    "logicTemplateName",
+    "templateId",
+    "networkId",
+    "systemDisk.size",
+}
+
 
 def _normalize_param(raw_param: dict) -> dict:
     """Preserve the instruction fields that drive the request workflow."""
+    key = raw_param.get("key", "")
+    default_value = raw_param.get("defaultValue")
+    runtime_default_only = key in _RUNTIME_FORM_DEFAULT_KEYS and default_value not in (None, "")
+
     normalized = {
-        "key": raw_param.get("key", ""),
-        "label": raw_param.get("label") or raw_param.get("key", ""),
+        "key": key,
+        "label": raw_param.get("label") or key,
         "required": bool(raw_param.get("required", False)),
         "source": raw_param.get("source"),
-        "defaultValue": raw_param.get("defaultValue"),
+        "defaultValue": None if runtime_default_only else default_value,
     }
+
+    if runtime_default_only:
+        normalized["runtimeDefaultOnly"] = True
 
     if raw_param.get("description") is not None:
         normalized["description"] = raw_param.get("description")

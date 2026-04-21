@@ -3,6 +3,7 @@ name: "request"
 description: "Self-service request skill. Request cloud resources, application environments, or ticket/work order services. Keywords: request, provision, deploy, create VM, apply resources, submit ticket, 申请资源, 创建虚拟机, 提交工单."
 provider_type: "smartcmp"
 instance_required: "true"
+workflow_role: "request_parent"
 
 # === LLM Context Fields ===
 triggers:
@@ -89,6 +90,17 @@ tool_submit_parameters: |
     },
     "required": ["json_body"]
   }
+tool_submit_success_contract:
+  type: "identifier_presence"
+  fields:
+    - "id"
+    - "requestId"
+    - "request_id"
+    - "workflowId"
+    - "workflow_id"
+  text_labels:
+    - "Request ID"
+    - "Workflow ID"
 ---
 
 # request
@@ -168,21 +180,40 @@ Use the EXACT parameter keys from catalog metadata. Do NOT rename, merge, or inv
 | `businessGroupName` | **top-level** | User-selected or auto-resolved from datasource business-group list; if catalog/request context proves exactly one valid value, use that value silently |
 | `userLoginId` | **top-level** | params `defaultValue` |
 | `name` | **top-level** | user input or auto-generate `vm-<timestamp>` |
-| `resourceBundleName` | **top-level** | params `defaultValue` |
+| `resourceBundleName` | **top-level** | Only when user explicitly chose a resource pool or a dedicated runtime lookup resolved it. If catalog metadata marks it `runtimeDefaultOnly`, omit it from the payload and let CMP runtime form choose the default. |
 | `node` | resourceSpecs | `instructions.node` (e.g. `"Compute"`) |
 | `type` | resourceSpecs | `instructions.type` (e.g. `"cloudchef.nodes.Compute"`) |
-| `computeProfileName` | resourceSpecs | params `defaultValue` |
+| `computeProfileName` | resourceSpecs | Only when user explicitly chose a compute profile or a dedicated runtime lookup resolved it. If catalog metadata marks it `runtimeDefaultOnly`, omit it from the payload. |
 | `cpu` | resourceSpecs | user input or params `defaultValue` |
 | `memory` | resourceSpecs | user input or params `defaultValue`. **MUST be integer GB, NEVER convert to MB** (e.g. "8g" → `8`, NOT `8192`) |
-| `logicTemplateName` | resourceSpecs | params `defaultValue` (OS template name) |
-| `templateId` | resourceSpecs | params `defaultValue` (image ID, e.g. `"vm-531"`) |
+| `logicTemplateName` | resourceSpecs | Use user choice or explicit runtime lookup. If catalog metadata marks it `runtimeDefaultOnly`, omit it from the payload and let CMP runtime form apply the real default. |
+| `templateId` | resourceSpecs | Use user choice or explicit runtime lookup. If catalog metadata marks it `runtimeDefaultOnly`, omit it from the payload. |
 | `credentialUser` | resourceSpecs | user input or params `defaultValue` |
 | `credentialPassword` | resourceSpecs | user input (ask if no default) |
-| `networkId` | resourceSpecs | params `defaultValue` |
-| `systemDisk` | resourceSpecs | **nested object** `{"size": N}` |
+| `networkId` | resourceSpecs | Use user choice or explicit runtime lookup. If catalog metadata marks it `runtimeDefaultOnly`, omit it from the payload. |
+| `systemDisk` | resourceSpecs | **nested object** `{"size": N}`. If only a `runtimeDefaultOnly` catalog default exists, omit the field and let CMP runtime form choose. |
 
 **FORBIDDEN inside resourceSpecs:** `name`, `businessGroupName`, `resourceBundleName`
 **FORBIDDEN top-level:** `description`, `serviceCategory`, `priority`, `category`, `requestor`, `parameters`
+
+## Runtime Default Guard
+
+Some SmartCMP catalogs expose stale or design-time `defaultValue` fields through
+`/catalogs/published`, while the real submit form applies different runtime
+defaults in the UI. Because of that:
+
+- If a parameter is marked `runtimeDefaultOnly: true` in catalog metadata, do
+  **NOT** serialize that value into the request body.
+- Treat `runtimeDefaultOnly` values as UI hints only.
+- For those fields, either:
+  - omit them and let CMP runtime form apply the real default, or
+  - ask the user to choose explicitly, or
+  - resolve them through datasource/resource-pool/image lookups first.
+- This guard especially applies to infrastructure selectors such as
+  `resourceBundleName`, `computeProfileName`, `logicTemplateName`,
+  `templateId`, `networkId`, and `systemDisk.size`.
+- Safe defaults like `userLoginId` may still be used directly when they are not
+  marked `runtimeDefaultOnly`.
 
 ## Correct Example (vSphere Linux VM)
 
@@ -263,10 +294,11 @@ Resolve ALL parameters from `instructions.parameters` without calling lookup too
 | 2 | `businessGroupName` availability is unknown | Call datasource `smartcmp_list_all_business_groups` first to determine actual choices |
 | 3 | Datasource returns exactly one `businessGroupName` | Use it silently |
 | 4 | Datasource returns multiple `businessGroupName` values and user did not choose one yet | Ask the user to choose one |
-| 5 | Other parameter has non-empty `defaultValue` | Use default silently |
-| 6 | `name` not provided | Generate or ask user |
-| 7 | `credentialUser/Password` required, no default | Ask user |
-| 8 | Everything else, no default | Omit from request body |
+| 5 | Other parameter has non-empty `defaultValue` and is **not** marked `runtimeDefaultOnly` | Use default silently |
+| 6 | Parameter is marked `runtimeDefaultOnly: true` | Omit it from payload unless user explicitly chose it or datasource/runtime lookup resolved it |
+| 7 | `name` not provided | Generate or ask user |
+| 8 | `credentialUser/Password` required, no default | Ask user |
+| 9 | Everything else, no default | Omit from request body |
 
 **Spec parsing:** "2c4g" → cpu=2, memory=4. "4c8g" → cpu=4, memory=8. "8核16G" → cpu=8, memory=16. **memory value is ALWAYS the raw GB integer. NEVER multiply by 1024.** `memory: 8` is correct, `memory: 8192` is WRONG.
 
