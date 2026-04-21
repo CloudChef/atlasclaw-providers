@@ -95,13 +95,55 @@ tool_submit_parameters: |
 
 Submit cloud resource, application environment, or ticket/work order requests through the service catalog.
 
-## Flow (3 turns max)
+## Flow
 
-Only two tools exist: `smartcmp_list_services` and `smartcmp_submit_request`.
+Request submission uses `smartcmp_list_services` and
+`smartcmp_submit_request`. Business-group scope discovery must be decided from
+datasource business-group results, not by assumption.
 
-1. **Turn 1:** Call `smartcmp_list_services` → auto-select catalog → tell user what was selected
-2. **Turn 2:** Build request body from catalog defaults + user specs → show JSON preview → ask confirmation
-3. **Turn 3:** User confirms → call `smartcmp_submit_request`
+1. Call `smartcmp_list_services` → auto-select or ask for the target catalog
+2. If `businessGroupName` is not already fixed by user input or a single
+   catalog default, call datasource business-group listing
+   (`smartcmp_list_all_business_groups`) to determine whether the user has one
+   or multiple available business groups
+3. If datasource returns exactly one business group, use it silently; if it
+   returns multiple, ask the user to choose one before building the preview
+4. Show JSON preview and wait for confirmation
+5. User confirms → call `smartcmp_submit_request`
+
+## Terminology Mapping
+
+SmartCMP uses `business group` as the platform field name, but users may
+describe the same request scope as `tenant`, `租户`, `部门`, `BU`,
+`Department`, `项目`, or `Project`.
+
+- When the user uses one of these terms for request scope, resolve it to
+  `businessGroupName`.
+- Keep the request payload field name exactly as `businessGroupName` even if
+  you reply using the user's wording.
+- If `tenant` clearly refers to AtlasClaw auth or platform tenancy rather than
+  the SmartCMP request scope, clarify before using it in the request body.
+
+## Business-Group Resolution
+
+`businessGroupName` is not always a question that should be asked explicitly.
+The request skill must determine whether the user has one or multiple available
+business groups by using datasource business-group listing first.
+
+Handle it with these rules:
+
+- Use datasource `smartcmp_list_all_business_groups` to get the actual
+  available business-group list whenever the count is not already fixed by
+  request context.
+- If datasource returns exactly one business group, use it silently. Do not ask
+  the user to fill it again.
+- If datasource returns multiple business groups, ask the user which one to
+  apply under before building the JSON preview.
+- If the user already specified a tenant / 租户 / 部门 / BU / 项目 and it
+  clearly matches one available business group, use it directly instead of
+  asking again.
+- Keep the selection question short and concrete, preferably as a numbered list
+  of available business-group names.
 
 ## Service Selection
 
@@ -123,7 +165,7 @@ Use the EXACT parameter keys from catalog metadata. Do NOT rename, merge, or inv
 |-------|----------|-------------|
 | `catalogId` | **top-level** | catalog metadata `id` field (**MUST be UUID**, never sourceKey) |
 | `catalogName` | **top-level** | catalog metadata `name` field |
-| `businessGroupName` | **top-level** | params `defaultValue` |
+| `businessGroupName` | **top-level** | User-selected or auto-resolved from datasource business-group list; if catalog/request context proves exactly one valid value, use that value silently |
 | `userLoginId` | **top-level** | params `defaultValue` |
 | `name` | **top-level** | user input or auto-generate `vm-<timestamp>` |
 | `resourceBundleName` | **top-level** | params `defaultValue` |
@@ -218,10 +260,13 @@ Resolve ALL parameters from `instructions.parameters` without calling lookup too
 | # | Condition | Action |
 |---|-----------|--------|
 | 1 | User specifies value (e.g. "2c4g" → cpu=2, memory=4) | Use user value |
-| 2 | Parameter has non-empty `defaultValue` | Use default silently |
-| 3 | `name` not provided | Generate or ask user |
-| 4 | `credentialUser/Password` required, no default | Ask user |
-| 5 | Everything else, no default | Omit from request body |
+| 2 | `businessGroupName` availability is unknown | Call datasource `smartcmp_list_all_business_groups` first to determine actual choices |
+| 3 | Datasource returns exactly one `businessGroupName` | Use it silently |
+| 4 | Datasource returns multiple `businessGroupName` values and user did not choose one yet | Ask the user to choose one |
+| 5 | Other parameter has non-empty `defaultValue` | Use default silently |
+| 6 | `name` not provided | Generate or ask user |
+| 7 | `credentialUser/Password` required, no default | Ask user |
+| 8 | Everything else, no default | Omit from request body |
 
 **Spec parsing:** "2c4g" → cpu=2, memory=4. "4c8g" → cpu=4, memory=8. "8核16G" → cpu=8, memory=16. **memory value is ALWAYS the raw GB integer. NEVER multiply by 1024.** `memory: 8` is correct, `memory: 8192` is WRONG.
 
@@ -251,6 +296,8 @@ When `serviceCategory` is `"GENERIC_SERVICE"`:
 ## Interaction Rules
 
 - `smartcmp_list_services` at most ONCE per conversation.
+- Do not assume single vs multiple business groups. Use datasource
+  `smartcmp_list_all_business_groups` when that fact matters.
 - ONE tool call per turn. After any tool call, STOP and respond.
 - When auto-selecting, do NOT echo raw tool output.
 - Never claim submitted unless `smartcmp_submit_request` actually executed.

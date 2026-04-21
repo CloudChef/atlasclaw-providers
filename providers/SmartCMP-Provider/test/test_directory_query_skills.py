@@ -84,7 +84,7 @@ def test_list_all_business_groups_hits_ui_directory_endpoint(monkeypatch):
 
     stdout, stderr = run_script(
         monkeypatch,
-        "skills/business-group/scripts/list_all_business_groups.py",
+        "skills/datasource/scripts/list_all_business_groups.py",
         [],
         fake_get=fake_get,
     )
@@ -106,6 +106,19 @@ def test_list_all_business_groups_hits_ui_directory_endpoint(monkeypatch):
     }
     assert payload[1]["id"] == "bg-2"
     assert payload[1]["name"] == "业务组B"
+
+
+def test_datasource_skill_owns_business_group_directory_flow():
+    datasource_skill = (PROVIDER_ROOT / "skills" / "datasource" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'tool_list_all_business_groups_name: "smartcmp_list_all_business_groups"' in datasource_skill
+    assert 'tool_list_all_business_groups_entrypoint: "scripts/list_all_business_groups.py"' in datasource_skill
+    for term in ("tenant", "租户", "部门", "BU", "Department", "项目", "Project"):
+        assert term in datasource_skill
+
+    assert not (PROVIDER_ROOT / "skills" / "business-group" / "SKILL.md").exists()
 
 
 def test_list_all_resource_pools_supports_keyword_filter(monkeypatch):

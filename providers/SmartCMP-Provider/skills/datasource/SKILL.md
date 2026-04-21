@@ -1,6 +1,6 @@
 ---
 name: "datasource"
-description: "Discovery skill. Browse available services, applications, OS templates, images, and generic resource details before submitting a request. For standalone 查看所有业务组, 查询资源池, 查看所有资源, 查看所有云主机, or 查看某个云主机详情 requests, prefer the dedicated business-group, resource-pool, or resource skill."
+description: "Discovery skill. Browse SmartCMP reference data such as service catalogs, business groups, tenant/租户/部门/BU/项目 scopes, applications, OS templates, images, and generic resource details before submitting a request. Standalone business-group discovery belongs here; standalone resource-pool and resource browsing still use their dedicated skills."
 provider_type: "smartcmp"
 instance_required: "true"
 
@@ -8,6 +8,17 @@ instance_required: "true"
 triggers:
   - list services
   - list catalogs
+  - list business groups
+  - show business groups
+  - show tenants
+  - list tenants
+  - tenant
+  - 租户
+  - 部门
+  - BU
+  - Department
+  - 项目
+  - Project
   - list applications
   - list OS templates
   - list images
@@ -17,18 +28,20 @@ triggers:
 
 use_when:
   - User wants to browse or explore available options before taking action
-  - User asks about available services, applications, templates, images, or resource details
+  - User asks about available services, business-group scopes, tenants, departments, BUs, projects, applications, templates, images, or resource details
   - User needs reference data to prepare a request but does not want to submit yet
+  - User wants a standalone list of SmartCMP business groups through the UI directory endpoint
   - User wants resource details by resource ID before analysis or troubleshooting
 
 avoid_when:
   - User wants to submit a provisioning request (use request skill)
   - User wants to approve or reject requests (use approval skill)
   - User wants autonomous request processing (use request-decomposition-agent)
-  - User wants a direct all-business-groups, all-resource-pools, all-resources, all-virtual-machines, or cloud-host detail/attribute analysis flow (use business-group, resource-pool, or resource)
+  - User wants a direct all-resource-pools, all-resources, all-virtual-machines, or cloud-host detail/attribute analysis flow (use resource-pool or resource)
 
 examples:
   - "Show available service catalogs"
+  - "Show available tenants or projects"
   - "List applications for business group X"
   - "List OS templates for VM provisioning"
   - "Show resource details for resource ID X"
@@ -36,9 +49,28 @@ examples:
 related:
   - request
   - approval
-  - business-group
   - resource-pool
   - resource
+
+tool_list_all_business_groups_name: "smartcmp_list_all_business_groups"
+tool_list_all_business_groups_description: "List SmartCMP business groups from the standalone UI directory endpoint. Treat 'business group' as the same scope concept users may call tenant, 租户, 部门, BU, Department, 项目, or Project. Use this for standalone discovery only; do not switch to the request workflow unless the user is actually preparing a request."
+tool_list_all_business_groups_entrypoint: "scripts/list_all_business_groups.py"
+tool_list_all_business_groups_groups:
+  - cmp
+  - datasource
+tool_list_all_business_groups_capability_class: "provider:smartcmp"
+tool_list_all_business_groups_priority: 90
+tool_list_all_business_groups_result_mode: "tool_only_ok"
+tool_list_all_business_groups_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "query_value": {
+        "type": "string",
+        "description": "Optional keyword used to filter business groups. Omit or pass an empty string to list all business groups."
+      }
+    }
+  }
 ---
 
 # datasource
@@ -48,9 +80,28 @@ Reference data discovery skill (read-only).
 ## Purpose
 
 Query and browse reference data as standalone read-only operations. Use when
-user wants to explore available options without submitting a request. Prefer
-the dedicated `business-group` or `resource-pool` skill for standalone
-directory listings of all business groups or all resource pools.
+user wants to explore available options without submitting a request. This
+skill owns standalone business-group scope discovery. Dedicated
+`resource-pool` and `resource` skills still handle standalone resource-pool
+and resource browsing.
+
+## Terminology Mapping
+
+Treat SmartCMP `business group` as a generic organizational scope. Users may
+describe the same concept as:
+
+- tenant
+- 租户
+- 部门
+- BU
+- Department
+- 项目
+- Project
+
+Resolve these terms against SmartCMP business-group data unless the user is
+clearly referring to some other system-level tenant concept. Mirror the user's
+wording in replies when it helps readability, but keep the SmartCMP field names
+`businessGroupName` and `bgId` when calling scripts or building request data.
 
 ## Trigger Conditions
 
@@ -59,22 +110,25 @@ Activate this skill when user intent matches:
 | Intent | Keywords |
 |--------|----------|
 | View catalogs | "show catalogs", "list services", "available services" |
+| View business-group scopes | "show business groups", "show tenants", "查看租户", "查看部门", "查看项目" |
 | List applications | "list applications", "show apps" |
 | List OS templates | "list OS templates", "available OS" |
 | List images | "list images", "available images" |
 | Show resource details | "resource details", "show resource", "analyze resource data" |
 
 **NOT for**: Resource provisioning -> use `request` skill instead.
-**NOT for**: Direct "查看所有业务组", "查询资源池", "查看所有资源",
-"查看所有云主机", or "查看某个云主机详情" requests -> use `business-group`,
-`resource-pool`, or `resource`.
+**NOT for**: Direct "查询资源池", "查看所有资源", "查看所有云主机", or
+"查看某个云主机详情" requests -> use `resource-pool` or `resource`.
 
 ## Scripts
 
-All scripts are located in `../shared/scripts/`:
+Most request-preparation scripts are located in `../shared/scripts/`. The
+standalone business-group directory helper is datasource-owned and lives in
+`scripts/`.
 
 | Script | Description | Arguments |
 |--------|-------------|-----------|
+| `scripts/list_all_business_groups.py` | List all business-group scopes (tenant / 租户 / 部门 / BU / 项目) from the standalone UI directory endpoint | `[QUERY_VALUE]` |
 | `list_services.py` | List published service catalogs | `[KEYWORD]` |
 | `list_business_groups.py` | List business groups for a catalog | `<CATALOG_ID>` |
 | `list_components.py` | Get component type (nodeType) | `<SOURCE_KEY>` |
@@ -125,7 +179,17 @@ export CMP_PASSWORD="<password>"
 
 ## Workflow Examples
 
-### Example 1: List Available Catalogs
+### Example 1: List Business-Group Scopes
+
+**User:** "Show available tenants or projects"
+
+```bash
+python scripts/list_all_business_groups.py
+```
+
+**Output:** Numbered list + `##BUSINESS_GROUP_DIRECTORY_META_START## ... ##BUSINESS_GROUP_DIRECTORY_META_END##`
+
+### Example 2: List Available Catalogs
 
 **User:** "Show available catalogs"
 
@@ -135,7 +199,7 @@ python ../shared/scripts/list_services.py
 
 **Output:** Numbered list + `##CATALOG_META_START## ... ##CATALOG_META_END##`
 
-### Example 2: List Applications
+### Example 3: List Applications
 
 **User:** "List applications for business group X"
 
@@ -143,7 +207,7 @@ python ../shared/scripts/list_services.py
 python ../shared/scripts/list_applications.py <bgId>
 ```
 
-### Example 3: List OS Templates
+### Example 4: List OS Templates
 
 **User:** "List OS templates for VM provisioning"
 
@@ -151,7 +215,7 @@ python ../shared/scripts/list_applications.py <bgId>
 python ../shared/scripts/list_os_templates.py <osType> <resourceBundleId>
 ```
 
-### Example 4: Show Resource Details
+### Example 5: Show Resource Details
 
 **User:** "Show resource details for ID X"
 
@@ -160,6 +224,13 @@ python ../shared/scripts/list_resource.py <resource_id>
 ```
 
 ## Data Flow
+
+```
+scripts/list_all_business_groups.py [query_value]
+  -> standalone business-group scope discovery
+```
+
+Catalog-driven request preparation flow:
 
 ```
 list_services.py
@@ -179,6 +250,7 @@ list_services.py
 
 | Script | Meta Block |
 |--------|------------|
+| `scripts/list_all_business_groups.py` | `##BUSINESS_GROUP_DIRECTORY_META_START## ... ##BUSINESS_GROUP_DIRECTORY_META_END##` |
 | `list_services.py` | `##CATALOG_META_START## ... ##CATALOG_META_END##` |
 | `list_business_groups.py` | `##BG_META_START## ... ##BG_META_END##` |
 | `list_components.py` | `##COMPONENT_META_START## ... ##COMPONENT_META_END##` |
@@ -192,8 +264,9 @@ list_services.py
 
 > Scripts are shared with the `request` skill.
 
-> Standalone directory queries for all business groups or all resource pools
-> belong to the `business-group`, `resource-pool`, and `resource` skills.
+> Standalone directory queries for all business-group scopes belong to
+> `datasource`. Standalone resource-pool and resource browsing belong to
+> `resource-pool` and `resource`.
 
 > On error (`[ERROR]`), report to user immediately; do NOT self-debug.
 

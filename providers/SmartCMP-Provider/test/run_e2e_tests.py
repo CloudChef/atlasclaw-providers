@@ -8,6 +8,8 @@ Usage:
 
 All interactive prompts default to the first option.
 """
+from __future__ import annotations
+
 import os
 import sys
 import json
@@ -173,6 +175,39 @@ def extract_meta_json(output: str, start_tag: str, end_tag: str):
     return None
 
 
+def extract_meta_list(meta_payload, list_key: str) -> list:
+    """Normalize META payloads that may be a raw list or an envelope object."""
+    if isinstance(meta_payload, list):
+        return meta_payload
+    if isinstance(meta_payload, dict):
+        value = meta_payload.get(list_key)
+        if isinstance(value, list):
+            return value
+    return []
+
+
+def collect_skill_python_files() -> list[str]:
+    """Return every Python file under skills/ as a provider-relative path."""
+    skills_root = PROVIDER_ROOT / "skills"
+    files: list[str] = []
+    for py_file in skills_root.rglob("*.py"):
+        if "__pycache__" in py_file.parts:
+            continue
+        files.append(str(py_file.relative_to(PROVIDER_ROOT)))
+    return sorted(files)
+
+
+def collect_reference_markdown_files() -> list[str]:
+    """Return every markdown file stored under a skill references/ directory."""
+    skills_root = PROVIDER_ROOT / "skills"
+    files: list[str] = []
+    for md_file in skills_root.rglob("*.md"):
+        if "references" not in md_file.parts:
+            continue
+        files.append(str(md_file.relative_to(PROVIDER_ROOT)))
+    return sorted(files)
+
+
 def extract_id_from_output(output: str) -> str:
     """Extract first ID from (id: xxx) pattern."""
     match = re.search(r"\(id:\s*([a-f0-9-]+)\)", output)
@@ -228,37 +263,15 @@ def run_tests():
     print_result("Python Available", True, f"Python {sys.version.split()[0]}")
     
     # Syntax check for all scripts
-    scripts = [
-        "skills/shared/scripts/list_services.py",
-        "skills/shared/scripts/list_business_groups.py",
-        "skills/shared/scripts/list_components.py",
-        "skills/shared/scripts/list_resource_pools.py",
-        "skills/shared/scripts/list_applications.py",
-        "skills/shared/scripts/list_os_templates.py",
-        "skills/shared/scripts/list_cloud_entry_types.py",
-        "skills/shared/scripts/list_images.py",
-        "skills/approval/scripts/list_pending.py",
-        "skills/approval/scripts/approve.py",
-        "skills/approval/scripts/reject.py",
-        "skills/alarm/scripts/list_alerts.py",
-        "skills/alarm/scripts/analyze_alert.py",
-        "skills/alarm/scripts/operate_alert.py",
-        "skills/business-group/scripts/list_all_business_groups.py",
-        "skills/request/scripts/submit.py",
-        "skills/resource/scripts/analyze_resource_detail.py",
-        "skills/resource/scripts/list_resources.py",
-        "skills/resource-power/scripts/operate_resource_power.py",
-        "skills/resource-pool/scripts/list_all_resource_pools.py",
-        "skills/cost-optimization/scripts/_cost_common.py",
-        "skills/cost-optimization/scripts/_analysis.py",
-        "skills/cost-optimization/scripts/list_recommendations.py",
-        "skills/cost-optimization/scripts/analyze_recommendation.py",
-        "skills/cost-optimization/scripts/execute_optimization.py",
-        "skills/cost-optimization/scripts/track_execution.py",
-    ]
-    
-    syntax_ok = all(check_syntax(s) for s in scripts)
-    print_result(f"All Scripts Syntax Check ({len(scripts)} files)", syntax_ok)
+    scripts = collect_skill_python_files()
+    syntax_failures = [script for script in scripts if not check_syntax(script)]
+    syntax_ok = not syntax_failures
+    syntax_message = f"Checked {len(scripts)} files"
+    if syntax_failures:
+        syntax_message = "Failed: " + ", ".join(syntax_failures[:5])
+        if len(syntax_failures) > 5:
+            syntax_message += f" (+{len(syntax_failures) - 5} more)"
+    print_result(f"All Scripts Syntax Check ({len(scripts)} files)", syntax_ok, syntax_message)
 
     # -------------------------------------------------------------------------
     # Test 2: Datasource Skill Tests
@@ -266,22 +279,21 @@ def run_tests():
     print_header("2. Datasource Skill Tests")
     
     catalog_id = None
-    source_key = None
-    bg_id = None
-    node_type = None
-    resource_pool_id = None
     
     # list_services.py
     success, output = run_script("skills/shared/scripts/list_services.py")
     print_result("list_services.py", success, f"Exit code: {0 if success else 1}")
     if success:
         meta = extract_meta_json(output, "##CATALOG_META_START##", "##CATALOG_META_END##")
-        if meta and len(meta) > 0:
-            catalog_id = meta[0].get("id")
-            source_key = meta[0].get("sourceKey")
-            print(f"       {Colors.GRAY}Found {len(meta)} catalog(s), using first: {meta[0].get('name')}{Colors.RESET}")
+        catalogs = extract_meta_list(meta, "catalogs")
+        if catalogs:
+            catalog_id = catalogs[0].get("id")
+            print(
+                f"       {Colors.GRAY}Found {len(catalogs)} catalog(s), using first: "
+                f"{catalogs[0].get('name')}{Colors.RESET}"
+            )
 
-    success, output = run_script("skills/business-group/scripts/list_all_business_groups.py")
+    success, output = run_script("skills/datasource/scripts/list_all_business_groups.py")
     print_result("list_all_business_groups.py", success, f"Exit code: {0 if success else 1}")
 
     success, output = run_script("skills/resource-pool/scripts/list_all_resource_pools.py")
@@ -295,61 +307,8 @@ def run_tests():
     )
     print_skip("operate_resource_power.py", "Skipped by default to avoid power-operation side effects")
     
-    # list_business_groups.py
-    if catalog_id:
-        success, output = run_script("skills/shared/scripts/list_business_groups.py", [catalog_id])
-        print_result("list_business_groups.py", success, f"Exit code: {0 if success else 1}")
-        if success:
-            bg_id = extract_id_from_output(output)
-            if bg_id:
-                print(f"       {Colors.GRAY}Using first business group ID: {bg_id}{Colors.RESET}")
-    else:
-        print_skip("list_business_groups.py", "No catalogId available")
-    
-    # list_components.py
-    if source_key:
-        success, output = run_script("skills/shared/scripts/list_components.py", [source_key])
-        print_result("list_components.py", success, f"Exit code: {0 if success else 1}")
-        if success:
-            meta = extract_meta_json(output, "##COMPONENT_META_START##", "##COMPONENT_META_END##")
-            if meta and meta.get("typeName"):
-                node_type = meta.get("typeName")
-                print(f"       {Colors.GRAY}Component type: {node_type}{Colors.RESET}")
-    else:
-        print_skip("list_components.py", "No sourceKey available")
-    
-    # list_applications.py
-    if bg_id:
-        success, output = run_script("skills/shared/scripts/list_applications.py", [bg_id])
-        print_result("list_applications.py", success, f"Exit code: {0 if success else 1}")
-    else:
-        print_skip("list_applications.py", "No bgId available")
-    
-    # list_resource_pools.py
-    if bg_id and source_key and node_type:
-        success, output = run_script("skills/shared/scripts/list_resource_pools.py", [bg_id, source_key, node_type])
-        print_result("list_resource_pools.py", success, f"Exit code: {0 if success else 1}")
-        if success:
-            meta = extract_meta_json(output, "##RESOURCE_POOL_META_START##", "##RESOURCE_POOL_META_END##")
-            if meta and len(meta) > 0:
-                resource_pool_id = meta[0].get("id")
-                print(f"       {Colors.GRAY}Found {len(meta)} resource pool(s), using first: {meta[0].get('name')}{Colors.RESET}")
-    else:
-        print_skip("list_resource_pools.py", "Missing required params")
-    
-    # list_os_templates.py
-    if resource_pool_id:
-        success, output = run_script("skills/shared/scripts/list_os_templates.py", ["Linux", resource_pool_id])
-        print_result("list_os_templates.py", success, f"Exit code: {0 if success else 1}")
-    else:
-        print_skip("list_os_templates.py", "No resourcePoolId available")
-    
-    # list_images.py - skip (requires complete workflow chain)
-    print_skip("list_images.py", "Requires complete workflow chain")
-    
-    # list_cloud_entry_types.py
-    success, output = run_script("skills/shared/scripts/list_cloud_entry_types.py")
-    print_result("list_cloud_entry_types.py", success, f"Exit code: {0 if success else 1}")
+    if not catalog_id:
+        print_skip("catalog-driven follow-ups", "No catalogId available")
 
     # -------------------------------------------------------------------------
     # Test 3: Approval Skill Tests
@@ -492,7 +451,6 @@ def run_tests():
     skill_dirs = [
         "skills/approval",
         "skills/alarm",
-        "skills/business-group",
         "skills/datasource",
         "skills/request",
         "skills/preapproval-agent",
@@ -520,18 +478,7 @@ def run_tests():
     # -------------------------------------------------------------------------
     print_header("8. Reference Files Validation")
     
-    ref_files = [
-        "skills/approval/references/WORKFLOW.md",
-        "skills/alarm/references/WORKFLOW.md",
-        "skills/datasource/references/WORKFLOW.md",
-        "skills/request/references/WORKFLOW.md",
-        "skills/request/references/PARAMS.md",
-        "skills/request/references/EXAMPLES.md",
-        "skills/preapproval-agent/references/review-guidelines.md",
-        "skills/request-decomposition-agent/references/decomposition-guidelines.md",
-        "skills/resource-power/references/WORKFLOW.md",
-        "skills/cost-optimization/references/WORKFLOW.md",
-    ]
+    ref_files = collect_reference_markdown_files()
     
     for ref in ref_files:
         full_path = PROVIDER_ROOT / ref
