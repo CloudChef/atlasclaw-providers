@@ -14,6 +14,7 @@ from requests import RequestException
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SHARED_SCRIPT_DIR = os.path.join(SCRIPT_DIR, "..", "..", "shared", "scripts")
+DATASOURCE_SCRIPT_DIR = os.path.join(SCRIPT_DIR, "..", "..", "datasource", "scripts")
 
 
 def _load_module_from_path(module_name: str, file_path: str):
@@ -60,7 +61,7 @@ except ImportError:
 
 resource_module = _load_module_from_path(
     "cost_optimization_shared_list_resource_local",
-    os.path.join(SHARED_SCRIPT_DIR, "list_resource.py"),
+    os.path.join(DATASOURCE_SCRIPT_DIR, "list_resource.py"),
 )
 collect_resource_ids_from_summaries = resource_module.collect_resource_ids_from_summaries
 load_resource_records = resource_module.load_resource_records

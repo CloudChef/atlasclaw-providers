@@ -281,7 +281,7 @@ def run_tests():
     catalog_id = None
     
     # list_services.py
-    success, output = run_script("skills/shared/scripts/list_services.py")
+    success, output = run_script("skills/datasource/scripts/list_services.py")
     print_result("list_services.py", success, f"Exit code: {0 if success else 1}")
     if success:
         meta = extract_meta_json(output, "##CATALOG_META_START##", "##CATALOG_META_END##")
@@ -299,13 +299,13 @@ def run_tests():
     success, output = run_script("skills/resource-pool/scripts/list_all_resource_pools.py")
     print_result("list_all_resource_pools.py", success, f"Exit code: {0 if success else 1}")
 
-    success, output = run_script("skills/resource/scripts/list_resources.py")
-    print_result("list_resources.py", success, f"Exit code: {0 if success else 1}")
+    success, output = run_script("skills/resource/scripts/list_all_resource.py")
+    print_result("list_all_resource.py", success, f"Exit code: {0 if success else 1}")
     print_skip(
-        "analyze_resource_detail.py",
+        "resource_detail.py",
         "Skipped by default because refresh-status may trigger a backend refresh and requires a known resource ID",
     )
-    print_skip("operate_resource_power.py", "Skipped by default to avoid power-operation side effects")
+    print_skip("operate_resource.py", "Skipped by default to avoid power-operation side effects")
     
     if not catalog_id:
         print_skip("catalog-driven follow-ups", "No catalogId available")
@@ -456,7 +456,6 @@ def run_tests():
         "skills/preapproval-agent",
         "skills/request-decomposition-agent",
         "skills/resource",
-        "skills/resource-power",
         "skills/resource-pool",
         "skills/cost-optimization",
     ]

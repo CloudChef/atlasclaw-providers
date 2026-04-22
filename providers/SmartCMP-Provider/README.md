@@ -193,16 +193,10 @@ python skills/datasource/scripts/list_all_business_groups.py
 python skills/datasource/scripts/list_all_business_groups.py production
 
 # List service catalogs
-python skills/shared/scripts/list_services.py
-
-# List catalog business groups
-python skills/shared/scripts/list_business_groups.py <catalogId>
-
-# List resource pools
-python skills/shared/scripts/list_resource_pools.py <bgId> <sourceKey> <nodeType>
+python skills/datasource/scripts/list_services.py
 
 # Show resource details and normalized resource view by ID
-python skills/shared/scripts/list_resource.py <resource_id>
+python skills/datasource/scripts/list_resource.py <resource_id>
 ```
 
 ### resource-pool - Resource Pool Directory
@@ -225,10 +219,9 @@ python skills/resource-pool/scripts/list_all_resource_pools.py
 python skills/resource-pool/scripts/list_all_resource_pools.py production
 ```
 
-### resource - Resource Directory
+### resource - Resource Browsing & Operations
 
-Read-mostly listing and inspection of SmartCMP resources or cloud hosts through
-the standalone CMP UI list endpoints.
+Browse, inspect, and operate on SmartCMP resources or cloud hosts.
 
 **Use Cases:**
 - 查看我的云资源
@@ -237,50 +230,33 @@ the standalone CMP UI list endpoints.
 - 查看所有云主机
 - 查看某个云主机详情
 - 分析某个云主机属性
+- 把某个云资源关机
+- 把某个云主机开机
 - Query resources or virtual machines by keyword without entering the request workflow
 
 **Examples:**
 ```bash
 # List all resources
-python skills/resource/scripts/list_resources.py
+python skills/resource/scripts/list_all_resource.py
 
 # List all cloud hosts
-python skills/resource/scripts/list_resources.py --scope virtual_machines
+python skills/resource/scripts/list_all_resource.py --scope virtual_machines
 
 # Filter cloud hosts
-python skills/resource/scripts/list_resources.py --scope virtual_machines --query-value production
+python skills/resource/scripts/list_all_resource.py --scope virtual_machines --query-value production
 
 # Refresh and analyze one cloud host
-python skills/resource/scripts/analyze_resource_detail.py <resource_id>
+python skills/resource/scripts/resource_detail.py <resource_id>
+
+# Stop one resource
+python skills/resource/scripts/operate_resource.py res-1 --action stop
+
+# Start multiple resources
+python skills/resource/scripts/operate_resource.py res-1 res-2 --action start
 ```
 
 The resource list output includes each item's current status so users can tell
 whether a start or stop action is needed.
-
-### resource-power - Resource Power Operations
-
-Focused day2 start/stop operations for existing SmartCMP cloud resources or
-virtual machines.
-
-**Use Cases:**
-- 把某个云资源关机
-- 把某个云主机开机
-- Stop a resource after confirming it is currently running
-- Start a VM after confirming it is currently stopped
-
-**Workflow:**
-1. Use `resource` to list matching resources and review their current status
-2. Map the chosen item to the SmartCMP `resource_id`
-3. Submit the native power operation with `start` or `stop`
-
-**Examples:**
-```bash
-# Stop one resource
-python skills/resource-power/scripts/operate_resource_power.py res-1 --action stop
-
-# Start multiple resources
-python skills/resource-power/scripts/operate_resource_power.py res-1 res-2 --action start
-```
 
 ### request - Resource Requests
 
@@ -298,10 +274,7 @@ Submit cloud resource or application provisioning requests through SmartCMP plat
 **Examples:**
 ```bash
 # List services
-python skills/shared/scripts/list_services.py
-
-# Get component type
-python skills/shared/scripts/list_components.py resource.iaas.machine.instance.abstract
+python skills/datasource/scripts/list_services.py
 
 # Submit request
 python skills/request/scripts/submit.py --file request_body.json
@@ -367,7 +340,7 @@ configuration posture.
 **Examples:**
 ```bash
 # Fetch raw resource facts
-python skills/shared/scripts/list_resource.py <resource_id>
+python skills/datasource/scripts/list_resource.py <resource_id>
 
 # Analyze one or more resources directly
 python skills/resource-compliance/scripts/analyze_resource.py <resource_id>
@@ -432,17 +405,8 @@ SmartCMP-Provider/
 │   │   ├── scripts/
 │   │   └── SKILL.md
 │   └── shared/
-│       └── scripts/                 # Shared SmartCMP data-access scripts
-│           ├── _common.py
-│           ├── list_services.py
-│           ├── list_business_groups.py
-│           ├── list_components.py
-│           ├── list_resource_pools.py
-│           ├── list_applications.py
-│           ├── list_os_templates.py
-│           ├── list_cloud_entry_types.py
-│           ├── list_images.py
-│           └── list_resource.py
+│       └── scripts/                 # Shared authentication module
+│           └── _common.py
 ├── test/                            # Provider test suite
 ├── PROVIDER.md                      # Provider configuration docs
 └── README.md                        # This file
@@ -450,19 +414,15 @@ SmartCMP-Provider/
 
 ## Shared Scripts
 
-The `shared/scripts/` directory contains data query scripts shared across multiple skills:
+The `shared/scripts/` directory contains the authentication module, while data query
+scripts are located in `datasource/scripts/`:
 
-| Script | Description |
-|--------|-------------|
-| `list_services.py` | List published service catalogs |
-| `list_business_groups.py` | List business groups for a catalog |
-| `list_components.py` | Get component type information |
-| `list_resource_pools.py` | List available resource pools |
-| `list_applications.py` | List applications in a business group |
-| `list_os_templates.py` | List OS templates (VM only) |
-| `list_cloud_entry_types.py` | Get cloud entry types |
-| `list_images.py` | List images (private cloud only) |
-| `list_resource.py` | Fetch resource summary, details, raw resource fields, and the shared normalized `type + properties` view by ID |
+| Script | Location | Description |
+|--------|----------|-------------|
+| `_common.py` | `shared/scripts/` | Authentication & URL normalization (used by all scripts) |
+| `list_resource.py` | `datasource/scripts/` | Fetch resource summary, details, raw resource fields, and the shared normalized `type + properties` view by ID |
+| `list_services.py` | `datasource/scripts/` | List published service catalogs |
+| `list_all_business_groups.py` | `datasource/scripts/` | List standalone business-group scopes |
 
 ## Notes
 

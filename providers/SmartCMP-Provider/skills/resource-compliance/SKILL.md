@@ -15,6 +15,14 @@ triggers:
   - linux security
   - tomcat lifecycle
   - alicloud oss security
+  - 资源合规
+  - 合规分析
+  - 合规检查
+  - 安全分析
+  - 资源风险
+  - 版本检查
+  - 生命周期分析
+  - 补丁检查
 
 use_when:
   - User wants to analyze one or more resources by ID for compliance or security risk
@@ -30,6 +38,15 @@ avoid_when:
 related:
   - datasource
   - resource
+
+tool_analyze_name: "smartcmp_analyze_resource_compliance"
+tool_analyze_description: "Analyze one or more SmartCMP resources by ID for compliance, security risk, lifecycle, and configuration posture with componentType-driven cloud/software/OS analyzers."
+tool_analyze_entrypoint: "scripts/analyze_resource.py"
+tool_analyze_groups:
+  - cmp
+  - compliance
+tool_analyze_capability_class: "provider:smartcmp"
+tool_analyze_priority: 110
 ---
 
 # resource-compliance

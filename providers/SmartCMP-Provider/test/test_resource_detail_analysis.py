@@ -15,7 +15,7 @@ SCRIPT_PATH = (
     / "skills"
     / "resource"
     / "scripts"
-    / "analyze_resource_detail.py"
+    / "resource_detail.py"
 )
 
 

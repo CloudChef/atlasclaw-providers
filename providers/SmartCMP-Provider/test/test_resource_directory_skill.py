@@ -28,8 +28,8 @@ class FakeResponse:
 
 
 def run_script(monkeypatch, argv: list[str], *, fake_get):
-    script_path = PROVIDER_ROOT / "skills" / "resource" / "scripts" / "list_resources.py"
-    module_name = "test_list_resources_module"
+    script_path = PROVIDER_ROOT / "skills" / "resource" / "scripts" / "list_all_resource.py"
+    module_name = "test_list_all_resource_module"
 
     monkeypatch.setenv("CMP_URL", "https://cmp.example.com")
     monkeypatch.setenv("CMP_COOKIE", "CloudChef-Authenticate=test-token")
@@ -64,7 +64,7 @@ def extract_meta(stderr: str):
     return json.loads(match.group(1))
 
 
-def test_list_resources_hits_all_resources_ui_url(monkeypatch):
+def test_list_all_resource_hits_all_resources_ui_url(monkeypatch):
     captured = {}
 
     def fake_get(url, headers=None, verify=None, timeout=None):
@@ -97,7 +97,7 @@ def test_list_resources_hits_all_resources_ui_url(monkeypatch):
     assert payload[0]["id"] == "res-1"
 
 
-def test_list_resources_hits_virtual_machine_ui_url(monkeypatch):
+def test_list_all_resource_hits_virtual_machine_ui_url(monkeypatch):
     captured = {}
 
     def fake_get(url, headers=None, verify=None, timeout=None):

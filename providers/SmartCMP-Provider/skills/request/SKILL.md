@@ -54,7 +54,7 @@ related:
 # === Tool Registration ===
 tool_list_services_name: "smartcmp_list_services"
 tool_list_services_description: "List available service catalogs from SmartCMP. Call this tool ONLY ONCE at the beginning of the workflow. If you already have a catalogId from a previous call, do NOT call this tool again — proceed directly to building the request body and calling smartcmp_submit_request. After receiving the catalog list, check whether the user's original message clearly matches a specific catalog. If so, auto-select it and proceed without asking. Otherwise show the numbered list. Keep returned _internal metadata for workflow use only; do not show those fields to the user."
-tool_list_services_entrypoint: "../shared/scripts/list_services.py"
+tool_list_services_entrypoint: "../datasource/scripts/list_services.py"
 tool_list_services_group: "cmp"
 tool_list_services_capability_class: "provider:smartcmp"
 tool_list_services_priority: 100

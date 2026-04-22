@@ -15,9 +15,9 @@ MODULE_PATH = (
     / "providers"
     / "SmartCMP-Provider"
     / "skills"
-    / "resource-power"
+    / "resource"
     / "scripts"
-    / "operate_resource_power.py"
+    / "operate_resource.py"
 )
 
 

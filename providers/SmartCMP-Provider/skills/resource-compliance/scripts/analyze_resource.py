@@ -24,6 +24,7 @@ def _load_module_from_path(module_name, file_path):
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SHARED_SCRIPT_DIR = os.path.join(SCRIPT_DIR, "..", "..", "shared", "scripts")
+DATASOURCE_SCRIPT_DIR = os.path.join(SCRIPT_DIR, "..", "..", "datasource", "scripts")
 
 analysis_module = _load_module_from_path(
     "resource_compliance_analysis_local",
@@ -41,7 +42,7 @@ require_config = common_module.require_config
 
 list_resource_module = _load_module_from_path(
     "resource_compliance_list_resource_local",
-    os.path.join(SHARED_SCRIPT_DIR, "list_resource.py"),
+    os.path.join(DATASOURCE_SCRIPT_DIR, "list_resource.py"),
 )
 load_resource_records = list_resource_module.load_resource_records
 request_json = list_resource_module.request_json

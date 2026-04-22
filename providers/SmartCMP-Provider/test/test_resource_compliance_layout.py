@@ -6,6 +6,7 @@ from pathlib import Path
 PROVIDER_ROOT = Path(__file__).resolve().parents[1]
 SKILL_ROOT = PROVIDER_ROOT / "skills" / "resource-compliance"
 SHARED_SCRIPTS = PROVIDER_ROOT / "skills" / "shared" / "scripts"
+DATASOURCE_SCRIPTS = PROVIDER_ROOT / "skills" / "datasource" / "scripts"
 
 
 def load_module(module_name: str, module_path: Path):
@@ -34,7 +35,7 @@ def test_resource_compliance_skill_layout_exists():
     for relative_path in expected_files:
         assert (SKILL_ROOT / relative_path).exists(), relative_path
 
-    assert (SHARED_SCRIPTS / "list_resource.py").exists()
+    assert (DATASOURCE_SCRIPTS / "list_resource.py").exists()
 
 
 def test_datasource_skill_mentions_resource_lookup():
@@ -72,6 +73,6 @@ def test_resource_compliance_scripts_import_cleanly():
 
     list_resource_module = load_module(
         "test_list_resource_module",
-        SHARED_SCRIPTS / "list_resource.py",
+        DATASOURCE_SCRIPTS / "list_resource.py",
     )
     assert hasattr(list_resource_module, "main")

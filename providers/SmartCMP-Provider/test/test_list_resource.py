@@ -13,7 +13,7 @@ MODULE_PATH = (
     / "providers"
     / "SmartCMP-Provider"
     / "skills"
-    / "shared"
+    / "datasource"
     / "scripts"
     / "list_resource.py"
 )

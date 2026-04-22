@@ -79,7 +79,7 @@ Cloud management platform provider for self-service resource requests, approvals
    - **Option 1**: Extract session cookie from SmartCMP web console (see [Cookie Extraction](#cookie-extraction))
    - **Option 2**: Set up auto-login credentials (recommended)
 2. Set environment variables (see [Environment Variables](#environment-variables))
-3. Use skills: `datasource` / `resource-pool` / `resource` / `resource-power` → `request` → `approval` → `alarm` → `cost-optimization` → `resource-compliance`
+3. Use skills: `datasource` / `resource-pool` / `resource` → `request` → `approval` → `alarm` → `cost-optimization` → `resource-compliance`
 
 ## Connection Parameters
 
@@ -290,8 +290,7 @@ CMP_URL=https://cmp.example.com
 | Skill | Type | Description | Key Operations |
 |-------|------|-------------|----------------|
 | `resource-pool` | Directory Query | Standalone listing of all resource pools from the CMP UI directory endpoint | `smartcmp_list_all_resource_pools` |
-| `resource` | Directory Query | Standalone listing of all resources or all cloud hosts, plus one-host detail analysis via refresh-status | `smartcmp_list_resources`, `smartcmp_analyze_resource_detail` |
-| `resource-power` | Day2 Operation | Start or stop existing SmartCMP resources or virtual machines through the native resource-operations endpoint | `smartcmp_operate_resource_power` |
+| `resource` | Directory Query + Day2 Operation | Standalone listing of all resources or all cloud hosts, one-host detail analysis via refresh-status, and start/stop power operations | `smartcmp_list_all_resource`, `smartcmp_resource_detail`, `smartcmp_operate_resource` |
 | `datasource` | Data Query | Read-only reference data queries, standalone business-group scope discovery, and resource lookup by ID for service discovery and request workflows | `smartcmp_list_all_business_groups`, `list_services`, `list_business_groups`, `list_resource_pools`, `list_resource` |
 | `request` | Provisioning | Cloud resource provisioning requests | `list_components`, `submit` |
 | `approval` | Workflow | Approval workflow management | `list_pending`, `approve`, `reject` |
@@ -320,34 +319,24 @@ python skills/resource-pool/scripts/list_all_resource_pools.py <keyword>    # Fi
 #### resource
 
 List all resources or all cloud hosts directly from the CMP UI list endpoint,
-and inspect one cloud host by resource ID with the refresh-status endpoint.
+inspect one cloud host by resource ID with the refresh-status endpoint, and
+perform start/stop power operations on existing resources.
 Use this when the user says "查看我的云资源", "查看所有资源", "查看我的云主机",
-"查看所有云主机", "查看某个云主机详情", or "分析某个云主机属性".
+"查看所有云主机", "查看某个云主机详情", "分析某个云主机属性",
+"云资源开机", "云资源关机", "启动云主机", or "停止云主机".
 
 ```bash
-python skills/resource/scripts/list_resources.py                                     # List all resources
-python skills/resource/scripts/list_resources.py --scope virtual_machines            # List all cloud hosts
-python skills/resource/scripts/list_resources.py --scope virtual_machines --query-value production
-python skills/resource/scripts/analyze_resource_detail.py <resource_id>              # Refresh and analyze one cloud host
+python skills/resource/scripts/list_all_resource.py                                     # List all resources
+python skills/resource/scripts/list_all_resource.py --scope virtual_machines            # List all cloud hosts
+python skills/resource/scripts/list_all_resource.py --scope virtual_machines --query-value production
+python skills/resource/scripts/resource_detail.py <resource_id>              # Refresh and analyze one cloud host
+python skills/resource/scripts/operate_resource.py <resource_id> --action stop
+python skills/resource/scripts/operate_resource.py <resource_id> --action start
+python skills/resource/scripts/operate_resource.py <id1> <id2> --action stop
 ```
 
 The list output includes each resource's current status so power actions can
 reuse the same browse step.
-
-#### resource-power
-
-Start or stop existing SmartCMP resources or virtual machines through the
-native `POST /nodes/resource-operations` endpoint.
-
-Use this when the user says "云资源开机", "云资源关机", "启动云主机", or
-"停止云主机" after the target resource has been resolved to a real SmartCMP
-`resource_id`.
-
-```bash
-python skills/resource-power/scripts/operate_resource_power.py <resource_id> --action stop
-python skills/resource-power/scripts/operate_resource_power.py <resource_id> --action start
-python skills/resource-power/scripts/operate_resource_power.py <id1> <id2> --action stop
-```
 
 #### datasource
 
@@ -360,13 +349,8 @@ browsing belongs to `resource`.
 
 ```bash
 python skills/datasource/scripts/list_all_business_groups.py        # Standalone business-group scopes
-python skills/shared/scripts/list_services.py                         # List service catalogs
-python skills/shared/scripts/list_business_groups.py <catalogId>      # Catalog business groups
-python skills/shared/scripts/list_resource_pools.py <bgId> <key> <type>  # Resource pools
-python skills/shared/scripts/list_applications.py <bgId>              # Applications
-python skills/shared/scripts/list_os_templates.py <osType> <resourceBundleId>  # OS templates
-python skills/shared/scripts/list_images.py <resourceBundleId> <logicTemplateId> <cloudEntryTypeId>  # Images
-python skills/shared/scripts/list_resource.py <resource_id>           # Resource details + normalized view
+python skills/datasource/scripts/list_services.py                    # List service catalogs
+python skills/datasource/scripts/list_resource.py <resource_id>          # Resource details + normalized view
 ```
 
 #### request
@@ -380,9 +364,8 @@ use it silently. Ask the user to choose only when datasource returns multiple
 business groups for the request.
 
 ```bash
-python skills/shared/scripts/list_services.py          # 1. Discover services
-python skills/shared/scripts/list_components.py <key>  # 2. Get component schema
-python skills/request/scripts/submit.py --file request_body.json  # 3. Submit request
+python skills/datasource/scripts/list_services.py          # 1. Discover services
+python skills/request/scripts/submit.py --file request_body.json  # 2. Submit request
 ```
 
 #### approval
@@ -473,20 +456,15 @@ Orchestration agent that transforms descriptive infrastructure demands into stru
 
 ## Shared Scripts Reference
 
-Located in `skills/shared/scripts/`, used across datasource, request, and
-resource analysis workflows:
+Located in `skills/shared/scripts/` and `skills/datasource/scripts/`, used across
+datasource, request, and resource analysis workflows:
 
-| Script | Description |
-|--------|-------------|
-| `list_services.py` | List published service catalogs |
-| `list_business_groups.py` | List business groups for a catalog |
-| `list_components.py` | Get component type information |
-| `list_resource_pools.py` | List available resource pools |
-| `list_applications.py` | List applications in a business group |
-| `list_os_templates.py` | List OS templates (VM only) |
-| `list_cloud_entry_types.py` | Get cloud entry types |
-| `list_images.py` | List images (private cloud only) |
-| `list_resource.py` | Fetch resource summary, details, raw resource fields, and the shared normalized `type + properties` view by ID |
+| Script | Location | Description |
+|--------|----------|-------------|
+| `_common.py` | `shared/scripts/` | Authentication & URL normalization (used by all scripts) |
+| `list_resource.py` | `datasource/scripts/` | Fetch resource summary, details, raw resource fields, and the shared normalized `type + properties` view by ID |
+| `list_services.py` | `datasource/scripts/` | List published service catalogs |
+| `list_all_business_groups.py` | `datasource/scripts/` | List standalone business-group scopes |
 
 ## Error Handling
 

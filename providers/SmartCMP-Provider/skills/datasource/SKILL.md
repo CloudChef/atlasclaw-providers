@@ -23,8 +23,12 @@ triggers:
   - list OS templates
   - list images
   - resource details
-  - show resource
-  - analyze resource data
+  - 查看服务目录
+  - 查看可用服务
+  - 查看业务组
+  - 查看租户
+  - 查看部门
+  - 查看项目
 
 use_when:
   - User wants to browse or explore available options before taking action
@@ -122,24 +126,15 @@ Activate this skill when user intent matches:
 
 ## Scripts
 
-Most request-preparation scripts are located in `../shared/scripts/`. The
-standalone business-group directory helper is datasource-owned and lives in
-`scripts/`.
+Most scripts are located in `scripts/`.
 
 | Script | Description | Arguments |
 |--------|-------------|-----------|
 | `scripts/list_all_business_groups.py` | List all business-group scopes (tenant / 租户 / 部门 / BU / 项目) from the standalone UI directory endpoint | `[QUERY_VALUE]` |
-| `list_services.py` | List published service catalogs | `[KEYWORD]` |
-| `list_business_groups.py` | List business groups for a catalog | `<CATALOG_ID>` |
-| `list_components.py` | Get component type (nodeType) | `<SOURCE_KEY>` |
-| `list_resource_pools.py` | List resource pools for a selected business group and component type | `<BG_ID> <SOURCE_KEY> <NODE_TYPE>` |
-| `list_applications.py` | List applications | `<BG_ID> [KEYWORD]` |
-| `list_os_templates.py` | List OS templates (VM only) | `<OS_TYPE> <RESOURCE_BUNDLE_ID>` |
-| `list_cloud_entry_types.py` | Get cloud entry types | (no args) |
-| `list_images.py` | List images (private cloud) | `<RB_ID> <TEMPLATE_ID> <CLOUD_TYPE_ID>` |
-| `list_resource.py` | List resource details by resource ID | `<RESOURCE_ID> [RESOURCE_ID ...]` |
+| `scripts/list_services.py` | List published service catalogs | `[KEYWORD]` |
+| `scripts/list_resource.py` | List resource details by resource ID | `<RESOURCE_ID> [RESOURCE_ID ...]` |
 
-`list_resource.py` also emits a normalized `type + properties` view per
+`scripts/list_resource.py` also emits a normalized `type + properties` view per
 resource as part of its standard output. That normalized view is shared across
 discovery, troubleshooting, automation, and compliance analysis.
 
@@ -194,33 +189,17 @@ python scripts/list_all_business_groups.py
 **User:** "Show available catalogs"
 
 ```bash
-python ../shared/scripts/list_services.py
+python scripts/list_services.py
 ```
 
 **Output:** Numbered list + `##CATALOG_META_START## ... ##CATALOG_META_END##`
 
-### Example 3: List Applications
-
-**User:** "List applications for business group X"
-
-```bash
-python ../shared/scripts/list_applications.py <bgId>
-```
-
-### Example 4: List OS Templates
-
-**User:** "List OS templates for VM provisioning"
-
-```bash
-python ../shared/scripts/list_os_templates.py <osType> <resourceBundleId>
-```
-
-### Example 5: Show Resource Details
+### Example 3: Show Resource Details
 
 **User:** "Show resource details for ID X"
 
 ```bash
-python ../shared/scripts/list_resource.py <resource_id>
+python scripts/list_resource.py <resource_id>
 ```
 
 ## Data Flow
@@ -228,22 +207,9 @@ python ../shared/scripts/list_resource.py <resource_id>
 ```
 scripts/list_all_business_groups.py [query_value]
   -> standalone business-group scope discovery
-```
 
-Catalog-driven request preparation flow:
-
-```
-list_services.py
+scripts/list_services.py [keyword]
   -> (catalogId, sourceKey)
-  -> list_business_groups.py <catalogId>
-     -> (bgId)
-     -> list_applications.py <bgId>
-  -> list_components.py <sourceKey>
-     -> (typeName = nodeType)
-     -> list_resource_pools.py <bgId> <sourceKey> <nodeType>
-        -> (resourceBundleId, cloudEntryTypeId)
-        -> list_os_templates.py <osType> <resourceBundleId>
-        -> list_images.py <rbId> <templateId> <cloudEntryTypeId>
 ```
 
 ## Output Meta Blocks
@@ -251,12 +217,7 @@ list_services.py
 | Script | Meta Block |
 |--------|------------|
 | `scripts/list_all_business_groups.py` | `##BUSINESS_GROUP_DIRECTORY_META_START## ... ##BUSINESS_GROUP_DIRECTORY_META_END##` |
-| `list_services.py` | `##CATALOG_META_START## ... ##CATALOG_META_END##` |
-| `list_business_groups.py` | `##BG_META_START## ... ##BG_META_END##` |
-| `list_components.py` | `##COMPONENT_META_START## ... ##COMPONENT_META_END##` |
-| `list_resource_pools.py` | `##RESOURCE_POOL_META_START## ... ##RESOURCE_POOL_META_END##` |
-| `list_os_templates.py` | `##OS_TEMPLATE_META_START## ... ##OS_TEMPLATE_META_END##` |
-| `list_cloud_entry_types.py` | `##CLOUD_ENTRY_TYPES_META_START## ... ##CLOUD_ENTRY_TYPES_META_END##` |
+| `scripts/list_services.py` | `##CATALOG_META_START## ... ##CATALOG_META_END##` |
 
 ## Critical Rules
 

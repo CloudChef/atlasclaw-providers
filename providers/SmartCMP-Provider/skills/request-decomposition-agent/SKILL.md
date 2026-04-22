@@ -75,10 +75,7 @@ This agent does NOT access the platform directly. It orchestrates:
 
 | Skill | Purpose |
 |-------|---------|
-| `../shared/scripts/list_services.py` | List available service catalogs |
-| `../shared/scripts/list_components.py` | Get component type information |
-| `../shared/scripts/list_business_groups.py` | List business groups |
-| `../shared/scripts/list_resource_pools.py` | List available resource pools |
+| `../datasource/scripts/list_services.py` | List available service catalogs |
 | `../request/scripts/submit.py` | Submit assembled request (if mode allows) |
 
 ## Workflow
@@ -98,10 +95,10 @@ This agent does NOT access the platform directly. It orchestrates:
    └── One per CMP-executable unit
          ↓
 4. Match to CMP Catalog
-   └── ../shared/scripts/list_services.py → Find suitable entries
+   └── ../datasource/scripts/list_services.py → Find suitable entries
          ↓
 5. Fetch Target Schema
-   └── ../shared/scripts/list_components.py → Get required fields
+   └── Use catalog metadata to determine required fields
          ↓
 6. Build Request Payloads
    ├── Resolved parameters

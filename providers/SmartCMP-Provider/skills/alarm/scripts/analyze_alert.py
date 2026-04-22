@@ -12,6 +12,7 @@ from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SHARED_SCRIPT_DIR = SCRIPT_DIR.parent.parent / "shared" / "scripts"
+DATASOURCE_SCRIPT_DIR = SCRIPT_DIR.parent.parent / "datasource" / "scripts"
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
@@ -31,7 +32,7 @@ def _load_local_analysis_module():
 
 def _load_shared_resource_module():
     """Load the shared resource discovery helper used by datasource skill."""
-    module_path = SHARED_SCRIPT_DIR / "list_resource.py"
+    module_path = DATASOURCE_SCRIPT_DIR / "list_resource.py"
     spec = importlib.util.spec_from_file_location("_smartcmp_shared_list_resource", module_path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Unable to load shared resource helpers from {module_path}")

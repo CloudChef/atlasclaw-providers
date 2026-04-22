@@ -13,9 +13,13 @@ triggers:
   - rightsize
   - execute optimization
   - 费用优化
+  - 成本优化
+  - 优化建议
   - 节省建议
   - 降配
   - 空闲资源
+  - 资源利用率
+  - 查看优化建议
 
 use_when:
   - User wants to list optimization or FinOps recommendations
@@ -78,7 +82,7 @@ discovery to remediation tracking.
    - Optional: `--with-related-policies` to show related policy counts
 2. Analyze a recommendation with `analyze_recommendation.py`
    - Silently resolve the related `resourceId` through datasource
-     `../shared/scripts/list_resource.py`
+     `../datasource/scripts/list_resource.py`
    - Merge normalized resource `type + properties` into the analysis facts
    - Returns multi-dimensional recommendations (P0/P1/P2 priority)
    - Includes risk assessment and best practice guidance
@@ -108,7 +112,7 @@ It does not call AWS or Azure APIs directly.
 ## Resource Enrichment
 
 This skill should internally reuse the datasource skill's shared
-`../shared/scripts/list_resource.py` helper whenever a recommendation includes
+`../datasource/scripts/list_resource.py` helper whenever a recommendation includes
 `resourceId`.
 
 - Pull resource details before rendering the final analysis output.

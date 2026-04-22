@@ -36,7 +36,10 @@ try:
     from _common import require_config
 except ImportError:
     import os
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(
+        0,
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shared", "scripts"),
+    )
     from _common import require_config
 
 BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()

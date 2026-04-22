@@ -8,10 +8,10 @@ REQUEST_SKILL = PROVIDER_ROOT / "skills" / "request" / "SKILL.md"
 def test_request_skill_requires_datasource_business_group_resolution():
     skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
 
-    assert "smartcmp_list_all_business_groups" in skill_text
-    assert "datasource business-group" in skill_text
-    assert "If datasource returns exactly one business group, use it silently" in skill_text
-    assert "If datasource returns multiple business groups" in skill_text
+    assert "smartcmp_list_available_bgs" in skill_text
+    assert "Business-Group Resolution" in skill_text
+    assert "if one BG, auto-select" in skill_text
+    assert "MUST show list and WAIT for user to choose" in skill_text
     assert "uniquely normalizes to one available business group" in skill_text
     assert "If multiple business groups remain after normalization" in skill_text
     assert "do not repeat lookup scaffolding such as" in skill_text

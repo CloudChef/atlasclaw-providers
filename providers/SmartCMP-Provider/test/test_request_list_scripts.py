@@ -19,6 +19,15 @@ SCRIPTS_DIR = (
     / "scripts"
 )
 
+DATASOURCE_SCRIPTS_DIR = (
+    REPO_ROOT
+    / "providers"
+    / "SmartCMP-Provider"
+    / "skills"
+    / "datasource"
+    / "scripts"
+)
+
 
 class FakeResponse:
     def __init__(self, payload, *, status_code: int = 200, text: str = ""):
@@ -38,8 +47,8 @@ def _unexpected_http_call(*args, **kwargs):
     raise AssertionError("Unexpected HTTP call in test.")
 
 
-def run_script(monkeypatch, script_name: str, argv: list[str], *, fake_get=None, fake_post=None):
-    script_path = SCRIPTS_DIR / script_name
+def run_script(monkeypatch, script_name: str, argv: list[str], *, fake_get=None, fake_post=None, scripts_dir=None):
+    script_path = (scripts_dir or SCRIPTS_DIR) / script_name
     module_name = f"test_{script_path.stem}_module"
 
     monkeypatch.setenv("CMP_URL", "https://cmp.example.com")
@@ -119,7 +128,7 @@ def test_list_services_preserves_instruction_fields(monkeypatch):
             }
         )
 
-    stdout, stderr = run_script(monkeypatch, "list_services.py", [], fake_get=fake_get)
+    stdout, stderr = run_script(monkeypatch, "list_services.py", [], fake_get=fake_get, scripts_dir=DATASOURCE_SCRIPTS_DIR)
     payload = extract_meta(stderr, "CATALOG_META")
     catalogs = payload["catalogs"]
 
@@ -177,7 +186,7 @@ def test_list_services_marks_explicit_runtime_defaults_as_non_serializable(monke
             }
         )
 
-    _, stderr = run_script(monkeypatch, "list_services.py", [], fake_get=fake_get)
+    _, stderr = run_script(monkeypatch, "list_services.py", [], fake_get=fake_get, scripts_dir=DATASOURCE_SCRIPTS_DIR)
     payload = extract_meta(stderr, "CATALOG_META")
     params = payload["catalogs"][0]["params"]
 
@@ -219,7 +228,7 @@ def test_list_services_keeps_plain_defaults_when_runtime_only_flag_is_absent(mon
             }
         )
 
-    _, stderr = run_script(monkeypatch, "list_services.py", [], fake_get=fake_get)
+    _, stderr = run_script(monkeypatch, "list_services.py", [], fake_get=fake_get, scripts_dir=DATASOURCE_SCRIPTS_DIR)
     payload = extract_meta(stderr, "CATALOG_META")
     params = payload["catalogs"][0]["params"]
 
