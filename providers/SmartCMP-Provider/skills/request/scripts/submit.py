@@ -414,14 +414,39 @@ def _load_runtime_cookies() -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
+def _fetch_current_user() -> dict:
+    """Fetch current user info from CMP API. Returns dict with userId/userLoginId or empty dict."""
+    try:
+        url = f"{BASE_URL}/users/current-user-details"
+        headers = create_headers(AUTH_TOKEN)
+        resp = requests.get(url, headers=headers, verify=False, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            return {
+                "userId": str(data.get("id", "") or "").strip(),
+                "userLoginId": str(data.get("loginId", "") or data.get("userLoginId", "") or data.get("username", "") or "").strip(),
+            }
+    except Exception:
+        pass
+    return {}
+
+
 def _enrich_request_body(body: object) -> object:
     if not isinstance(body, dict):
         return body
 
     enriched = dict(body)
+
+    # Remove null/None values for userId and userLoginId so they can be filled
+    if enriched.get("userId") is None:
+        enriched.pop("userId", None)
+    if enriched.get("userLoginId") is None:
+        enriched.pop("userLoginId", None)
+
     if enriched.get("userId") and enriched.get("userLoginId"):
         return enriched
 
+    # Source 1: ATLASCLAW_COOKIES
     cookies = _load_runtime_cookies()
     cookie_user_id = str(cookies.get("userId", "") or "").strip()
     if cookie_user_id and not enriched.get("userId"):
@@ -431,9 +456,18 @@ def _enrich_request_body(body: object) -> object:
     if cookie_login_id and not enriched.get("userLoginId"):
         enriched["userLoginId"] = cookie_login_id
 
+    # Source 2: ATLASCLAW_USER_ID env var
     runtime_user_id = str(os.environ.get("ATLASCLAW_USER_ID", "") or "").strip()
     if runtime_user_id and not enriched.get("userLoginId"):
         enriched["userLoginId"] = runtime_user_id
+
+    # Source 3: CMP API /users/current (final fallback)
+    if not enriched.get("userLoginId") or not enriched.get("userId"):
+        api_user = _fetch_current_user()
+        if api_user.get("userId") and not enriched.get("userId"):
+            enriched["userId"] = api_user["userId"]
+        if api_user.get("userLoginId") and not enriched.get("userLoginId"):
+            enriched["userLoginId"] = api_user["userLoginId"]
 
     return enriched
 
@@ -447,8 +481,8 @@ args = parser.parse_args()
 if not args.file and not args.json:
     print("ERROR: No request body provided.")
     print("You must pass the json_body parameter with the complete request JSON.")
-    print('For cloud resources: {"catalogId":"...","catalogName":"Linux VM","userLoginId":"admin","businessGroupName":"ABI","name":"vm-01","resourceSpecs":[{"node":"Compute","type":"cloudchef.nodes.Compute","cpu":2,"memory":4}]}')
-    print('For tickets: {"catalogId":"...","catalogName":"ticket","userLoginId":"admin","businessGroupName":"my-group","name":"ticket-title","genericRequest":{"description":"problem description"}}')
+    print('For cloud resources: {"catalogId":"...","catalogName":"Linux VM","userLoginId":"admin","<businessGroup key>":"<defaultValue>","name":"vm-01","resourceSpecs":[{"node":"Compute","type":"cloudchef.nodes.Compute","computeProfileName":"2c4g"}]}')
+    print('For tickets: {"catalogId":"...","catalogName":"ticket","userLoginId":"admin","<businessGroup key>":"<defaultValue>","name":"ticket-title","genericRequest":{"description":"problem description"}}')
     print("FORBIDDEN fields: Do NOT add priority, category, requestor, parameters, impactScope, urgency, contactName, or any field not shown above.")
     print("First show the user a JSON preview, get their confirmation, then call this tool with the json_body parameter set to the confirmed JSON string.")
     sys.exit(0)

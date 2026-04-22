@@ -60,34 +60,30 @@ tool_list_capability_class: "provider:smartcmp"
 tool_list_priority: 100
 tool_list_result_mode: "tool_only_ok"
 tool_detail_name: "smartcmp_get_request_detail"
-tool_detail_description: "Get SmartCMP pending approval/request detail. Always pass the lookup value in the `identifier` argument; valid identifier values include workflow ID, approval ID, request ID, task ID, or process instance ID."
+tool_detail_description: "Get detail of an existing SmartCMP pending approval item. ONLY use when user explicitly asks for the detail/status of a SPECIFIC request by its ticket ID or workflow ID (e.g. TIC20260316000001). Do NOT use during resource provisioning or request submission workflows."
 tool_detail_entrypoint: "scripts/get_request_detail.py"
 tool_detail_aliases:
-  - "request detail"
   - "approval detail"
-  - "工单详情"
-  - "请求详情"
   - "审批详情"
-  - "请求状态"
+  - "工单详情"
 tool_detail_keywords:
   - "detail"
   - "status"
   - "workflow"
-  - "request detail"
   - "approval detail"
   - "ticket detail"
   - "详情"
-  - "状态"
-  - "工单"
   - "审批"
-  - "请求"
+  - "TIC"
 tool_detail_use_when:
-  - "User asks for the detail or current status of a SmartCMP request by identifier"
-  - "User asks to inspect 工单详情、请求详情、审批详情 or 请求状态"
+  - "User asks for the detail or current status of an EXISTING SmartCMP request by its ticket/workflow ID"
+  - "User provides a specific ticket ID like TIC20260316000001 and asks for its detail"
+tool_detail_avoid_when:
+  - "User is in the middle of submitting a NEW resource request (use smartcmp_submit_request instead)"
+  - "User is providing parameters (name, password, specs) for a new request"
 tool_detail_groups:
   - cmp
   - approval
-  - request
 tool_detail_capability_class: "provider:smartcmp"
 tool_detail_priority: 105
 tool_detail_result_mode: "tool_only_ok"

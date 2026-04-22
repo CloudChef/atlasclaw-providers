@@ -5,13 +5,13 @@ PROVIDER_ROOT = Path(__file__).resolve().parents[1]
 REQUEST_SKILL = PROVIDER_ROOT / "skills" / "request" / "SKILL.md"
 
 
-def test_request_skill_requires_datasource_business_group_resolution():
+def test_request_skill_requires_api_driven_business_group_resolution():
     skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
 
-    assert "smartcmp_list_all_business_groups" in skill_text
-    assert "datasource business-group" in skill_text
-    assert "If datasource returns exactly one business group, use it silently" in skill_text
-    assert "If datasource returns multiple business groups" in skill_text
+    assert "smartcmp_list_available_bgs" in skill_text
+    assert "Business Group Selection (API-driven)" in skill_text
+    assert "If only one BG available" in skill_text
+    assert "If multiple BGs" in skill_text
 
 
 def test_request_skill_does_not_trust_runtime_form_defaults_from_catalog_metadata():

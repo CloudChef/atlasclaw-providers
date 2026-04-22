@@ -38,12 +38,13 @@ avoid_when:
   - User describes requirements in natural language without specific parameters (use request-decomposition-agent)
 
 examples:
-  - "Create a new VM with 4 CPU and 8GB RAM"
+  - "Create a new VM with 2c4g"
   - "Provision cloud resources for my project"
   - "Deploy a Linux VM in production environment"
   - "Submit a request for 3 virtual machines"
   - "提交一个问题工单"
   - "申请一个机房资源"
+  - "申请2c4g的linux云主机"
 
 related:
   - datasource
@@ -85,7 +86,7 @@ tool_submit_parameters: |
     "properties": {
       "json_body": {
         "type": "string",
-        "description": "REQUIRED. The complete request JSON as a string. For cloud: include catalogId, catalogName, userLoginId, businessGroupName, name, and resourceSpecs array [{node, type, cpu, memory, ...}]. For tickets: include catalogId, catalogName, userLoginId, businessGroupName, name, and genericRequest {description}. FORBIDDEN fields: never add priority, category, requestor, parameters, impactScope, urgency, contactName, or any field not listed above. DO NOT omit this parameter."
+        "description": "REQUIRED. The complete request JSON as a string. For cloud: include catalogId, catalogName, userLoginId, business group field (key from params), name, resourceBundleName or resourceBundleTags (in resourceSpecs), and resourceSpecs array. For tickets: include catalogId, catalogName, userLoginId, business group field, name, and genericRequest {description}. FORBIDDEN fields: never add priority, category, requestor, parameters, impactScope, urgency, contactName, or any field not listed above. All field keys and values MUST come from instructions.parameters, not hardcoded. DO NOT omit this parameter."
       }
     },
     "required": ["json_body"]
@@ -101,6 +102,57 @@ tool_submit_success_contract:
   text_labels:
     - "Request ID"
     - "Workflow ID"
+tool_facets_name: "smartcmp_list_facets"
+tool_facets_description: "List available resource bundle tag facets from SmartCMP. Call this tool when resourceBundleTags is required in catalog parameters and resourceBundleName is absent. Returns facet definitions with keys and selectable options. Use the returned facet key and option key (NOT display names) to build resourceBundleTags values."
+tool_facets_entrypoint: "scripts/list_facets.py"
+tool_facets_group: "cmp"
+tool_facets_capability_class: "provider:smartcmp"
+tool_facets_priority: 110
+tool_facets_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "aspects": {
+        "type": "string",
+        "description": "Comma-separated aspect filter. Default: CLOUD_RESOURCE"
+      }
+    }
+  }
+tool_bgs_name: "smartcmp_list_available_bgs"
+tool_bgs_description: "List available business groups for a specific service catalog. Call this AFTER selecting a catalog to get the list of business groups the user can choose from. Use the returned id or name (depending on the catalog parameter key) for the business group field in the request body."
+tool_bgs_entrypoint: "scripts/list_available_bgs.py"
+tool_bgs_group: "cmp"
+tool_bgs_capability_class: "provider:smartcmp"
+tool_bgs_priority: 105
+tool_bgs_cli_positional:
+  - catalog_id
+tool_bgs_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "catalog_id": {
+        "type": "string",
+        "description": "REQUIRED. UUID of the service catalog to query available business groups for."
+      }
+    },
+    "required": ["catalog_id"]
+  }
+tool_flavors_name: "smartcmp_list_flavors"
+tool_flavors_description: "List available compute flavors (specifications) from SmartCMP. Call this to get available compute profiles. Match the user's spec (e.g. '2c4g') against the returned flavor name field. Use the matched flavor's name for computeProfileName or id for computeProfileId, depending on the catalog parameter key."
+tool_flavors_entrypoint: "scripts/list_flavors.py"
+tool_flavors_group: "cmp"
+tool_flavors_capability_class: "provider:smartcmp"
+tool_flavors_priority: 108
+tool_flavors_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Optional search keyword to filter flavors"
+      }
+    }
+  }
 ---
 
 # request
@@ -109,19 +161,26 @@ Submit cloud resource, application environment, or ticket/work order requests th
 
 ## Flow
 
-Request submission uses `smartcmp_list_services` and
-`smartcmp_submit_request`. Business-group scope discovery must be decided from
-datasource business-group results, not by assumption.
+Five tools exist: `smartcmp_list_services`, `smartcmp_list_available_bgs`, `smartcmp_list_flavors`, `smartcmp_list_facets`, and `smartcmp_submit_request`.
 
-1. Call `smartcmp_list_services` → auto-select or ask for the target catalog
-2. If `businessGroupName` is not already fixed by user input or a single
-   catalog default, call datasource business-group listing
-   (`smartcmp_list_all_business_groups`) to determine whether the user has one
-   or multiple available business groups
-3. If datasource returns exactly one business group, use it silently; if it
-   returns multiple, ask the user to choose one before building the preview
-4. Show JSON preview and wait for confirmation
-5. User confirms → call `smartcmp_submit_request`
+### Complete flow
+
+1. **Call `smartcmp_list_services`** → auto-select or ask user to select catalog
+2. **Call `smartcmp_list_available_bgs`** (with catalogId) → if one BG, auto-select; if multiple, **MUST show list and WAIT for user to choose** (never auto-pick a default)
+3. **Check `instructions.parameters`** for `resourceBundleTags`:
+   - If `resourceBundleTags` required AND `resourceBundleName` absent → **call `smartcmp_list_facets`** → auto-match user's env keyword or ask user to select
+   - Otherwise → use `resourceBundleName` from params `defaultValue`
+4. **Check `instructions.parameters`** for `computeProfileName`:
+   - If user provided a spec (e.g. "2c4g") → **call `smartcmp_list_flavors`** → match user spec against flavor `name` field → use matched `name` for `computeProfileName`
+   - If no user spec and has `defaultValue` → use default
+5. **Build request body** → show JSON preview → ask confirmation
+6. **User confirms** → call `smartcmp_submit_request`
+
+### Parallel tool calls
+
+When possible, call independent tools together in the same turn to reduce round-trips:
+- After catalog is selected: `smartcmp_list_available_bgs` + `smartcmp_list_facets` + `smartcmp_list_flavors` can potentially be called together if all are needed
+- Minimum turns: catalog selection → data gathering → preview → submit
 
 ## Terminology Mapping
 
@@ -130,32 +189,11 @@ describe the same request scope as `tenant`, `租户`, `部门`, `BU`,
 `Department`, `项目`, or `Project`.
 
 - When the user uses one of these terms for request scope, resolve it to
-  `businessGroupName`.
-- Keep the request payload field name exactly as `businessGroupName` even if
+  the business group field from `instructions.parameters`.
+- Keep the request payload field name exactly as the param key even if
   you reply using the user's wording.
 - If `tenant` clearly refers to AtlasClaw auth or platform tenancy rather than
   the SmartCMP request scope, clarify before using it in the request body.
-
-## Business-Group Resolution
-
-`businessGroupName` is not always a question that should be asked explicitly.
-The request skill must determine whether the user has one or multiple available
-business groups by using datasource business-group listing first.
-
-Handle it with these rules:
-
-- Use datasource `smartcmp_list_all_business_groups` to get the actual
-  available business-group list whenever the count is not already fixed by
-  request context.
-- If datasource returns exactly one business group, use it silently. Do not ask
-  the user to fill it again.
-- If datasource returns multiple business groups, ask the user which one to
-  apply under before building the JSON preview.
-- If the user already specified a tenant / 租户 / 部门 / BU / 项目 and it
-  clearly matches one available business group, use it directly instead of
-  asking again.
-- Keep the selection question short and concrete, preferably as a numbered list
-  of available business-group names.
 
 ## Service Selection
 
@@ -169,23 +207,72 @@ Handle it with these rules:
    - Ambiguous → show numbered list and ask
 3. **When auto-selecting:** Output brief confirmation like "已为您自动选择 Linux VM" and STOP.
 
+## Spec Parsing: Compute Profile (API-driven)
+
+When the user provides a resource spec like "2c4g", "4c8g", "8核16G", the Agent must **call `smartcmp_list_flavors`** to find the matching compute profile from the platform, rather than directly writing a value.
+
+### Workflow
+
+1. **Parse user input** into a normalized spec string (lowercase `NcNg` format):
+   - "2c4g" → `"2c4g"`
+   - "4C8G" → `"4c8g"`
+   - "8核16G" → `"8c16g"`
+
+2. **Call `smartcmp_list_flavors`** to get available flavors from the API.
+
+3. **Match** the parsed spec against the flavor `name` field from API response:
+   - Exact match → use that flavor's `name` for `computeProfileName` (or `id` for `computeProfileId`, depending on the catalog parameter key)
+   - No exact match → try fuzzy matching (case-insensitive, with/without spaces)
+   - Still no match → show available flavors to user and ask them to choose
+
+4. **If user did not provide a spec:**
+   - If `computeProfileName` has a `defaultValue` in params → use default
+   - Otherwise → show flavor list from `smartcmp_list_flavors` and ask user to choose
+
+### API Response Structure
+
+`smartcmp_list_flavors` returns flavor objects like:
+
+```json
+{
+  "id": "<uuid>",
+  "name": "<flavor_name>",
+  "specType": "compute",
+  "flavors": [
+    { "type": "CPU", "unit": "Core", "number": null },
+    { "type": "Memory", "unit": "GB", "number": null }
+  ]
+}
+```
+
+The `name` field is what should be matched against user input and used for `computeProfileName`.
+
+### Key Rules
+
+- **Always call `smartcmp_list_flavors`** to verify the spec exists before using it
+- Use the actual `name` from API response for `computeProfileName`, or `id` for `computeProfileId` — depends on which key exists in `instructions.parameters`
+- **Do NOT create separate `cpu` or `memory` fields.** The spec goes into the compute profile field only
+- If the API returns no matching flavor, do NOT guess — ask the user
+- **`computeProfileName` MUST appear inside `resourceSpecs`.** If the user requested a spec (e.g. "2c4g"), it is FORBIDDEN to omit `computeProfileName` from the request body. Missing `computeProfileName` will cause the request to use an unintended default.
+
 ## Field Placement (MUST follow)
 
-Use the EXACT parameter keys from catalog metadata. Do NOT rename, merge, or invent field names.
+Use the **EXACT parameter keys** from `instructions.parameters`. Do NOT rename, merge, invent field names, or use hardcoded values from this document's examples.
+
+> **CRITICAL:** The parameter keys below (e.g. `businessGroupName` vs `businessGroupId`) are **illustrative only**. Different catalog configurations may use different keys. Always check `instructions.parameters` and use the actual `key` field from the catalog metadata.
 
 | Field | Location | Value Source |
 |-------|----------|-------------|
 | `catalogId` | **top-level** | catalog metadata `id` field (**MUST be UUID**, never sourceKey) |
 | `catalogName` | **top-level** | catalog metadata `name` field |
-| `businessGroupName` | **top-level** | User-selected or auto-resolved from datasource business-group list; if catalog/request context proves exactly one valid value, use that value silently |
-| `userLoginId` | **top-level** | params `defaultValue` |
+| `businessGroupId` | **top-level** | **Always use `businessGroupId`** as the key. Value is the `id` from `smartcmp_list_available_bgs` API response (the user's selected BG) |
+| `userLoginId` | **top-level** | params `defaultValue` if available; if null or empty, set to `""` (empty string) — the submit script auto-fills it from the current session |
 | `name` | **top-level** | user input or auto-generate `vm-<timestamp>` |
-| `resourceBundleName` | **top-level** | Only when user explicitly chose a resource pool or a dedicated runtime lookup resolved it. If catalog metadata marks it `runtimeDefaultOnly`, omit it from the payload and let CMP runtime form choose the default. |
+| resource bundle field | **top-level** | `resourceBundleName` from params `defaultValue` (omit when using `resourceBundleTags`) |
 | `node` | resourceSpecs | `instructions.node` (e.g. `"Compute"`) |
 | `type` | resourceSpecs | `instructions.type` (e.g. `"cloudchef.nodes.Compute"`) |
-| `computeProfileName` | resourceSpecs | Only when user explicitly chose a compute profile or a dedicated runtime lookup resolved it. If catalog metadata marks it `runtimeDefaultOnly`, omit it from the payload. |
-| `cpu` | resourceSpecs | user input or params `defaultValue` |
-| `memory` | resourceSpecs | user input or params `defaultValue`. **MUST be integer GB, NEVER convert to MB** (e.g. "8g" → `8`, NOT `8192`) |
+| `resourceBundleTags` | resourceSpecs | **array of `"<facet.key>:<option.key>"` strings** from `smartcmp_list_facets` API, see Tag-based Resource Bundle section |
+| compute profile field | resourceSpecs | **matched from `smartcmp_list_flavors` API**. Use `name` for `computeProfileName` or `id` for `computeProfileId`, depending on param key |
 | `logicTemplateName` | resourceSpecs | Use user choice or explicit runtime lookup. If catalog metadata marks it `runtimeDefaultOnly`, omit it from the payload and let CMP runtime form apply the real default. |
 | `templateId` | resourceSpecs | Use user choice or explicit runtime lookup. If catalog metadata marks it `runtimeDefaultOnly`, omit it from the payload. |
 | `credentialUser` | resourceSpecs | user input or params `defaultValue` |
@@ -193,8 +280,14 @@ Use the EXACT parameter keys from catalog metadata. Do NOT rename, merge, or inv
 | `networkId` | resourceSpecs | Use user choice or explicit runtime lookup. If catalog metadata marks it `runtimeDefaultOnly`, omit it from the payload. |
 | `systemDisk` | resourceSpecs | **nested object** `{"size": N}`. If only a `runtimeDefaultOnly` catalog default exists, omit the field and let CMP runtime form choose. |
 
-**FORBIDDEN inside resourceSpecs:** `name`, `businessGroupName`, `resourceBundleName`
+**FORBIDDEN inside resourceSpecs:** `name`, `businessGroupId`, `resourceBundleName`, `cpu`, `memory`
 **FORBIDDEN top-level:** `description`, `serviceCategory`, `priority`, `category`, `requestor`, `parameters`
+
+### Parameter Key Rule (CRITICAL)
+
+**Every field in the request body MUST use the exact `key` from `instructions.parameters`.** Do NOT substitute with similar-sounding names from examples in this document.
+
+**Exception:** Business group always uses `businessGroupId` with the `id` from the API, regardless of what `instructions.parameters` defines.
 
 ## Runtime Default Guard
 
@@ -215,31 +308,179 @@ defaults in the UI. Because of that:
 - Safe defaults like `userLoginId` may still be used directly when they are not
   marked `runtimeDefaultOnly`.
 
-## Correct Example (vSphere Linux VM)
+## Business Group Selection (API-driven)
 
-> catalogId MUST be a UUID like `a1b2c3d4-...`, taken from catalog metadata `id` field.
-> NEVER use sourceKey like `BUILD-IN-CATALOG-LINUX-VM` as catalogId.
+After selecting a catalog, **always call `smartcmp_list_available_bgs`** with the catalogId to get the list of business groups available for that catalog.
+
+### Workflow
+
+1. Call `smartcmp_list_available_bgs` with `catalog_id` = selected catalogId
+2. API returns a list of business groups, each with `id` and `name`
+3. If only one BG available → auto-select and inform user
+4. If multiple BGs → **MUST show numbered list and ask user to choose. STOP and WAIT for user response. Do NOT auto-pick any default or "recommended" option.**
+5. Use the selected BG's `id` as the value for `businessGroupId` in the request body
+
+> **CRITICAL:** When multiple business groups are available, you MUST ask the user to choose. Never assume a default, never recommend one, never skip the selection. The workflow CANNOT proceed until the user explicitly picks one.
+>
+> **Do NOT use the `defaultValue` from params for business group.** Always call the API to get the actual available options.
+
+## Tag-based Resource Bundle Matching (resourceBundleTags)
+
+When `instructions.parameters` includes `resourceBundleTags` as **required** (`required: true`) and `resourceBundleName` is **absent**, use tag-based matching instead.
+
+### Trigger Conditions
+
+| Condition | Mode |
+|-----------|------|
+| `resourceBundleTags` required AND `resourceBundleName` absent | **Tag mode** — call `smartcmp_list_facets`, let user pick, build `resourceBundleTags` in resourceSpecs |
+| `resourceBundleName` present (regardless of `resourceBundleTags`) | **Name mode** — use `resourceBundleName` at top-level as normal, ignore tags |
+
+### Tag Mode Workflow
+
+1. **Call `smartcmp_list_facets`** to retrieve available facet definitions and options.
+2. **Present options to user** using `nameZh` (Chinese) or `name` (English) from the response. Example:
+   - "请选择资源环境：1) 开发  2) 测试  3) 生产"
+3. **User selects** → build the tag string using the facet `key` and option `key` from API response.
+4. Place the result in `resourceBundleTags` array inside resourceSpecs.
+
+### API Response Structure
+
+`smartcmp_list_facets` returns facet objects. The structure varies per deployment — **do NOT assume any specific key names**. Example of what the API *might* return:
+
+```json
+[
+  {
+    "key": "<facet_key>",
+    "name": "<english_display_name>",
+    "nameZh": "<chinese_display_name>",
+    "optionMode": "SINGLE",
+    "options": [
+      { "key": "<option_key_1>", "name": "<EN_1>", "nameZh": "<ZH_1>" },
+      { "key": "<option_key_2>", "name": "<EN_2>", "nameZh": "<ZH_2>" }
+    ]
+  }
+]
+```
+
+All `key` values (`facet.key`, `option.key`) are **deployment-specific** and can only be known at runtime by calling the API.
+
+### Building resourceBundleTags (CRITICAL)
+
+Format: `["<facet.key>:<option.key>"]` — both parts come **directly from the runtime API response**, never hardcoded, never invented.
+
+**Step-by-step:**
+
+1. Call `smartcmp_list_facets` → receive facet list
+2. For each facet, read `facet.key` (e.g. the API might return `"FACET_ENV"`, `"FACET_REGION"`, etc.)
+3. Present `facet.nameZh` / `facet.name` as label, and `option.nameZh` / `option.name` as choices to user
+4. User picks an option → take that option's `key` field from the API response
+5. Build tag string: `"<facet.key>:<selected_option.key>"`
+6. Place in array: `"resourceBundleTags": ["<facet.key>:<selected_option.key>"]`
+
+| API Field | Usage |
+|-----------|-------|
+| `facet.key` | Left side of colon — **read from API response at runtime** |
+| `option.key` | Right side of colon — **read from API response at runtime** |
+| `facet.nameZh` / `facet.name` | **Display only** — show to user, NEVER put in request body |
+| `option.nameZh` / `option.name` | **Display only** — show to user, NEVER put in request body |
+
+> **NEVER hardcode** any facet key or option key. Every deployment may have different keys. Always call `smartcmp_list_facets` first and use the returned values.
+
+### Auto-matching from User Input
+
+If the user mentions an environment keyword in their request (e.g. "测试", "生产", "开发"), the Agent should:
+
+1. Call `smartcmp_list_facets` to get available options.
+2. Match user's keyword against option `nameZh` / `name` fields.
+3. If exactly one option matches → auto-select and inform user (e.g. "已自动匹配资源环境: 测试").
+4. If no match or ambiguous → show the full option list and ask user to choose.
+
+### Correct Example (Tag-based, no resourceBundleName)
+
+> The values below are illustrative only.
+> In practice, use the **actual keys and defaultValues** from `instructions.parameters`,
+> and the **actual facet/option keys** returned by `smartcmp_list_facets` at runtime.
 
 ```json
 {
-  "catalogId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "catalogName": "Linux VM",
-  "businessGroupName": "我的业务组",
-  "userLoginId": "admin",
+  "catalogId": "<UUID from catalog metadata id>",
+  "catalogName": "<from catalog metadata name>",
+  "businessGroupId": "<id from smartcmp_list_available_bgs>",
+  "name": "test-linux-vm",
+  "resourceSpecs": [
+    {
+      "resourceBundleTags": ["<facet.key>:<option.key>"],
+      "computeProfileName": "2c4g",
+      "node": "Compute",
+      "type": "cloudchef.nodes.Compute",
+      "logicTemplateName": "<defaultValue from params>",
+      "systemDisk": { "size": 60 }
+    }
+  ]
+}
+```
+
+### WRONG — Tag Mistakes (DO NOT follow)
+
+**Wrong 1: Using display name instead of API key**
+```json
+{ "resourceBundleTags": ["资源环境:测试"] }
+```
+Display names (`nameZh`) are for showing to user only. Must use `facet.key` and `option.key` from API response.
+
+**Wrong 2: Using parameter field name as tag key**
+```json
+{ "resourceBundleTags": ["Resource Bundle Tags:test"] }
+```
+`"Resource Bundle Tags"` is the parameter name, not a facet key. Must use `facet.key` from API.
+
+**Wrong 3: Hardcoding or inventing keys without calling API**
+```json
+{ "resourceBundleTags": ["env:test"] }
+```
+Tag key and value must come from `smartcmp_list_facets` API response, not invented or assumed.
+
+**Wrong 4: Using both resourceBundleName and resourceBundleTags**
+```json
+{ "resourceBundleName": "pool", "resourceSpecs": [{ "resourceBundleTags": ["..."] }] }
+```
+When using tags, omit `resourceBundleName` from top-level.
+
+**Wrong 5: resourceBundleTags placed at top-level**
+```json
+{ "resourceBundleTags": ["..."], "resourceSpecs": [...] }
+```
+`resourceBundleTags` belongs inside each resourceSpecs item, not at top-level.
+
+**Wrong 6: resourceBundleTags as object instead of array**
+```json
+{ "resourceBundleTags": { "key": "value" } }
+```
+Must be array of strings: `["<facet.key>:<option.key>"]`
+
+## Correct Example (vSphere Linux VM with user spec "2c4g")
+
+> catalogId MUST be a UUID like `a1b2c3d4-...`, taken from catalog metadata `id` field.
+> NEVER use sourceKey like `BUILD-IN-CATALOG-LINUX-VM` as catalogId.
+> All field names and values below are **illustrative**. Always use the actual keys and defaultValues from `instructions.parameters`.
+
+```json
+{
+  "catalogId": "<UUID from catalog metadata id>",
+  "catalogName": "<from catalog metadata name>",
+  "businessGroupId": "<id from smartcmp_list_available_bgs>",
   "name": "my-linux-vm",
-  "resourceBundleName": "Vsphere资源池",
+  "resourceBundleName": "<defaultValue from params>",
   "resourceSpecs": [
     {
       "node": "Compute",
       "type": "cloudchef.nodes.Compute",
-      "computeProfileName": "微型计算",
-      "cpu": 2,
-      "memory": 4,
-      "logicTemplateName": "CentOS",
-      "templateId": "vm-551",
+      "computeProfileName": "2c4g",
+      "logicTemplateName": "<defaultValue from params>",
+      "templateId": "<defaultValue from params>",
       "credentialUser": "root",
       "credentialPassword": "P@ssw0rd",
-      "networkId": "network-18963",
+      "networkId": "<defaultValue from params>",
       "systemDisk": { "size": 50 }
     }
   ]
@@ -254,17 +495,17 @@ defaults in the UI. Because of that:
 ```
 Must be: `"catalogId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"`
 
-**Wrong 2: fields flattened to top-level**
+**Wrong 2: separate cpu/memory fields instead of computeProfileName**
 ```json
-{ "catalogName": "Linux VM", "cpu": 1, "memory": 1, "computeProfileName": "test" }
+{ "resourceSpecs": [{ "cpu": 2, "memory": 4, "computeProfileName": "test" }] }
 ```
-`cpu`, `memory`, `computeProfileName` MUST be inside `resourceSpecs[]`.
+User said "2c4g" → must be `"computeProfileName": "2c4g"`. Do NOT add `cpu` or `memory` fields.
 
 **Wrong 3: top-level fields duplicated inside resourceSpecs**
 ```json
-{ "resourceSpecs": [{ "name": "vm1", "businessGroupName": "ABI", "resourceBundleName": "pool" }] }
+{ "resourceSpecs": [{ "name": "vm1", "businessGroupId": "xxx", "resourceBundleName": "pool" }] }
 ```
-`name`, `businessGroupName`, `resourceBundleName` belong at top-level ONLY.
+`name`, business group field, `resourceBundleName` belong at top-level ONLY.
 
 **Wrong 4: systemDisk uses dot notation**
 ```json
@@ -278,34 +519,33 @@ Must be: `"systemDisk": { "size": 50 }`
 ```
 Use EXACT keys from catalog metadata: `"logicTemplateName"` + `"templateId"` (two separate fields).
 
-**Wrong 6: memory converted to MB**
+**Wrong 6: computeProfileName not lowercase**
 ```json
-{ "resourceSpecs": [{ "cpu": 4, "memory": 8192 }] }
+{ "resourceSpecs": [{ "computeProfileName": "4C8G" }] }
 ```
-User said "8g" → must be `"memory": 8` (raw GB integer), NOT 8192.
+Must be lowercase: `"computeProfileName": "4c8g"`
 
-## Parameter Resolution (No Lookup Tools)
+## Parameter Resolution
 
-Resolve ALL parameters from `instructions.parameters` without calling lookup tools:
+Resolve parameters using API tools and `instructions.parameters`:
 
 | # | Condition | Action |
 |---|-----------|--------|
-| 1 | User specifies value (e.g. "2c4g" → cpu=2, memory=4) | Use user value |
-| 2 | `businessGroupName` availability is unknown | Call datasource `smartcmp_list_all_business_groups` first to determine actual choices |
-| 3 | Datasource returns exactly one `businessGroupName` | Use it silently |
-| 4 | Datasource returns multiple `businessGroupName` values and user did not choose one yet | Ask the user to choose one |
-| 5 | Other parameter has non-empty `defaultValue` and is **not** marked `runtimeDefaultOnly` | Use default silently |
-| 6 | Parameter is marked `runtimeDefaultOnly: true` | Omit it from payload unless user explicitly chose it or datasource/runtime lookup resolved it |
+| 1 | Business group field exists in params | Call `smartcmp_list_available_bgs` → user selects → use `businessGroupId` with the selected BG's `id` |
+| 2 | User provides spec (e.g. "2c4g", "4核8G") | Parse to lowercase NcNg → call `smartcmp_list_flavors` → match against `name` → set compute profile field |
+| 3 | User does not provide spec, no `defaultValue` for compute profile | Call `smartcmp_list_flavors` → show list → ask user to choose |
+| 4 | `resourceBundleTags` required AND `resourceBundleName` absent | Call `smartcmp_list_facets` → match/select → set `resourceBundleTags` in resourceSpecs using API keys; omit `resourceBundleName` |
+| 5 | Parameter has non-empty `defaultValue` (except business group) and is **not** marked `runtimeDefaultOnly` | Use default silently |
+| 6 | Parameter is marked `runtimeDefaultOnly: true` | Omit it from payload unless user explicitly chose it or runtime lookup resolved it |
 | 7 | `name` not provided | Generate or ask user |
 | 8 | `credentialUser/Password` required, no default | Ask user |
-| 9 | Everything else, no default | Omit from request body |
-
-**Spec parsing:** "2c4g" → cpu=2, memory=4. "4c8g" → cpu=4, memory=8. "8核16G" → cpu=8, memory=16. **memory value is ALWAYS the raw GB integer. NEVER multiply by 1024.** `memory: 8` is correct, `memory: 8192` is WRONG.
+| 9 | `resourceBundleTags` required but user didn't mention env and no match from facets | Show facet options list and ask user to choose |
+| 10 | Everything else, no default | Omit from request body |
 
 ## Ticket / Work Order Rules
 
 When `serviceCategory` is `"GENERIC_SERVICE"`:
-- top level: `catalogId`, `catalogName`, `userLoginId`, `businessGroupName`, `name`
+- top level: `catalogId`, `catalogName`, `userLoginId`, `businessGroupId`, `name`
 - nested: `genericRequest` with only `description` field
 - Do NOT add `impactScope`, `expectedResolutionTime`, `priority`, `urgency`, `contactName`,
   `contactPhone`, `email` or any other invented fields. Put extra info in `description` text.
@@ -328,9 +568,10 @@ When `serviceCategory` is `"GENERIC_SERVICE"`:
 ## Interaction Rules
 
 - `smartcmp_list_services` at most ONCE per conversation.
-- Do not assume single vs multiple business groups. Use datasource
-  `smartcmp_list_all_business_groups` when that fact matters.
-- ONE tool call per turn. After any tool call, STOP and respond.
-- When auto-selecting, do NOT echo raw tool output.
+- `smartcmp_list_available_bgs` at most ONCE per conversation (after catalog selection).
+- `smartcmp_list_flavors` at most ONCE per conversation (when compute profile needed).
+- `smartcmp_list_facets` at most ONCE per conversation (only when tag mode detected).
+- Multiple independent tools CAN be called in the same turn to reduce round-trips.
+- When auto-selecting (single option), do NOT echo raw tool output.
 - Never claim submitted unless `smartcmp_submit_request` actually executed.
 - Never display raw `_internal` metadata to user.
