@@ -2,6 +2,11 @@
 
 Reusable provider packages and starter patterns for integrating external enterprise systems with AtlasClaw.
 
+This repository is the home for concrete provider packages such as SmartCMP and
+Jira. AtlasClaw core documents the loading contract; this repository documents
+provider behavior, auth models, field semantics, workflow patterns, and
+reference implementations.
+
 ![AtlasClaw provider runtime overview](docs/images/provider-runtime-overview.svg)
 
 ## What Is a Provider?
