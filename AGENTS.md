@@ -2,6 +2,11 @@
 
 ## Repository Overview
 
+This repository owns concrete integrations. If a document or implementation
+depends on a target system's auth model, fields, workflow semantics, webhook
+payloads, or provider-specific UI text, it belongs here rather than in
+`atlasclaw` core.
+
 This repository is organized into a few top-level modules:
 
 - `providers/`: concrete provider packages such as `SmartCMP-Provider` and `jira`
@@ -33,6 +38,9 @@ Directory responsibilities:
 - `skills/<skill-name>/scripts/`: executable integration logic and helpers
 - `skills/<skill-name>/references/`: API mappings, workflows, and examples kept close to the skill
 - `docs/` and `test/`: provider-specific design notes and verification coverage
+
+Core/runtime contracts, loading behavior, and provider-agnostic rules stay in
+`atlasclaw`. Concrete provider behavior and examples stay here.
 
 ## Code Style Guidelines
 
