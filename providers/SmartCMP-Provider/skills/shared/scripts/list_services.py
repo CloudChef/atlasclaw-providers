@@ -41,21 +41,41 @@ except ImportError:
 
 BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()
 
-_RUNTIME_FORM_DEFAULT_KEYS = {
-    "resourceBundleName",
-    "computeProfileName",
-    "logicTemplateName",
-    "templateId",
-    "networkId",
-    "systemDisk.size",
-}
+def _coerce_optional_bool(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes"}:
+            return True
+        if normalized in {"false", "0", "no"}:
+            return False
+    return None
+
+
+def _resolve_runtime_default_only(raw_param: dict) -> bool:
+    for key in ("runtimeDefaultOnly", "runtime_default_only"):
+        resolved = _coerce_optional_bool(raw_param.get(key))
+        if resolved is not None:
+            return resolved
+
+    metadata = raw_param.get("metadata")
+    if isinstance(metadata, dict):
+        for key in ("runtimeDefaultOnly", "runtime_default_only"):
+            resolved = _coerce_optional_bool(metadata.get(key))
+            if resolved is not None:
+                return resolved
+
+    return False
 
 
 def _normalize_param(raw_param: dict) -> dict:
     """Preserve the instruction fields that drive the request workflow."""
     key = raw_param.get("key", "")
     default_value = raw_param.get("defaultValue")
-    runtime_default_only = key in _RUNTIME_FORM_DEFAULT_KEYS and default_value not in (None, "")
+    runtime_default_only = (
+        _resolve_runtime_default_only(raw_param) and default_value not in (None, "")
+    )
 
     normalized = {
         "key": key,

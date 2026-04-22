@@ -176,11 +176,28 @@ Five tools exist: `smartcmp_list_services`, `smartcmp_list_available_bgs`, `smar
 5. **Build request body** → show JSON preview → ask confirmation
 6. **User confirms** → call `smartcmp_submit_request`
 
-### Parallel tool calls
+### Tool sequencing
 
-When possible, call independent tools together in the same turn to reduce round-trips:
-- After catalog is selected: `smartcmp_list_available_bgs` + `smartcmp_list_facets` + `smartcmp_list_flavors` can potentially be called together if all are needed
-- Minimum turns: catalog selection → data gathering → preview → submit
+Even when multiple lookups are logically independent, the runtime contract is
+still one tool call per turn:
+- After each tool call, stop and summarize the resolved result in natural
+  language.
+- Ask exactly one next question for the next missing field set, or move
+  directly to preview/submission if no required fields remain.
+- Do not batch `smartcmp_list_available_bgs`, `smartcmp_list_facets`, and
+  `smartcmp_list_flavors` into one turn.
+
+## Natural-Language Follow-up After Lookup Tools
+
+Lookup tools are for resolving request context, not for exposing raw tool
+output to the user.
+
+- After any lookup tool call, summarize the resolved result in natural language.
+- Ask exactly one next question for the next missing field, or move directly
+  to preview/submission if no required fields remain.
+- Do not paste raw tool output, JSON, or `_internal` metadata into the reply.
+- Never chain multiple tool calls in one turn; one tool call per turn remains
+  the hard limit.
 
 ## Terminology Mapping
 
@@ -195,6 +212,23 @@ describe the same request scope as `tenant`, `租户`, `部门`, `BU`,
 - If `tenant` clearly refers to AtlasClaw auth or platform tenancy rather than
   the SmartCMP request scope, clarify before using it in the request body.
 
+## Business-Group Resolution
+
+Business-group selection stays API-driven, but the follow-up must remain
+concise and natural:
+
+- Use `smartcmp_list_available_bgs` as the authoritative source of available
+  business groups for the selected catalog.
+- If the API returns exactly one business group, use it silently. Do not ask
+  the user to fill it again.
+- If the user already specified a tenant / 租户 / 部门 / BU / 项目 and it
+  uniquely normalizes to one available business group, carry that resolved
+  match forward instead of asking again.
+- If multiple business groups remain after normalization, ask one concise
+  numbered selection question before building the preview.
+- Ask one concise selection question and wait for the user's choice.
+- When asking the user to choose, do not repeat lookup scaffolding such as
+  `Found N business group(s)` before the question.
 ## Service Selection
 
 1. Call `smartcmp_list_services` (ONCE only, never again after getting catalogId).
@@ -205,7 +239,7 @@ describe the same request scope as `tenant`, `租户`, `部门`, `BU`,
    - "k8s" / "容器" → select "App on Kubernetes"
    - "机房" → select "机房"
    - Ambiguous → show numbered list and ask
-3. **When auto-selecting:** Output brief confirmation like "已为您自动选择 Linux VM" and STOP.
+3. **When auto-selecting:** Output a concise natural-language confirmation such as "已为您自动选择 Linux VM". If required fields remain, ask exactly one natural-language question for the next missing field set. Do not echo raw tool output.
 
 ## Spec Parsing: Compute Profile (API-driven)
 
@@ -542,6 +576,27 @@ Resolve parameters using API tools and `instructions.parameters`:
 | 9 | `resourceBundleTags` required but user didn't mention env and no match from facets | Show facet options list and ask user to choose |
 | 10 | Everything else, no default | Omit from request body |
 
+## Concrete Flow Expectations
+
+- "我要申请工单": after the ticket service is auto-selected and the business
+  group is resolved or chosen, keep the resolved context and continue with a
+  natural-language prompt for the remaining ticket fields instead of stopping
+  at raw tool output.
+- If the user did not specify a business group for the ticket flow and the
+  datasource returns multiple choices, ask only the short business-group
+  selection question using the available names. Do not echo the lookup
+  preamble or dump the full tool output.
+- "我要申请测试部门的 2C4G 的 Linux VM": recognize Linux VM, the business
+  group `测试部门`, and `cpu=2` plus `memory=4`; carry those values forward and
+  ask only for the remaining required fields, minimizing follow-up rounds.
+- In that Linux VM flow, if business-group lookup returns `测试`, treat it as
+  the resolved match for user wording `测试部门` only when it is the unique
+  normalized datasource match; otherwise ask the user to choose. When it is a
+  unique match, continue directly to the remaining VM fields. Do not show the
+  business-group list or the lookup preamble to the user.
+- In both flows, do not re-ask for already resolved service, business group,
+  CPU, or memory values.
+
 ## Ticket / Work Order Rules
 
 When `serviceCategory` is `"GENERIC_SERVICE"`:
@@ -571,7 +626,7 @@ When `serviceCategory` is `"GENERIC_SERVICE"`:
 - `smartcmp_list_available_bgs` at most ONCE per conversation (after catalog selection).
 - `smartcmp_list_flavors` at most ONCE per conversation (when compute profile needed).
 - `smartcmp_list_facets` at most ONCE per conversation (only when tag mode detected).
-- Multiple independent tools CAN be called in the same turn to reduce round-trips.
+- ONE tool call per turn. After any tool call, STOP and summarize the resolved result in natural language, then ask at most one next question. Never dump raw tool output.
 - When auto-selecting (single option), do NOT echo raw tool output.
 - Never claim submitted unless `smartcmp_submit_request` actually executed.
 - Never display raw `_internal` metadata to user.

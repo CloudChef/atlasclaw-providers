@@ -69,7 +69,7 @@ def run_script(monkeypatch, argv: list[str], *, fake_post=None, fake_get=None):
 def test_submit_request_fails_when_verified_request_enters_failed_state(monkeypatch):
     def fake_post(url, headers=None, json=None, verify=None, timeout=None):
         assert url == "https://cmp.example.com/platform-api/generic-request/submit"
-        return FakeResponse([{"id": "req-1", "state": "INITIALING"}])
+        return FakeResponse([{"id": "req-1", "workflowId": "TIC20260422000001", "state": "INITIALING"}])
 
     def fake_get(url, headers=None, verify=None, timeout=None):
         if url == "https://cmp.example.com/platform-api/generic-request/req-1":
@@ -131,8 +131,8 @@ def test_submit_request_fails_when_verified_request_enters_failed_state(monkeypa
     )
 
     assert exit_code == 1
-    assert "[FAILED] 申请已创建但初始化失败" in stdout
-    assert "Request ID: req-1" in stdout
+    assert "[FAILED] Request was created but initialization failed" in stdout
+    assert "Request ID: TIC20260422000001" in stdout
     assert "State: INITIALING_FAILED" in stdout
     assert "Provision State: provisionAllocationFailed" in stdout
     assert "Error: No value present" in stdout
@@ -157,13 +157,14 @@ def test_submit_request_fails_when_verified_request_enters_failed_state(monkeypa
 def test_submit_request_succeeds_when_verified_request_is_visible(monkeypatch):
     def fake_post(url, headers=None, json=None, verify=None, timeout=None):
         assert url == "https://cmp.example.com/platform-api/generic-request/submit"
-        return FakeResponse([{"id": "req-1", "state": "INITIALING"}])
+        return FakeResponse([{"id": "req-1", "workflowId": "TIC20260422000002", "state": "INITIALING"}])
 
     def fake_get(url, headers=None, verify=None, timeout=None):
         assert url == "https://cmp.example.com/platform-api/generic-request/req-1"
         return FakeResponse(
             {
                 "id": "req-1",
+                "workflowId": "TIC20260422000002",
                 "state": "INITIALING",
                 "processInstanceId": "proc-1",
             }
@@ -177,18 +178,17 @@ def test_submit_request_succeeds_when_verified_request_is_visible(monkeypatch):
     )
 
     assert exit_code == 0
-    assert "[SUCCESS] 申请已提交" in stdout
-    assert "Request ID: req-1" in stdout
+    assert "[SUCCESS] Request submitted" in stdout
+    assert "Request ID: TIC20260422000002" in stdout
     assert "State: INITIALING" in stdout
-    assert "Process Instance ID: proc-1" in stdout
     assert "Catalog: Linux OS" in stdout
     assert "Name: vm-1" in stdout
 
 
-def test_submit_request_stays_non_success_when_request_never_leaves_initialing(monkeypatch):
+def test_submit_request_stays_pending_without_error_when_request_never_leaves_initialing(monkeypatch):
     def fake_post(url, headers=None, json=None, verify=None, timeout=None):
         assert url == "https://cmp.example.com/platform-api/generic-request/submit"
-        return FakeResponse([{"id": "req-1", "state": "INITIALING"}])
+        return FakeResponse([{"id": "req-1", "workflowId": "TIC20260422000003", "state": "INITIALING"}])
 
     def fake_get(url, headers=None, verify=None, timeout=None):
         assert url == "https://cmp.example.com/platform-api/generic-request/req-1"
@@ -208,7 +208,33 @@ def test_submit_request_stays_non_success_when_request_never_leaves_initialing(m
         fake_get=fake_get,
     )
 
-    assert exit_code == 1
-    assert "[PENDING] 申请已提交，但后台尚未确认进入流程" in stdout
-    assert "Request ID: req-1" in stdout
+    assert exit_code == 0
+    assert "[PENDING] Request submitted, but workflow has not been confirmed yet" in stdout
+    assert "Request ID: TIC20260422000003" in stdout
     assert "State: INITIALING" in stdout
+    assert "Note: Track this request by Request ID instead of resubmitting it." in stdout
+
+
+def test_submit_request_stays_pending_without_error_when_verification_lookup_fails(monkeypatch):
+    def fake_post(url, headers=None, json=None, verify=None, timeout=None):
+        assert url == "https://cmp.example.com/platform-api/generic-request/submit"
+        return FakeResponse([{"id": "req-1", "workflowId": "TIC20260422000004", "state": "INITIALING"}])
+
+    def fake_get(url, headers=None, verify=None, timeout=None):
+        assert url == "https://cmp.example.com/platform-api/generic-request/req-1"
+        return FakeResponse({"message": "Not found"}, status_code=404, text="Not found")
+
+    exit_code, stdout, _ = run_script(
+        monkeypatch,
+        ["--json", '{"catalogName":"Linux OS","name":"vm-1","resourceSpecs":[{}]}'],
+        fake_post=fake_post,
+        fake_get=fake_get,
+    )
+
+    assert exit_code == 0
+    assert "[PENDING] Request submitted, but not yet verifiable in SmartCMP" in stdout
+    assert "Request ID: TIC20260422000004" in stdout
+    assert "Submit State: INITIALING" in stdout
+    assert "Verify HTTP: 404" in stdout
+    assert "Message: Not found" in stdout
+    assert "Note: Track this request by Request ID instead of resubmitting it." in stdout
