@@ -177,6 +177,11 @@ def _is_submission_confirmed(snapshot: dict) -> bool:
     return state not in {"INITIALING", "INITIALIZING"}
 
 
+def _verification_wait_seconds(attempt: int) -> float:
+    """Use a fixed linear backoff: step, 2*step, 3*step, ..."""
+    return _VERIFY_INTERVAL_SECONDS * max(1, int(attempt) + 1)
+
+
 def _extract_request_records(result: object) -> list[dict]:
     if isinstance(result, list):
         return [item for item in result if isinstance(item, dict)]
@@ -415,7 +420,7 @@ def _verify_submitted_request(request_id: str) -> dict:
                 return snapshot
 
         if attempt < _VERIFY_ATTEMPTS - 1:
-            time.sleep(_VERIFY_INTERVAL_SECONDS)
+            time.sleep(_verification_wait_seconds(attempt))
 
     last_snapshot["failed"] = bool(
         last_snapshot.get("ok")
