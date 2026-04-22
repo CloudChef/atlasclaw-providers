@@ -173,7 +173,7 @@ Five tools exist: `smartcmp_list_services`, `smartcmp_list_available_bgs`, `smar
 ### Complete flow
 
 1. **Call `smartcmp_list_services`** → auto-select or ask user to select catalog
-2. **Call `smartcmp_list_available_bgs`** (with catalogId) → if one BG, auto-select; if multiple, **MUST show list and WAIT for user to choose** (never auto-pick a default)
+2. **Call `smartcmp_list_available_bgs`** (with catalogId) → if one BG, auto-select; if multiple, **MUST show list and WAIT for user to choose** (never auto-pick a default). **You MUST call this tool. Do NOT skip it. Do NOT ask the user to type a business group name. The tool returns the available options.**
 3. **Check `instructions.parameters`** for `resourceBundleTags`:
    - If `resourceBundleTags` required AND `resourceBundleName` absent → **call `smartcmp_list_facets`** (with businessGroupId) → auto-match user's env keyword or ask user to select
    - Otherwise → use `resourceBundleName` from params `defaultValue`
@@ -182,6 +182,8 @@ Five tools exist: `smartcmp_list_services`, `smartcmp_list_available_bgs`, `smar
    - If no user spec and has `defaultValue` → use default
 5. **Build request body** → show JSON preview → ask confirmation
 6. **User confirms** → call `smartcmp_submit_request`
+
+> **MANDATORY:** Steps 1–2 are NEVER optional. You MUST call `smartcmp_list_services` and then `smartcmp_list_available_bgs` in every request flow. Never skip the business group API call.
 
 ### Tool sequencing
 
@@ -295,7 +297,7 @@ Use the **EXACT parameter keys** from `instructions.parameters`. Do NOT rename, 
 | resource bundle field | **top-level** | `resourceBundleName` from params `defaultValue` (omit when using `resourceBundleTags`) |
 | `node` | resourceSpecs | `instructions.node` (e.g. `"Compute"`) |
 | `type` | resourceSpecs | `instructions.type` (e.g. `"cloudchef.nodes.Compute"`) |
-| `resourceBundleTags` | resourceSpecs | **array of `"<facet.key>:<option.key>"` strings** from `smartcmp_list_facets` API, see Tag-based Resource Bundle section |
+| `resourceBundleTags` | resourceSpecs | **MUST be an array of strings**, format: `["<facet.key>:<option.key>"]`. NEVER use object format like `{"key": "value"}`. Values from `smartcmp_list_facets` API, see Tag-based Resource Bundle section |
 | compute profile field | resourceSpecs | **matched from `smartcmp_list_flavors` API**. Use `name` for `computeProfileName` or `id` for `computeProfileId`, depending on param key. If both exist, prefer `computeProfileId`. **MUST NOT be omitted after a successful flavor match.** |
 | `logicTemplateName` | resourceSpecs | Use user choice or explicit runtime lookup. If catalog metadata marks it `runtimeDefaultOnly`, omit it from the payload and let CMP runtime form apply the real default. |
 | `templateId` | resourceSpecs | Use user choice or explicit runtime lookup. If catalog metadata marks it `runtimeDefaultOnly`, omit it from the payload. |
@@ -340,6 +342,8 @@ defaults in the UI. Because of that:
 ## Business Group Selection (API-driven)
 
 After selecting a catalog, **always call `smartcmp_list_available_bgs`** with the catalogId to get the list of business groups available for that catalog.
+
+> **IMPORTANT:** You MUST call the `smartcmp_list_available_bgs` tool. Do NOT ask the user "Which business group do you want?" without first calling the tool. The tool returns the actual list of available business groups. Without calling this tool, you do not know what options exist.
 
 ### Workflow
 
@@ -396,6 +400,10 @@ All `key` values (`facet.key`, `option.key`) are **deployment-specific** and can
 ### Building resourceBundleTags (CRITICAL)
 
 Format: `["<facet.key>:<option.key>"]` — both parts come **directly from the runtime API response**, never hardcoded, never invented.
+
+> **TYPE CONSTRAINT:** `resourceBundleTags` is ALWAYS an **array of strings**. Never an object, never a dict, never key-value pairs.
+> - CORRECT: `"resourceBundleTags": ["FACET_ENV:test"]`
+> - WRONG:  `"resourceBundleTags": {"FACET_ENV": "test"}` ← this will cause submission failure
 
 **Step-by-step:**
 
