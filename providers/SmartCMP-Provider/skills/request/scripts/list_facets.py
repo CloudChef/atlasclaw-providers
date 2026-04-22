@@ -2,10 +2,11 @@
 """List available resource bundle tag facets from SmartCMP.
 
 Usage:
-  python list_facets.py [--aspects ASPECTS]
+  python list_facets.py <business_group_id> [--node-type NODE_TYPE]
 
 Arguments:
-  --aspects, -a   Comma-separated aspect filter (default: CLOUD_RESOURCE)
+  business_group_id   REQUIRED. UUID of the selected business group.
+  --node-type, -n     Node type filter (default: cloudchef.nodes.Compute)
 
 Output:
   - Facet definitions with keys and selectable options
@@ -15,7 +16,7 @@ Environment:
   CMP_COOKIE - Session cookie string
 
 API Reference:
-  GET /facets?query&aspects=CLOUD_RESOURCE
+  GET /resource-bundles/available-facets?businessGroupId=xxx&cloudEntryId=&nodeType=cloudchef.nodes.Compute
 """
 import sys
 import json
@@ -33,24 +34,27 @@ except ImportError:
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description='List resource bundle tag facets from SmartCMP')
-    parser.add_argument('--aspects', '-a', default='CLOUD_RESOURCE',
-                        help='Comma-separated aspect filter (default: CLOUD_RESOURCE)')
+    parser.add_argument('business_group_id',
+                        help='REQUIRED. UUID of the selected business group.')
+    parser.add_argument('--node-type', '-n', default='cloudchef.nodes.Compute',
+                        help='Node type filter (default: cloudchef.nodes.Compute)')
     return parser.parse_args(argv)
 
 
-def fetch_facets(*, base_url, headers, aspects="CLOUD_RESOURCE"):
-    """Fetch facet definitions from SmartCMP API.
+def fetch_facets(*, base_url, headers, business_group_id, node_type="cloudchef.nodes.Compute"):
+    """Fetch available facet definitions from SmartCMP API.
 
     Args:
         base_url: SmartCMP platform-api base URL
         headers: HTTP headers with auth token
-        aspects: Comma-separated aspect filter
+        business_group_id: UUID of the selected business group
+        node_type: Node type filter (e.g. cloudchef.nodes.Compute)
 
     Returns:
         List of facet objects with keys and options
     """
-    url = f"{base_url}/facets"
-    params = {"query": "", "aspects": aspects}
+    url = f"{base_url}/resource-bundles/available-facets"
+    params = {"businessGroupId": business_group_id, "cloudEntryId": "", "nodeType": node_type}
 
     resp = requests.get(url, headers=headers, params=params, verify=False, timeout=30)
     if resp.status_code != 200:
@@ -100,7 +104,9 @@ def main(argv=None) -> int:
     base_url, _, headers, _ = require_config()
 
     try:
-        facets = fetch_facets(base_url=base_url, headers=headers, aspects=args.aspects)
+        facets = fetch_facets(base_url=base_url, headers=headers,
+                              business_group_id=args.business_group_id,
+                              node_type=args.node_type)
     except (RuntimeError, requests.RequestException) as exc:
         print(f"[ERROR] {exc}")
         return 1

@@ -118,8 +118,7 @@ def test_datasource_skill_owns_business_group_directory_flow():
     for term in ("tenant", "租户", "部门", "BU", "Department", "项目", "Project"):
         assert term in datasource_skill
 
-    # business-group SKILL.md is kept as a standalone skill (entrypoint references datasource script)
-    assert (PROVIDER_ROOT / "skills" / "business-group" / "SKILL.md").exists()
+    assert not (PROVIDER_ROOT / "skills" / "business-group" / "SKILL.md").exists()
 
 
 def test_list_all_resource_pools_supports_keyword_filter(monkeypatch):
