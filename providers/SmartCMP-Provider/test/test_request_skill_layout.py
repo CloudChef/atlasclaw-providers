@@ -68,3 +68,20 @@ def test_request_skill_declares_provider_driven_workflow_metadata():
     assert '- "requestId"' in skill_text
     assert '- "workflowId"' in skill_text
     assert '- "Request ID"' in skill_text
+
+
+def test_request_skill_allows_structural_instruction_metadata_without_params() -> None:
+    skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
+
+    assert "structural instruction metadata for the selected catalog" in skill_text
+    assert "`node`, `type`, `osType`, or `cloudEntryTypeIds`" in skill_text
+
+
+def test_request_skill_keeps_instruction_reasoning_anchored_to_current_service() -> None:
+    skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
+
+    assert "Any answer, follow-up, preview, or request-building step" in skill_text
+    assert "must use only the currently selected" in skill_text
+    assert "catalog/service" in skill_text
+    assert "Do **NOT** switch to another service" in skill_text
+    assert "generic VM defaults" in skill_text

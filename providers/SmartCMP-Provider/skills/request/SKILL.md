@@ -208,6 +208,31 @@ output to the user.
 - Never chain multiple tool calls in one turn; one tool call per turn remains
   the hard limit.
 
+## Current Catalog Instruction Guard
+
+For this workflow, the current service's instruction content is exactly the
+selected catalog's `instructions` / `instructions.parameters` metadata.
+There is no separate `instruction.md` document outside that selected catalog
+metadata for this request flow.
+
+This rule overrides the generic request-flow continuation rules below whenever
+the agent reasons from the current service instruction content.
+
+- If the selected catalog metadata has no `instructions` field, or its
+  `parameters` list is empty, treat the current service instruction content as
+  empty.
+- Any answer, follow-up, preview, or request-building step that depends on the
+  current service instruction content must use only the currently selected
+  catalog/service.
+- Do **NOT** switch to another service, another catalog, generic VM defaults,
+  or historical candidates when applying that instruction context.
+- If the current selected catalog metadata is empty, say that the current
+  service instruction content is empty. Do **NOT** continue from another
+  service's instruction flow in the same reply.
+- Do **NOT** infer instruction content from generic workflow rules, examples in
+  this skill, earlier JSON previews, already-resolved request fields, or other
+  catalogs shown in historical lookup results.
+
 ## Terminology Mapping
 
 SmartCMP uses `business group` as the platform field name, but users may
@@ -319,6 +344,28 @@ Use the **EXACT parameter keys** from `instructions.parameters`. Do NOT rename, 
 **Every field in the request body MUST use the exact `key` from `instructions.parameters`.** Do NOT substitute with similar-sounding names from examples in this document.
 
 **Exception:** Business group always uses `businessGroupId` with the `id` from the API, regardless of what `instructions.parameters` defines.
+
+### Selected Catalog Field Eligibility (CRITICAL)
+
+Only include a request field when at least one of the following is true:
+
+- It is a fixed envelope field required by the workflow contract:
+  `catalogId`, `catalogName`, `businessGroupId`, or `name`
+- The user explicitly provided the value
+- A runtime lookup tool explicitly resolved the value for the current request
+- The field key is declared by the currently selected catalog's
+  `instructions.parameters`
+- It is explicit structural instruction metadata for the selected catalog, such
+  as `node`, `type`, `osType`, or `cloudEntryTypeIds`
+
+If the currently selected catalog does **not** declare a field and no user
+input or runtime lookup explicitly resolved it, omit that field.
+
+- Do **NOT** synthesize fields from generic examples, previously generated
+  preview JSON, or another catalog's defaults.
+- This especially forbids inventing `logicTemplateName`, `templateId`,
+  `networkId`, `systemDisk`, or similar default-backed fields when the current
+  selected catalog does not declare or resolve them.
 
 ## Runtime Default Guard
 
@@ -633,3 +680,6 @@ When `serviceCategory` is `"GENERIC_SERVICE"`:
 - When auto-selecting (single option), do NOT echo raw tool output.
 - Never claim submitted unless `smartcmp_submit_request` actually executed.
 - Never display raw `_internal` metadata to user.
+- If a reply depends on the current service instruction content, answer only
+  from the selected catalog metadata and do **NOT** continue the request flow
+  from another service's instruction context.
