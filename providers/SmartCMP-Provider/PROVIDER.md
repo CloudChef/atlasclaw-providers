@@ -86,10 +86,11 @@ Cloud management platform provider for self-service resource requests, approvals
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `base_url` | string | Yes | SmartCMP platform API URL (e.g., `https://cmp.corp.com/platform-api`) |
-| `user_token` | string | Option 1 | User API token for token-based authe7[]R54ntication (e.g., `cmp_tk_v1_...`) |
-| `cookie` | string | Option 2 | Full authentication cookie string. Use `${CMP_COOKIE}` env var |
-| `username` | string | Option 3 | Username for auto-login authentication |
-| `password` | string | Option 3 | Password for auto-login authentication (plaintext or MD5 hash) |
+| `provider_token` | string | Option 1 | Shared provider API token configured by the platform administrator for all users |
+| `user_token` | string | Option 2 | User API token for token-based authentication (e.g., `cmp_tk_v1_...`) |
+| `cookie` | string | Option 3 | Full authentication cookie string. Use `${CMP_COOKIE}` env var |
+| `username` | string | Option 4 | Username for auto-login authentication |
+| `password` | string | Option 4 | Password for auto-login authentication (plaintext or MD5 hash) |
 | `auth_url` | string | No | Explicit authentication URL override. Use for private deployments that should not follow host inference |
 | `default_business_group` | string | No | Default SmartCMP business-group scope ID for requests (tenant / 部门 / 项目 scope) |
 | `timeout` | number | No | API request timeout in seconds (default: 30) |
@@ -104,24 +105,24 @@ Cloud management platform provider for self-service resource requests, approvals
 
 ### Authentication Modes
 
-| Mode | `auth_type` | Description | Required Config |
-|------|-------------|-------------|-----------------|
-| **SSO** | `cmp` | Embedded in CMP via Nginx reverse-proxy. Cookie auto-passed from browser. | `base_url` (hardcoded) |
-| **User Token** | `user_token` | Platform-generated API token. Simplest standalone setup. | `base_url`, `user_token` |
-| **Cookie** | `cookie` | Static cookie for server-to-server or testing. | `base_url`, `cookie` |
-| **Credential** | `credential` | Username/password auto-login to CMP API. | `base_url`, `username`, `password` |
-| **User Token** | `user_token` | Each user configures API token via AtlasClaw UI. | `base_url` |
+`base_url` is a provider instance connection field and is required for every SmartCMP instance. It is not part of auth mode selection.
 
-> **Auto-detection:** The system detects mode by which fields are configured. No explicit `auth_type` needed in most cases.
-> - SSO: Only `base_url` configured, no credentials in `.env`
-> - User Token: `user_token` field present
-> - Cookie: `cookie` field present
+| Mode | `auth_type` | Description | Auth-specific Required Config |
+|------|-------------|-------------|-------------------------------|
+| **Provider Token** | `provider_token` | Shared platform-generated API token configured once for all users. | `provider_token` |
+| **User Token** | `user_token` | Each user configures their own API token in AtlasClaw UI. | `user_token` |
+| **Cookie** | `cookie` | Current-request CMP cookie/token, or static cookie for server-to-server/testing. | request `CloudChef-Authenticate` cookie/token or `cookie` |
+| **Credential** | `credential` | Username/password auto-login to CMP API. | `username`, `password` |
+
+> **Fallback selection:** `auth_type` may be a single value or an ordered chain. The runtime selects the first mode whose auth-specific fields are available.
+> - Provider Token: `provider_token` field present
+> - User Token: user-owned `user_token` field present
+> - Cookie: request-scoped `CloudChef-Authenticate` cookie/token or `cookie` field present
 > - Credential: `username` + `password` fields present
-> - User Token: Only `base_url` configured, user adds token in UI
 
 ## Configuration Examples
 
-### Mode 1: SSO (CMP Embedded)
+### Mode 1: Cookie Authentication (CMP Embedded)
 
 When AtlasClaw is deployed behind the same Nginx as CMP. No credentials in `.env`.
 
@@ -130,7 +131,8 @@ When AtlasClaw is deployed behind the same Nginx as CMP. No credentials in `.env
   "service_providers": {
     "smartcmp": {
       "default": {
-        "base_url": "https://172.16.0.81"
+        "base_url": "https://172.16.0.81",
+        "auth_type": "cookie"
       }
     }
   }
@@ -139,9 +141,9 @@ When AtlasClaw is deployed behind the same Nginx as CMP. No credentials in `.env
 
 > **Important:** `base_url` must be **hardcoded** (not `${CMP_URL}`). No CMP env vars in `.env`.
 
-### Mode 2: User Token Authentication (Recommended for standalone)
+### Mode 2: Provider Token Authentication (Recommended for standalone shared access)
 
-Use a platform-generated user API token (e.g., `cmp_tk_v1_...`).
+Use a platform-generated API token shared by all AtlasClaw users.
 
 ```json
 {
@@ -149,7 +151,8 @@ Use a platform-generated user API token (e.g., `cmp_tk_v1_...`).
     "smartcmp": {
       "default": {
         "base_url": "${CMP_URL}",
-        "user_token": "${CMP_API_TOKEN}"
+        "auth_type": "provider_token",
+        "provider_token": "${CMP_PROVIDER_TOKEN}"
       }
     }
   }
@@ -159,7 +162,7 @@ Use a platform-generated user API token (e.g., `cmp_tk_v1_...`).
 **`.env`:**
 ```bash
 CMP_URL=https://cmp.example.com
-CMP_API_TOKEN=cmp_tk_v1_2486ae574bd1020e6e72be503...
+CMP_PROVIDER_TOKEN=cmp_tk_v1_2486ae574bd1020e6e72be503...
 ```
 
 ### Mode 3: Cookie Authentication
@@ -172,6 +175,7 @@ Use a pre-obtained CMP session cookie.
     "smartcmp": {
       "default": {
         "base_url": "${CMP_URL}",
+        "auth_type": "cookie",
         "cookie": "${CMP_COOKIE}"
       }
     }
@@ -195,6 +199,7 @@ Auto-login with username/password.
     "smartcmp": {
       "default": {
         "base_url": "${CMP_URL}",
+        "auth_type": "credential",
         "username": "${CMP_USERNAME}",
         "password": "${CMP_PASSWORD}"
       }
@@ -221,7 +226,8 @@ Each user configures their own API token in AtlasClaw UI.
   "service_providers": {
     "smartcmp": {
       "default": {
-        "base_url": "${CMP_URL}"
+        "base_url": "${CMP_URL}",
+        "auth_type": "user_token"
       }
     }
   }
@@ -239,23 +245,24 @@ CMP_URL=https://cmp.example.com
 
 | Variable | Required By | Description |
 |----------|-------------|-------------|
-| `CMP_URL` | API Token, Cookie, Credential, User Token | SmartCMP platform URL. Auto-normalizes: adds `https://` and `/platform-api` if missing. |
-| `CMP_API_TOKEN` | User Token | Platform-generated user API token (e.g., `cmp_tk_v1_...`). |
+| `CMP_URL` | Provider Token, Cookie, Credential, User Token | SmartCMP platform URL. Auto-normalizes: adds `https://` and `/platform-api` if missing. |
+| `CMP_PROVIDER_TOKEN` | Provider Token | Shared platform-generated API token for all AtlasClaw users. |
+| `CMP_API_TOKEN` | Legacy User Token | Platform-generated API token used by legacy env fallback. |
 | `CMP_COOKIE` | Cookie | Full session cookie string from browser. |
 | `CMP_USERNAME` | Credential | Login username. |
 | `CMP_PASSWORD` | Credential | Login password (plaintext or MD5 hash). |
 
 ### Quick Setup by Mode
 
-**SSO Mode:**
+**CMP Embedded Cookie Mode:**
 ```bash
 # No environment variables needed
 ```
 
-**User Token Mode:**
+**Provider Token Mode:**
 ```bash
 CMP_URL=https://cmp.example.com
-CMP_API_TOKEN=cmp_tk_v1_...
+CMP_PROVIDER_TOKEN=cmp_tk_v1_...
 ```
 
 **Cookie Mode:**

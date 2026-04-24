@@ -21,11 +21,12 @@ Environment Variables (from SkillDeps):
   ATLASCLAW_USER_ID          - Current user ID
 
 Legacy Environment Variables (fallback):
-  CMP_URL       - Base URL (IP, hostname, or full path)
-  CMP_API_TOKEN - User API token for token-based authentication
-  CMP_COOKIE    - Full session cookie string
-  CMP_USERNAME  - Username for auto-login
-  CMP_PASSWORD  - Password for auto-login
+  CMP_URL            - Base URL (IP, hostname, or full path)
+  CMP_PROVIDER_TOKEN - Shared provider token for token-based authentication
+  CMP_API_TOKEN      - Legacy API token for token-based authentication
+  CMP_COOKIE         - Full session cookie string
+  CMP_USERNAME       - Username for auto-login
+  CMP_PASSWORD       - Password for auto-login
 """
 import os
 import sys
@@ -203,20 +204,36 @@ def _get_config_from_skilldeps() -> tuple:
     # Extract configuration
     base_url = instance.get('base_url', '')
     explicit_auth_url = instance.get('auth_url', '')
+    raw_auth_type = instance.get('auth_type', '')
+    if isinstance(raw_auth_type, list):
+        auth_type = str(raw_auth_type[0] if raw_auth_type else '').strip()
+    else:
+        auth_type = str(raw_auth_type or '').strip()
 
-    # Authentication priority:
-    # 1. CloudChef-Authenticate from cookies (UI passed)
-    # 2. User token from provider config
-    # 3. Cookie from provider config
-    # 4. Username/Password from provider config
+    # Authentication priority for legacy unresolved configs:
+    # 1. Request-scoped CloudChef-Authenticate cookie/token
+    # 2. Shared provider token from provider config
+    # 3. User token from provider config
+    # 4. Cookie from provider config
+    # 5. Username/Password from provider config
     cloudchef_token = cookies.get('CloudChef-Authenticate', '')
+    provider_token = instance.get('provider_token', '')
     user_token = instance.get('user_token', '')
     config_cookie = instance.get('cookie', '')
     username = instance.get('username', '')
     password = instance.get('password', '')
 
     # Determine auth token
-    auth_token = cloudchef_token or user_token or config_cookie
+    if auth_type == 'provider_token':
+        auth_token = provider_token
+    elif auth_type == 'user_token':
+        auth_token = user_token
+    elif auth_type == 'cookie':
+        auth_token = cloudchef_token or config_cookie
+    elif auth_type == 'credential':
+        auth_token = ''
+    else:
+        auth_token = cloudchef_token or provider_token or user_token or config_cookie
 
     # If no token but have credentials, try auto-login
     if not auth_token and username and password and base_url:
@@ -251,6 +268,7 @@ def _get_config_from_env() -> tuple:
         Tuple of (base_url, auth_token, instance_config) or (None, None, None) if not available
     """
     raw_url = os.environ.get("CMP_URL", "")
+    provider_token = os.environ.get("CMP_PROVIDER_TOKEN", "")
     user_token = os.environ.get("CMP_API_TOKEN", "")
     cookie = os.environ.get("CMP_COOKIE", "")
     username = os.environ.get("CMP_USERNAME", "")
@@ -260,11 +278,13 @@ def _get_config_from_env() -> tuple:
     if not raw_url:
         return None, None, None
 
-    # If user token is provided, use it directly
-    if user_token:
+    # If provider or legacy API token is provided, use it directly
+    token = provider_token or user_token
+    if token:
         base_url = normalize_url(raw_url)
-        instance = {'base_url': raw_url, 'user_token': user_token}
-        return base_url, user_token, instance
+        token_key = 'provider_token' if provider_token else 'user_token'
+        instance = {'base_url': raw_url, token_key: token}
+        return base_url, token, instance
 
     auth_url = _resolve_auth_url(raw_url, explicit_auth_url)
 

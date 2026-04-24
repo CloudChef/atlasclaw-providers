@@ -48,8 +48,8 @@ def test_infer_auth_url_for_private_deployment_host():
 def test_env_auth_url_override_takes_priority(monkeypatch):
     calls = []
     monkeypatch.setattr(common, "_auto_login", _fake_auto_login(calls))
-    monkeypatch.setattr(common, "_get_cached_cookie", lambda *_args, **_kwargs: "")
-    monkeypatch.setattr(common, "_cache_cookie", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(common, "_get_cached_cookie", lambda *_args, **_kwargs: "", raising=False)
+    monkeypatch.setattr(common, "_cache_cookie", lambda *_args, **_kwargs: None, raising=False)
     monkeypatch.setenv("CMP_URL", "https://democmp.smartcmp.cloud:1443")
     monkeypatch.setenv("CMP_AUTH_URL", "https://login.internal.example/platform-api/login")
     monkeypatch.setenv("CMP_USERNAME", "admin")
@@ -74,8 +74,8 @@ def test_env_auth_url_override_takes_priority(monkeypatch):
 def test_skilldeps_auth_url_override_takes_priority(monkeypatch):
     calls = []
     monkeypatch.setattr(common, "_auto_login", _fake_auto_login(calls))
-    monkeypatch.setattr(common, "_get_cached_cookie", lambda *_args, **_kwargs: "")
-    monkeypatch.setattr(common, "_cache_cookie", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(common, "_get_cached_cookie", lambda *_args, **_kwargs: "", raising=False)
+    monkeypatch.setattr(common, "_cache_cookie", lambda *_args, **_kwargs: None, raising=False)
     monkeypatch.setenv("ATLASCLAW_COOKIES", "{}")
     monkeypatch.setenv(
         "ATLASCLAW_PROVIDER_CONFIG",
@@ -105,3 +105,83 @@ def test_skilldeps_auth_url_override_takes_priority(monkeypatch):
     assert base_url == "https://democmp.smartcmp.cloud:1443/platform-api"
     assert auth_token == "test-token"
     assert instance["auth_url"] == "https://login.internal.example/platform-api/login"
+
+
+def test_skilldeps_provider_token_is_used_as_shared_token(monkeypatch):
+    monkeypatch.setenv(
+        "ATLASCLAW_COOKIES",
+        json.dumps({"CloudChef-Authenticate": "request-cookie-token"}),
+    )
+    monkeypatch.setenv(
+        "ATLASCLAW_PROVIDER_CONFIG",
+        json.dumps(
+            {
+                "smartcmp": {
+                    "default": {
+                        "base_url": "https://cmp.example.com",
+                        "auth_type": "provider_token",
+                        "provider_token": "shared-provider-token",
+                    }
+                }
+            }
+        ),
+    )
+
+    base_url, auth_token, instance = common._get_config_from_skilldeps()
+
+    assert base_url == "https://cmp.example.com/platform-api"
+    assert auth_token == "shared-provider-token"
+    assert instance["provider_token"] == "shared-provider-token"
+
+
+def test_skilldeps_cookie_auth_uses_request_cookie(monkeypatch):
+    monkeypatch.setenv(
+        "ATLASCLAW_COOKIES",
+        json.dumps({"CloudChef-Authenticate": "request-cookie-token"}),
+    )
+    monkeypatch.setenv(
+        "ATLASCLAW_PROVIDER_CONFIG",
+        json.dumps(
+            {
+                "smartcmp": {
+                    "default": {
+                        "base_url": "https://cmp.example.com",
+                        "auth_type": "cookie",
+                    }
+                }
+            }
+        ),
+    )
+
+    base_url, auth_token, instance = common._get_config_from_skilldeps()
+
+    assert base_url == "https://cmp.example.com/platform-api"
+    assert auth_token == "request-cookie-token"
+    assert instance["auth_type"] == "cookie"
+
+
+def test_skilldeps_cookie_auth_prefers_request_cookie_over_config_cookie(monkeypatch):
+    monkeypatch.setenv(
+        "ATLASCLAW_COOKIES",
+        json.dumps({"CloudChef-Authenticate": "request-cookie-token"}),
+    )
+    monkeypatch.setenv(
+        "ATLASCLAW_PROVIDER_CONFIG",
+        json.dumps(
+            {
+                "smartcmp": {
+                    "default": {
+                        "base_url": "https://cmp.example.com",
+                        "auth_type": "cookie",
+                        "cookie": "CloudChef-Authenticate=config-cookie-token",
+                    }
+                }
+            }
+        ),
+    )
+
+    base_url, auth_token, instance = common._get_config_from_skilldeps()
+
+    assert base_url == "https://cmp.example.com/platform-api"
+    assert auth_token == "request-cookie-token"
+    assert instance["auth_type"] == "cookie"
