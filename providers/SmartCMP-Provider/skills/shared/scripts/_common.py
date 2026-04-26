@@ -346,20 +346,8 @@ def get_cmp_config(exit_on_error: bool = True) -> tuple:
     # Final validation
     if not base_url or not auth_token:
         if exit_on_error:
-            print("[ERROR] SmartCMP configuration not available.")
-            print()
-            print("Configure one of the following in atlasclaw.json:")
-            print()
-            print('  "service_providers": {')
-            print('    "smartcmp": {')
-            print('      "prod": {')
-            print('        "base_url": "https://cmp.example.com/platform-api",')
-            print('        "cookie": "${CMP_COOKIE}"')
-            print('      }')
-            print('    }')
-            print('  }')
-            print()
-            print("Or pass CloudChef-Authenticate cookie in HTTP request.")
+            print("[ERROR] SmartCMP service is unavailable because access authentication is not configured.")
+            print("AtlasClaw could not access this provider with the current credentials.")
             print()
             sys.exit(1)
         return "", "", {}
