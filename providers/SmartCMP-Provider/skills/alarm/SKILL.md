@@ -56,22 +56,60 @@ tool_list_capability_class: "provider:smartcmp"
 tool_list_priority: 100
 
 tool_analyze_name: "smartcmp_analyze_alert"
-tool_analyze_description: "Analyze one SmartCMP alert with rule context, datasource-enriched resource facts, assessment, and remediation guidance."
+tool_analyze_description: "Analyze one SmartCMP alert with rule context, datasource-enriched resource facts, assessment, and remediation guidance. Always pass a real SmartCMP alertId as alert_id. If the user refers to a numbered result from a prior alert list, resolve that display index from the previous smartcmp_list_alerts metadata and pass that item's alertId, not the display index."
 tool_analyze_entrypoint: "scripts/analyze_alert.py"
 tool_analyze_groups:
   - cmp
   - alarm
 tool_analyze_capability_class: "provider:smartcmp"
 tool_analyze_priority: 120
+tool_analyze_cli_positional:
+  - alert_id
+tool_analyze_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "alert_id": {
+        "type": "string",
+        "description": "SmartCMP alertId to analyze. If the user references a numbered alert result, use the alertId from the matching previous smartcmp_list_alerts metadata item; do not pass the display index."
+      },
+      "days": {
+        "type": "integer",
+        "description": "Trend lookback window in days. Default: 7.",
+        "default": 7
+      }
+    },
+    "required": ["alert_id"]
+  }
 
 tool_operate_name: "smartcmp_operate_alert"
-tool_operate_description: "Perform validated status operations (mute, resolve, reopen) on one or more SmartCMP alerts."
+tool_operate_description: "Perform validated status operations (mute, resolve, reopen) on one or more SmartCMP alerts. Always pass real SmartCMP alert IDs; resolve numbered result references from prior smartcmp_list_alerts metadata before calling."
 tool_operate_entrypoint: "scripts/operate_alert.py"
 tool_operate_groups:
   - cmp
   - alarm
 tool_operate_capability_class: "provider:smartcmp"
 tool_operate_priority: 150
+tool_operate_cli_positional:
+  - alert_ids
+tool_operate_cli_split:
+  - alert_ids
+tool_operate_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "alert_ids": {
+        "type": "string",
+        "description": "One or more SmartCMP alert IDs separated by spaces. If the user references numbered alert results, first resolve each display index to its alertId from prior smartcmp_list_alerts metadata."
+      },
+      "action": {
+        "type": "string",
+        "enum": ["mute", "resolve", "reopen"],
+        "description": "Status operation to perform on the target alert IDs."
+      }
+    },
+    "required": ["alert_ids", "action"]
+  }
 ---
 
 # alarm

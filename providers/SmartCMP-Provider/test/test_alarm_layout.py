@@ -48,6 +48,23 @@ def test_alarm_skill_layout():
         assert script_path.is_file(), f"{script_path.name} should exist"
 
 
+def test_alarm_skill_declares_tool_input_contracts():
+    skill_text = (ALARM_DIR / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "tool_analyze_cli_positional:" in skill_text
+    assert "- alert_id" in skill_text
+    assert "tool_analyze_parameters:" in skill_text
+    assert '"alert_id"' in skill_text
+    assert '"required": ["alert_id"]' in skill_text
+    assert "previous smartcmp_list_alerts metadata" in skill_text
+
+    assert "tool_operate_cli_positional:" in skill_text
+    assert "- alert_ids" in skill_text
+    assert "tool_operate_cli_split:" in skill_text
+    assert "tool_operate_parameters:" in skill_text
+    assert '"required": ["alert_ids", "action"]' in skill_text
+
+
 def test_alarm_scripts_import_cleanly():
     helper_module = load_module("test_alarm_common_module", SCRIPTS_DIR / "_alarm_common.py")
     assert hasattr(helper_module, "emit_placeholder")
