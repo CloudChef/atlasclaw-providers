@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# Copyright 2026  Qianyun, Inc., www.cloudchef.io, All rights reserved.
+
 """Start or stop SmartCMP cloud resources through the native power endpoint."""
 
 from __future__ import annotations

@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+# Copyright 2026  Qianyun, Inc., www.cloudchef.io, All rights reserved.
+
 """
 Command line tool to validate Office document XML files against XSD schemas and tracked changes.
 

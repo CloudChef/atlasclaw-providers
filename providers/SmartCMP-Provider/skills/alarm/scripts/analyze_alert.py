@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+# Copyright 2026  Qianyun, Inc., www.cloudchef.io, All rights reserved.
+
 """Analyze a SmartCMP alert and emit a structured assessment block."""
 
 from __future__ import annotations

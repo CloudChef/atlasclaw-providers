@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# Copyright 2026  Qianyun, Inc., www.cloudchef.io, All rights reserved.
+
 """Integration-level tests for build_analysis_payload in analyze_recommendation.py."""
 
 from __future__ import annotations

@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright 2026  Qianyun, Inc., www.cloudchef.io, All rights reserved.
+
 """List SmartCMP resource pools from the standalone UI directory endpoint.
 
 Usage:

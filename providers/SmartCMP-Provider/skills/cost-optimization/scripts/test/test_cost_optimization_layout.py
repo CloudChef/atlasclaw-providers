@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# Copyright 2026  Qianyun, Inc., www.cloudchef.io, All rights reserved.
+
 """Render output layout tests for render_analysis() — AC-32 acceptance criteria #10."""
 
 from __future__ import annotations

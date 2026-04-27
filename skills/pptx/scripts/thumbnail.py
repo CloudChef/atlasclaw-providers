@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+# Copyright 2026  Qianyun, Inc., www.cloudchef.io, All rights reserved.
+
 """Create thumbnail grids from PowerPoint presentation slides.
 
 Creates a grid layout of slide thumbnails for quick visual analysis.

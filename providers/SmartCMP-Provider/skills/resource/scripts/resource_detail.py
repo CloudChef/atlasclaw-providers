@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright 2026  Qianyun, Inc., www.cloudchef.io, All rights reserved.
+
 """Refresh and render one SmartCMP resource or cloud host by resource ID."""
 from __future__ import annotations
 

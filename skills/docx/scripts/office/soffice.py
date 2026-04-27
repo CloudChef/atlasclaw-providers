@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+# Copyright 2026  Qianyun, Inc., www.cloudchef.io, All rights reserved.
+
 """
 Helper for running LibreOffice (soffice) in environments where AF_UNIX
 sockets may be blocked (e.g., sandboxed VMs).  Detects the restriction

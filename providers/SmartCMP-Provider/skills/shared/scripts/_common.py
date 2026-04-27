@@ -1,4 +1,6 @@
 ﻿# -*- coding: utf-8 -*-
+# Copyright 2026  Qianyun, Inc., www.cloudchef.io, All rights reserved.
+
 """SmartCMP Provider Common Utilities - Updated for SkillDeps Integration.
 
 This module now reads configuration from ATLASCLAW_PROVIDER_CONFIG and ATLASCLAW_COOKIES

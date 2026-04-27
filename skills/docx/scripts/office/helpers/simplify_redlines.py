@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+# Copyright 2026  Qianyun, Inc., www.cloudchef.io, All rights reserved.
+
 """Simplify tracked changes by merging adjacent w:ins or w:del elements.
 
 Merges adjacent <w:ins> elements from the same author into a single element.

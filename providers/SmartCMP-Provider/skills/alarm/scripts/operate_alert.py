@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+# Copyright 2026  Qianyun, Inc., www.cloudchef.io, All rights reserved.
+
 """Operate on SmartCMP alerts with validated English action names."""
 
 from __future__ import annotations

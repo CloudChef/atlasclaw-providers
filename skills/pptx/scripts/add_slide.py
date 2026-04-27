@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+# Copyright 2026  Qianyun, Inc., www.cloudchef.io, All rights reserved.
+
 """Add a new slide to an unpacked PPTX directory.
 
 Usage: python add_slide.py <unpacked_dir> <source>

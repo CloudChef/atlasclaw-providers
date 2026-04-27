@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+# Copyright 2026  Qianyun, Inc., www.cloudchef.io, All rights reserved.
+
 """Remove unreferenced files from an unpacked PPTX directory.
 
 Usage: python clean.py <unpacked_dir>

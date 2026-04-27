@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+# Copyright 2026  Qianyun, Inc., www.cloudchef.io, All rights reserved.
+
 """Unpack Office files (DOCX, PPTX, XLSX) for editing.
 
 Extracts the ZIP archive, pretty-prints XML files, and optionally:

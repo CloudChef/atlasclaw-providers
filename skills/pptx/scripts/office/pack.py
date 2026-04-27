@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+# Copyright 2026  Qianyun, Inc., www.cloudchef.io, All rights reserved.
+
 """Pack a directory into a DOCX, PPTX, or XLSX file.
 
 Validates with auto-repair, condenses XML formatting, and creates the Office file.
