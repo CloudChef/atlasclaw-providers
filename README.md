@@ -27,6 +27,7 @@ This repository contains reusable provider packages and reference implementation
 | --- | --- | --- |
 | [`SmartCMP-Provider`](providers/SmartCMP-Provider/README.md) | Cloud resource requests, approval workflows, and reference-data lookup for SmartCMP | Reference implementation |
 | [`jira`](providers/jira/README.md) | Jira issue operations and provider wiring patterns | Working example |
+| [`Weaver-Ecology`](providers/Weaver-Ecology/README.md) | Weaver Ecology OA workflow provider manifest and SSO configuration schema | Manifest scaffold |
 
 If you are new to the model, start with:
 
@@ -40,8 +41,10 @@ AtlasClaw providers follow a simple package layout:
 
 ```text
 providers/<provider-name>/
-├── PROVIDER.md              # Provider-level configuration and connection contract
-├── README.md                # Human-readable overview for developers
+├── PROVIDER.md              # LLM-facing provider contract
+├── provider.schema.json     # Runtime/API/UI manifest
+├── README.md                # Human-facing package docs
+├── assets/                  # Optional icons/images
 └── skills/
     ├── <skill-a>/
     │   ├── SKILL.md         # Skill metadata, trigger rules, entrypoints
@@ -53,8 +56,13 @@ providers/<provider-name>/
 
 ### File Responsibilities
 
-- `PROVIDER.md`: describes configuration shape, auth model, and provider capabilities
-- `README.md`: explains the provider to human readers
+- `provider.schema.json`: machine-readable manifest for runtime/API/UI and
+  code-analysis agents. It owns catalog display metadata, config fields,
+  auth modes, defaults, aliases, sensitive flags, and optional icon paths.
+- `PROVIDER.md`: natural-language provider contract for LLM context and
+  provider usage rules. Runtime must never parse schema from `PROVIDER.md`
+  body tables.
+- `README.md`: explains the provider package to human readers
 - `SKILL.md`: declares the skill name, description, provider binding, and executable entrypoints
 - `scripts/`: implements the actual integration logic
 - `references/`: keeps API mappings, examples, and workflow notes close to the skill
@@ -111,7 +119,11 @@ AtlasClaw now loads providers from an external providers repository through `pro
 
 Set `providers_root` in `atlasclaw.json` to the directory that contains provider folders such as `jira/` or `SmartCMP-Provider/`.
 
-At startup, AtlasClaw scans `providers_root/<provider>/` for `PROVIDER.md` and loads Markdown skills from `providers_root/<provider>/skills/`.
+At startup, AtlasClaw scans `providers_root/<provider>/` for `PROVIDER.md`,
+looks for a fixed sibling `provider.schema.json`, and loads Markdown skills
+from `providers_root/<provider>/skills/`. If the manifest is missing, skills
+still load, but provider definitions/config UI/defaults/schema validation are
+unavailable for that provider.
 
 Example:
 
@@ -160,7 +172,7 @@ Provider instances are configured under `service_providers`. AtlasClaw resolves 
       "cloud": {
         "base_url": "https://company.atlassian.net",
         "username": "admin@company.com",
-        "token": "${JIRA_API_TOKEN}",
+        "password": "${JIRA_API_TOKEN}",
         "api_version": "3",
         "default_project": "PROJ"
       }
@@ -168,8 +180,7 @@ Provider instances are configured under `service_providers`. AtlasClaw resolves 
     "smartcmp": {
       "prod": {
         "base_url": "https://cmp.corp.com/platform-api",
-        "cookie": "${CMP_COOKIE}",
-        "default_business_group": "47673d8d-6b3f-41e1-8ec0-c37e082d9020"
+        "cookie": "${CMP_COOKIE}"
       }
     }
   }
@@ -327,12 +338,13 @@ This gives the agent both direct data access and reusable business operations, w
 
 ## Typical Development Flow
 
-1. Define the provider instance contract in `PROVIDER.md`.
-2. Start by identifying the `datasource` layer, module execution skills, and any orchestration scenarios.
-3. Implement script entrypoints under each skill package.
-4. Configure a test instance in `atlasclaw.json`.
-5. Load the provider in AtlasClaw and validate end-to-end prompts against the real system.
-6. Add provider-specific examples and failure guidance before sharing with users.
+1. Define the LLM-facing provider contract in `PROVIDER.md`.
+2. Define the machine-readable runtime manifest in `provider.schema.json`.
+3. Start by identifying the `datasource` layer, module execution skills, and any orchestration scenarios.
+4. Implement script entrypoints under each skill package.
+5. Configure a test instance in `atlasclaw.json`.
+6. Load the provider in AtlasClaw and validate end-to-end prompts against the real system.
+7. Add provider-specific examples and failure guidance before sharing with users.
 
 ## Repository Layout
 

@@ -50,7 +50,7 @@ def load_jira_connection(extra: dict[str, Any]) -> tuple[str, str, str, str, str
 
     base_url = str(provider_instance.get("base_url", "")).rstrip("/")
     username = str(provider_instance.get("username", ""))
-    password = str(provider_instance.get("password", provider_instance.get("token", "")))
+    password = str(provider_instance.get("password", ""))
     api_version = str(provider_instance.get("api_version", "2"))
     default_project = provider_instance.get("default_project")
 

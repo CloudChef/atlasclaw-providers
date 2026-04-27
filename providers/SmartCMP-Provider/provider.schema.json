@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "provider_type": "smartcmp",
+  "catalog": {
+    "display_name": "SmartCMP",
+    "name_i18n_key": "provider.catalog.smartcmp.name",
+    "description": "Enterprise CMP workflow provider for approvals, service catalog queries, and fulfillment actions.",
+    "description_i18n_key": "provider.catalog.smartcmp.description",
+    "badge": "CMP",
+    "icon": "SC",
+    "icon_path": "assets/icon.svg",
+    "accent": "#0f766e"
+  },
+  "config_schema": {
+    "default_auth_type": "user_token",
+    "auth_modes": {
+      "provider_token": {
+        "required_fields": ["provider_token"]
+      },
+      "user_token": {
+        "required_fields": ["user_token"]
+      },
+      "cookie": {
+        "required_fields": ["cookie"]
+      },
+      "credential": {
+        "required_fields": ["username", "password"]
+      }
+    },
+    "fields": [
+      {
+        "name": "base_url",
+        "type": "url",
+        "required": true,
+        "scope": "instance",
+        "default": "https://console.smartcmp.cloud",
+        "label": "Base URL",
+        "label_i18n_key": "provider.baseUrl",
+        "placeholder": "https://console.smartcmp.cloud",
+        "placeholder_i18n_key": "provider.baseUrlPlaceholder"
+      },
+      {
+        "name": "auth_type",
+        "type": "hidden",
+        "scope": "instance",
+        "default": "user_token"
+      },
+      {
+        "name": "user_token",
+        "type": "password",
+        "required": true,
+        "sensitive": true,
+        "scope": "user",
+        "auth_types": ["user_token"],
+        "label": "User Token",
+        "label_i18n_key": "provider.userToken",
+        "placeholder": "Enter user token",
+        "placeholder_i18n_key": "provider.userTokenPlaceholder"
+      },
+      {
+        "name": "provider_token",
+        "type": "password",
+        "required": true,
+        "sensitive": true,
+        "scope": "instance",
+        "auth_types": ["provider_token"],
+        "label": "Provider Token",
+        "label_i18n_key": "provider.providerToken",
+        "placeholder": "Enter shared provider token",
+        "placeholder_i18n_key": "provider.providerTokenPlaceholder"
+      },
+      {
+        "name": "username",
+        "type": "text",
+        "required": true,
+        "scope": "instance",
+        "auth_types": ["credential"],
+        "label": "Username",
+        "label_i18n_key": "provider.username",
+        "placeholder": "cmp-robot",
+        "placeholder_i18n_key": "provider.usernamePlaceholder"
+      },
+      {
+        "name": "password",
+        "type": "password",
+        "required": true,
+        "sensitive": true,
+        "scope": "instance",
+        "auth_types": ["credential"],
+        "label": "Password",
+        "label_i18n_key": "provider.password",
+        "placeholder": "Enter password",
+        "placeholder_i18n_key": "provider.passwordPlaceholder"
+      },
+      {
+        "name": "cookie",
+        "type": "password",
+        "required": true,
+        "sensitive": true,
+        "scope": "instance",
+        "auth_types": ["cookie"],
+        "label": "Cookie",
+        "label_i18n_key": "provider.cookie",
+        "placeholder": "session=...",
+        "placeholder_i18n_key": "provider.cookiePlaceholder"
+      },
+      {
+        "name": "auth_url",
+        "type": "url",
+        "required": false,
+        "scope": "instance",
+        "label": "Auth URL",
+        "placeholder": "https://account.smartcmp.cloud/bss-api/api/authentication"
+      },
+      {
+        "name": "timeout",
+        "type": "number",
+        "required": false,
+        "scope": "instance",
+        "label": "Timeout Seconds"
+      }
+    ]
+  }
+}

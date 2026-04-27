@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Weaver Ecology">
+  <rect width="64" height="64" rx="12" fill="#2563eb"/>
+  <path d="M17 18h8l5 25 6-18h6l5 18 4-25h7l-8 29h-7l-5-16-5 16h-7L17 18Z" fill="#dbeafe"/>
+  <path d="M14 48h36v5H14v-5Z" fill="#93c5fd"/>
+</svg>

@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "provider_type": "weaver_ecology",
+  "catalog": {
+    "display_name": "Weaver Ecology",
+    "description": "Weaver Ecology OA workflow provider for current-user todos, request creation, approval, and rejection operations.",
+    "badge": "OA",
+    "icon": "WE",
+    "icon_path": "assets/icon.svg",
+    "accent": "#2563eb"
+  },
+  "config_schema": {
+    "default_auth_type": "sso",
+    "auth_modes": {
+      "sso": {
+        "required_fields": []
+      }
+    },
+    "fields": [
+      {
+        "name": "base_url",
+        "type": "url",
+        "required": true,
+        "scope": "instance",
+        "label": "Base URL",
+        "placeholder": "https://ecology.company.com"
+      },
+      {
+        "name": "auth_type",
+        "type": "hidden",
+        "scope": "instance",
+        "default": "sso"
+      },
+      {
+        "name": "sso_token_mode",
+        "type": "text",
+        "required": false,
+        "scope": "instance",
+        "default": "access_token",
+        "label": "SSO Token Mode",
+        "placeholder": "access_token or authorization_code"
+      },
+      {
+        "name": "user_id_claim",
+        "type": "text",
+        "required": false,
+        "scope": "instance",
+        "label": "User ID Claim",
+        "placeholder": "weaver_userid"
+      },
+      {
+        "name": "user_id_map",
+        "type": "json",
+        "required": false,
+        "scope": "instance",
+        "label": "User ID Map",
+        "placeholder": "{\"atlas_user\": \"weaver_userid\"}"
+      },
+      {
+        "name": "oauth_app_key",
+        "type": "text",
+        "required": false,
+        "scope": "instance",
+        "label": "OAuth App Key",
+        "placeholder": "Weaver OAuth app key"
+      },
+      {
+        "name": "oauth_app_secret",
+        "type": "password",
+        "required": false,
+        "sensitive": true,
+        "scope": "instance",
+        "label": "OAuth App Secret",
+        "placeholder": "Enter Weaver OAuth app secret"
+      },
+      {
+        "name": "token_endpoint",
+        "type": "text",
+        "required": false,
+        "scope": "instance",
+        "default": "/papi/openapi/oauth2/access_token",
+        "label": "Token Endpoint",
+        "placeholder": "/papi/openapi/oauth2/access_token"
+      },
+      {
+        "name": "timeout_seconds",
+        "type": "number",
+        "required": false,
+        "scope": "instance",
+        "default": 30,
+        "label": "Timeout Seconds"
+      }
+    ]
+  },
+  "redaction": {
+    "sensitive_fields": ["oauth_app_secret", "access_token", "sso_token"]
+  }
+}

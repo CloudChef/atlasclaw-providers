@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="SmartCMP">
+  <rect width="64" height="64" rx="12" fill="#0f766e"/>
+  <path d="M15 36h10v10H15V36Zm12-18h10v28H27V18Zm12 10h10v18H39V28Z" fill="#ccfbf1"/>
+  <path d="M15 28h10v5H15v-5Zm24-8h10v5H39v-5Z" fill="#5eead4"/>
+</svg>
