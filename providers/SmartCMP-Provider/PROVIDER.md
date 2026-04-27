@@ -92,7 +92,6 @@ Cloud management platform provider for self-service resource requests, approvals
 | `username` | string | Option 4 | Username for auto-login authentication |
 | `password` | string | Option 4 | Password for auto-login authentication (plaintext or MD5 hash) |
 | `auth_url` | string | No | Explicit authentication URL override. Use for private deployments that should not follow host inference |
-| `default_business_group` | string | No | Default SmartCMP business-group scope ID for requests (tenant / 部门 / 项目 scope) |
 | `timeout` | number | No | API request timeout in seconds (default: 30) |
 
 > **Note:** Auth URL inference is exact-match only:

@@ -44,7 +44,7 @@ JIRA project management and issue tracking service. Supports both JIRA Server/Da
 |-----------|------|----------|-------------|
 | `base_url` | string | Yes | JIRA instance URL (e.g., `http://jira.corp.com:8080` or `https://company.atlassian.net`) |
 | `username` | string | Yes (Server/DC) | JIRA username for Server/DC Basic Auth |
-| `token` | string | Yes | Password or PAT (Server/DC) or API Token (Cloud). Use `${JIRA_TOKEN}` env var |
+| `password` | string | Yes | Password or PAT (Server/DC) or API Token (Cloud). Use `${JIRA_API_TOKEN}` env var |
 | `api_version` | string | No | REST API version: `"2"` for Server/DC (default), `"3"` for Cloud |
 | `default_project` | string | No | Default project key (e.g., `"PROJ"`) |
 | `project_keys` | string[] | No | List of accessible project keys (e.g., `["PROJ", "OPS"]`) |
@@ -53,8 +53,11 @@ JIRA project management and issue tracking service. Supports both JIRA Server/Da
 
 | Deployment | Auth Method | Parameters |
 |------------|------------|------------|
-| **Server/DC** | Basic Auth (username + password/PAT) | `username` + `token` (password), `api_version: "2"` |
-| **Cloud** | Email + API Token | `username` (email) + `token` (API Token), `api_version: "3"` |
+| **Server/DC** | Basic Auth (username + password/PAT) | `username` + `password`, `api_version: "2"` |
+| **Cloud** | Email + API Token | `username` (email) + `password` (API Token), `api_version: "3"` |
+
+`password` is the canonical credential field. For Jira Cloud, store the API
+token value in `password`.
 
 ## Configuration Example
 
@@ -67,7 +70,7 @@ JIRA project management and issue tracking service. Supports both JIRA Server/Da
       "prod": {
         "base_url": "http://jira.corp.com:8080",
         "username": "admin",
-        "token": "${JIRA_PROD_TOKEN}",
+        "password": "${JIRA_PROD_TOKEN}",
         "api_version": "2",
         "default_project": "PROJ"
       }
@@ -85,7 +88,7 @@ JIRA project management and issue tracking service. Supports both JIRA Server/Da
       "cloud": {
         "base_url": "https://company.atlassian.net",
         "username": "admin@company.com",
-        "token": "${JIRA_API_TOKEN}",
+        "password": "${JIRA_API_TOKEN}",
         "api_version": "3",
         "default_project": "PROJ"
       }

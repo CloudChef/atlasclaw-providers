@@ -29,7 +29,7 @@ def load_jira_instance() -> dict[str, Any]:
     for key in ("base_url", "username"):
         if not inst.get(key):
             raise RuntimeError(f"missing jira.{instance_name}.{key}")
-    if not (inst.get("password") or inst.get("token")):
+    if not inst.get("password"):
         raise RuntimeError(f"missing jira.{instance_name}.password")
     return inst
 
@@ -38,7 +38,7 @@ def build_client(inst: dict[str, Any]) -> tuple[httpx.Client, str]:
     api_version = str(inst.get("api_version", "2"))
     client = httpx.Client(
         base_url=str(inst["base_url"]).rstrip("/"),
-        auth=(str(inst["username"]), str(inst.get("password", inst.get("token", "")))),
+        auth=(str(inst["username"]), str(inst["password"])),
         headers={"Content-Type": "application/json"},
         timeout=30.0,
         proxy=None,

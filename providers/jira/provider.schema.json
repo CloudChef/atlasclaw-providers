@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "provider_type": "jira",
+  "catalog": {
+    "display_name": "Jira",
+    "description": "Jira issue tracking provider for project, sprint, and work item operations.",
+    "badge": "ISSUE",
+    "icon": "JI",
+    "icon_path": "assets/icon.svg",
+    "accent": "#0052cc"
+  },
+  "config_schema": {
+    "default_auth_type": "credential",
+    "auth_modes": {
+      "credential": {
+        "required_fields": ["username", "password"]
+      }
+    },
+    "fields": [
+      {
+        "name": "base_url",
+        "type": "url",
+        "required": true,
+        "scope": "instance",
+        "label": "Base URL",
+        "placeholder": "https://company.atlassian.net"
+      },
+      {
+        "name": "auth_type",
+        "type": "hidden",
+        "scope": "instance",
+        "default": "credential"
+      },
+      {
+        "name": "username",
+        "type": "text",
+        "required": true,
+        "scope": "instance",
+        "auth_types": ["credential"],
+        "label": "Username / Email",
+        "placeholder": "admin@example.com"
+      },
+      {
+        "name": "password",
+        "type": "password",
+        "required": true,
+        "sensitive": true,
+        "scope": "instance",
+        "auth_types": ["credential"],
+        "label": "Password / API Token",
+        "placeholder": "Enter password or API token"
+      },
+      {
+        "name": "api_version",
+        "type": "text",
+        "required": false,
+        "scope": "instance",
+        "default": "2",
+        "label": "API Version",
+        "placeholder": "2"
+      },
+      {
+        "name": "default_project",
+        "type": "text",
+        "required": false,
+        "scope": "instance",
+        "label": "Default Project",
+        "placeholder": "PROJ"
+      },
+      {
+        "name": "project_keys",
+        "type": "text",
+        "required": false,
+        "scope": "instance",
+        "label": "Project Keys",
+        "placeholder": "PROJ,OPS"
+      }
+    ]
+  }
+}
