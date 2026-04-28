@@ -7,7 +7,7 @@ Usage:
   python get_request_detail.py <identifier> [--days N]
 
 Arguments:
-  identifier   Workflow ID, approval ID, request ID, task ID, or process instance ID
+  identifier   Request ID (SmartCMP workflowId field), approval ID, task ID, or process instance ID
   --days N     Search approvals updated in the last N days (default: 90)
 
 Output:
@@ -92,6 +92,8 @@ def _unwrap_value(value: Any) -> Any:
 
 
 def _extract_from_dict(data: dict[str, Any], specs: list[str], prefix: str = "") -> None:
+    del prefix
+
     def _append(label: str, value: Any) -> None:
         normalized = _unwrap_value(value)
         if normalized not in (None, ""):
@@ -109,6 +111,8 @@ def _extract_from_dict(data: dict[str, Any], specs: list[str], prefix: str = "")
             if value:
                 if isinstance(value, (int, float)) and value >= 1024:
                     specs.append(f"内存: {value / 1024:.1f}GB")
+                elif isinstance(value, (int, float)):
+                    specs.append(f"内存: {value}MB")
                 else:
                     specs.append(f"内存: {value}")
                 break
@@ -118,24 +122,45 @@ def _extract_from_dict(data: dict[str, Any], specs: list[str], prefix: str = "")
             break
     if "asset_tag" in data:
         _append("资产标签", data["asset_tag"])
-    if "infra_type" in data:
-        _append("类型", data["infra_type"])
-    if prefix:
-        specs.append(f"节点: {prefix}")
+    for key in ("infra_type", "resourceType", "cloudEntryType"):
+        if key in data:
+            value = _unwrap_value(data[key])
+            if value and value != "vsphere":
+                specs.append(f"类型: {value}")
+                break
 
 
 def _extract_resource_specs(item: dict[str, Any]) -> list[str]:
     activity = item.get("currentActivity") or {}
     params = activity.get("requestParams") or {}
     specs: list[str] = []
-    for value in params.values():
+    for key, value in params.items():
+        if key.startswith("_ra_Compute_") or key.startswith("_ra_"):
+            continue
         if isinstance(value, dict):
             _extract_from_dict(value, specs)
+
     resource_specs = params.get("resourceSpecs") or {}
     if isinstance(resource_specs, dict):
         for node_name, node_spec in resource_specs.items():
             if isinstance(node_spec, dict):
                 _extract_from_dict(node_spec, specs, prefix=str(node_name))
+
+    ext_params = params.get("extensibleParameters") or {}
+    if isinstance(ext_params, dict):
+        for node_name, node_spec in ext_params.items():
+            if isinstance(node_spec, dict):
+                _extract_from_dict(node_spec, specs, prefix=str(node_name))
+
+    compute_profile = params.get("_ra_Compute_compute_profile_id")
+    if compute_profile:
+        specs.append(f"计算配置: {compute_profile}")
+
+    for key in ("quantity", "count", "instanceCount", "serverCount"):
+        if key in params and params[key]:
+            specs.append(f"数量: {params[key]}")
+            break
+
     deduped: list[str] = []
     seen: set[str] = set()
     for spec in specs:
@@ -203,6 +228,16 @@ def _matches_identifier(item: dict[str, Any], identifier: str) -> bool:
     return False
 
 
+def _request_id(item: dict[str, Any]) -> str:
+    """Return the SmartCMP user-facing request number (RES/TIC...), not an internal UUID."""
+    return str(item.get("workflowId") or item.get("requestNo") or item.get("requestNumber") or "").strip()
+
+
+def _internal_request_id(item: dict[str, Any]) -> str:
+    """Return the SmartCMP internal request UUID when present."""
+    return str(item.get("id") or "").strip()
+
+
 def _query_pending_items(days: int) -> list[dict[str, Any]]:
     now_ms = int(time.time() * 1000)
     start_of_today = now_ms - (now_ms % 86400000)
@@ -249,7 +284,7 @@ def main() -> None:
     now_ms = int(time.time() * 1000)
     activity = matched.get("currentActivity") or {}
     name = matched.get("name") or matched.get("requestName") or "N/A"
-    workflow_id = matched.get("workflowId") or ""
+    request_id = _request_id(matched)
     catalog = matched.get("catalogName") or matched.get("resourceType") or matched.get("type") or "通用请求"
     applicant = matched.get("applicant") or matched.get("requesterName") or matched.get("createdByName") or "N/A"
     email = matched.get("email") or ""
@@ -263,8 +298,10 @@ def main() -> None:
     current_approver = _get_approver_info(matched)
 
     print("===============================================================")
-    print(f"  CMP 工单详情: {workflow_id or identifier}")
+    print(f"  CMP 工单详情: {request_id or identifier}")
     print("===============================================================")
+    if request_id:
+        print(f"编号: {request_id}")
     print(f"名称: {name}")
     print(f"类型: {catalog}")
     print(f"申请人: {applicant}" + (f" ({email})" if email else ""))
@@ -279,18 +316,12 @@ def main() -> None:
         print(f"- {spec}")
     if description:
         print(f"说明: {description}")
-    print("")
-    print("流程标识:")
-    print(f"- approvalId: {activity.get('id') or matched.get('id') or ''}")
-    print(f"- requestId: {matched.get('id') or ''}")
-    print(f"- workflowId: {workflow_id}")
-    print(f"- processInstanceId: {activity.get('processInstanceId') or ''}")
-    print(f"- taskId: {activity.get('taskId') or ''}")
 
     meta = {
         "approvalId": activity.get("id") or matched.get("id") or "",
-        "requestId": matched.get("id") or "",
-        "workflowId": workflow_id,
+        "requestId": request_id,
+        "internalRequestId": _internal_request_id(matched),
+        "workflowId": request_id,
         "taskId": activity.get("taskId") or "",
         "processInstanceId": activity.get("processInstanceId") or "",
         "name": name,
@@ -306,9 +337,9 @@ def main() -> None:
         "costEstimate": cost_estimate,
         "resourceSpecs": resource_specs,
     }
-    print("##APPROVAL_DETAIL_META_START##")
-    print(json.dumps(meta, ensure_ascii=False))
-    print("##APPROVAL_DETAIL_META_END##")
+    print("##APPROVAL_DETAIL_META_START##", file=sys.stderr)
+    print(json.dumps(meta, ensure_ascii=False), file=sys.stderr)
+    print("##APPROVAL_DETAIL_META_END##", file=sys.stderr)
 
 
 if __name__ == "__main__":

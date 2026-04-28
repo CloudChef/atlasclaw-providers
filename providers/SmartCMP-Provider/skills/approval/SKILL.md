@@ -60,7 +60,7 @@ tool_list_capability_class: "provider:smartcmp"
 tool_list_priority: 100
 tool_list_result_mode: "tool_only_ok"
 tool_detail_name: "smartcmp_get_request_detail"
-tool_detail_description: "Get detail of an existing SmartCMP pending approval item. ONLY use when user explicitly asks for the detail/status of a SPECIFIC request by its ticket ID or workflow ID (e.g. TIC20260316000001). Do NOT use during resource provisioning or request submission workflows."
+tool_detail_description: "Get detail of an existing SmartCMP pending approval item. ONLY use when user explicitly asks for the detail/status of a SPECIFIC request by its Request ID / 编号 (SmartCMP workflowId field, e.g. RES20260427000004 or TIC20260316000001). Human-facing detail output must display this value as 编号, while machine metadata keeps the requestId key. Do NOT use during resource provisioning or request submission workflows."
 tool_detail_entrypoint: "scripts/get_request_detail.py"
 tool_detail_aliases:
   - "approval detail"
@@ -76,8 +76,8 @@ tool_detail_keywords:
   - "审批"
   - "TIC"
 tool_detail_use_when:
-  - "User asks for the detail or current status of an EXISTING SmartCMP request by its ticket/workflow ID"
-  - "User provides a specific ticket ID like TIC20260316000001 and asks for its detail"
+  - "User asks for the detail or current status of an EXISTING SmartCMP request by its Request ID / 编号"
+  - "User provides a specific Request ID / 编号 like RES20260427000004 or TIC20260316000001 and asks for its detail"
 tool_detail_avoid_when:
   - "User is in the middle of submitting a NEW resource request (use smartcmp_submit_request instead)"
   - "User is providing parameters (name, password, specs) for a new request"
@@ -95,7 +95,7 @@ tool_detail_parameters: |
     "properties": {
       "identifier": {
         "type": "string",
-        "description": "The single lookup identifier. Put workflow ID, approval ID, request ID, task ID, or process instance ID into this `identifier` field."
+        "description": "The single lookup identifier. Put Request ID (SmartCMP workflowId field), approval ID, task ID, or process instance ID into this `identifier` field."
       },
       "days": {
         "type": "integer",
@@ -235,22 +235,23 @@ python scripts/list_pending.py [--days N]
 ```
 
 **Output Format:**
-- Human-readable: Numbered list with priority indicators (High/Medium/Low)
-- Machine-readable: `##APPROVAL_META_START## ... ##APPROVAL_META_END##`
+- Human-readable: Markdown table sorted by latest SmartCMP update first
+- Machine-readable: `##APPROVAL_META_START## ... ##APPROVAL_META_END##` on stderr for internal tool use
 
 **META Fields:**
 | Field | Description |
 |-------|-------------|
 | `id` | **Approval ID** — USE THIS for approve/reject operations |
 | `index` | Display index (1, 2, 3...) — for user selection only |
+| `requestId` | SmartCMP user-facing Request ID / request number (e.g., RES20260427000004 or TIC20260313000007) |
 | `name` | Request name |
-| `workflowId` | Ticket number (e.g., TIC20260313000007) — for display only |
+| `workflowId` | Legacy SmartCMP field carrying the same user-facing Request ID as `requestId` |
 | `catalogName` | Service catalog type |
 | `applicant` | Requester name |
 | `waitHours` | Hours since creation |
 | `priorityScore` | Priority score (higher = more urgent) |
+| `internalRequestId` | Internal request UUID — **DO NOT DISPLAY** and **DO NOT USE** for approve/reject |
 | `taskId` | Workflow task ID — **DO NOT USE** for approve/reject |
-| `requestId` | Original request ID — **DO NOT USE** for approve/reject |
 | `processInstanceId` | Process instance ID — **DO NOT USE** for approve/reject |
 
 ---
@@ -264,8 +265,9 @@ python scripts/list_pending.py [--days N]
 | Field | Format Example | Can Use for Approve/Reject? |
 |-------|----------------|----------------------------|
 | `id` | `20fef12e-5015-4df5-822b-e1e87c4f64fd` | **YES — USE THIS** |
+| `requestId` | `RES20260427000004` | **NO — Display/search only** |
+| `internalRequestId` | `00df4234-3934-4c85-a07e-3a5cd8bd3cfa` | **NO — Wrong endpoint** |
 | `taskId` | `38982580-1ecd-11f1-94d0-ba3859030815` | **NO — Will fail with 400 error** |
-| `requestId` | `00df4234-3934-4c85-a07e-3a5cd8bd3cfa` | **NO — Wrong endpoint** |
 | `processInstanceId` | `3897fe5d-1ecd-11f1-94d0-ba3859030815` | **NO — Internal use only** |
 
 **Mapping user selection to correct ID:**
@@ -276,7 +278,7 @@ User says "1" or "approve 1"
 Find item with index=1 in APPROVAL_META
   |
   v
-Extract the "id" field (NOT taskId, NOT requestId)
+Extract the "id" field (NOT requestId, NOT internalRequestId, NOT taskId)
   |
   v
 Pass to approve.py or reject.py
@@ -318,11 +320,12 @@ python scripts/reject.py <id1> <id2> --reason "Not aligned with policy"
 {
   "index": 1,
   "id": "20fef12e-5015-4df5-822b-e1e87c4f64fd",      // <- USE THIS for approve/reject
-  "requestId": "00df4234-3934-4c85-a07e-3a5cd8bd3cfa", // <- DO NOT USE
+  "requestId": "RES20260427000004",                   // <- display/search Request ID
+  "internalRequestId": "00df4234-3934-4c85-a07e-3a5cd8bd3cfa", // <- DO NOT USE
   "taskId": "38982580-1ecd-11f1-94d0-ba3859030815",    // <- DO NOT USE
   "processInstanceId": "3897fe5d-1ecd-11f1-94d0-ba3859030815", // <- DO NOT USE
   "name": "Test Request",
-  "workflowId": "TIC20260313000007",
+  "workflowId": "RES20260427000004",
   "catalogName": "Issue Ticket",
   "applicant": "TestUser",
   "email": "test@example.com",
@@ -340,13 +343,14 @@ python scripts/reject.py <id1> <id2> --reason "Not aligned with policy"
 [OK]    approve.py <id>     <- Use "id" field:      20fef12e-5015-4df5-822b-e1e87c4f64fd
 [OK]    reject.py <id>      <- Use "id" field:      20fef12e-5015-4df5-822b-e1e87c4f64fd
 
+[FAIL]  approve.py <requestId>   <- RES20260427000004 (display/search only)
+[FAIL]  approve.py <internalRequestId> <- 00df4234-3934-4c85-a07e-3a5cd8bd3cfa (wrong endpoint)
 [FAIL]  approve.py <taskId>      <- 38982580-1ecd-11f1-94d0-ba3859030815 (400 error)
-[FAIL]  approve.py <requestId>   <- 00df4234-3934-4c85-a07e-3a5cd8bd3cfa (not found)
 ```
 
 ## Critical Rules
 
-> **ONLY use `id` field for approve/reject** — NOT taskId, NOT requestId, NOT processInstanceId. Using wrong ID causes 400 errors.
+> **ONLY use `id` field for approve/reject** — NOT requestId, NOT internalRequestId, NOT taskId, NOT processInstanceId. Using wrong ID causes 400 errors.
 
 > **NEVER create temp files** — no `.py`, `.txt`, `.json`. Your context IS your memory.
 
@@ -360,7 +364,7 @@ python scripts/reject.py <id1> <id2> --reason "Not aligned with policy"
 
 | Error | Cause | Resolution |
 |-------|-------|------------|
-| `400` + `activity is null` | Used wrong ID field (taskId/requestId instead of id) | Re-read APPROVAL_META, use `id` field only |
+| `400` + `activity is null` | Used wrong ID field (`requestId`, `internalRequestId`, or `taskId` instead of `id`) | Re-read APPROVAL_META, use `id` field only |
 | `401` / Token expired | Session timeout | Refresh `CMP_COOKIE` or re-login |
 | `404` / Not found | Invalid approval ID | Verify ID from latest list_pending.py output |
 | `[ERROR]` output | Various | Report to user immediately; do NOT self-debug |

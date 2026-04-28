@@ -31,7 +31,7 @@ from __future__ import annotations
 import json
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 import requests
@@ -110,6 +110,55 @@ def format_timestamp(ts: Any) -> str:
         except Exception:
             return str(ts)
     return str(ts) if ts else ""
+
+
+def timestamp_sort_value(ts: Any) -> float:
+    """Return a comparable timestamp value for SmartCMP date fields."""
+    if isinstance(ts, (int, float)) and ts > 0:
+        return float(ts)
+    if not isinstance(ts, str):
+        return 0
+    raw = ts.strip()
+    if not raw:
+        return 0
+    try:
+        numeric = float(raw)
+    except ValueError:
+        numeric = 0
+    if numeric > 0:
+        return numeric
+
+    candidates = [raw]
+    if raw.endswith("Z"):
+        candidates.append(f"{raw[:-1]}+00:00")
+    for candidate in candidates:
+        try:
+            parsed = datetime.fromisoformat(candidate)
+        except ValueError:
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp() * 1000
+
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            parsed = datetime.strptime(raw, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        return parsed.timestamp() * 1000
+    return 0
+
+
+def sort_pending_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return items in the same newest-first order users see in SmartCMP."""
+    indexed_items = list(enumerate(items))
+    indexed_items.sort(
+        key=lambda pair: (
+            -timestamp_sort_value(pair[1].get("updatedDate") or pair[1].get("createdDate")),
+            pair[0],
+        )
+    )
+    return [item for _, item in indexed_items]
 
 
 def calculate_wait_hours(created_ts: Any, *, now_ms: int) -> float:
@@ -290,6 +339,16 @@ def get_approver_info(item: dict[str, Any]) -> str:
     return ", ".join(approvers) if approvers else "待分配"
 
 
+def _request_id(item: dict[str, Any]) -> str:
+    """Return the SmartCMP user-facing request number (RES/TIC...), not an internal UUID."""
+    return str(item.get("workflowId") or item.get("requestNo") or item.get("requestNumber") or "").strip()
+
+
+def _internal_request_id(item: dict[str, Any]) -> str:
+    """Return the SmartCMP internal request UUID when present."""
+    return str(item.get("id") or "").strip()
+
+
 def build_meta(items: list[dict[str, Any]], *, now_ms: int) -> list[dict[str, Any]]:
     """Build the structured approval meta payload."""
     meta: list[dict[str, Any]] = []
@@ -299,9 +358,10 @@ def build_meta(items: list[dict[str, Any]], *, now_ms: int) -> list[dict[str, An
             {
                 "index": index,
                 "id": activity.get("id") or item.get("id") or "",
-                "requestId": item.get("id") or "",
+                "requestId": _request_id(item),
+                "internalRequestId": _internal_request_id(item),
                 "name": item.get("name") or item.get("requestName") or "",
-                "workflowId": item.get("workflowId") or "",
+                "workflowId": _request_id(item),
                 "catalogName": item.get("catalogName") or "",
                 "applicant": item.get("applicant") or "",
                 "email": item.get("email") or "",
@@ -321,6 +381,47 @@ def build_meta(items: list[dict[str, Any]], *, now_ms: int) -> list[dict[str, An
             }
         )
     return meta
+
+
+def escape_markdown_cell(value: Any) -> str:
+    """Render one value safely inside a Markdown table cell."""
+    rendered = str(value or "").replace("\n", " ").replace("\r", " ").strip()
+    rendered = " ".join(rendered.split())
+    return rendered.replace("|", "\\|")
+
+
+def truncate_cell(value: Any, *, limit: int) -> str:
+    rendered = str(value or "").strip()
+    if len(rendered) <= limit:
+        return rendered
+    return rendered[: max(0, limit - 3)].rstrip() + "..."
+
+
+def render_pending_table(items: list[dict[str, Any]], *, total: int, now_ms: int) -> str:
+    """Render pending approvals as a compact Markdown table."""
+    lines = [
+        f"待审批列表 - 共 {total} 项（按更新时间倒序）",
+        "",
+        "| # | Request ID | Name | Catalog | Applicant | Updated At | Wait(h) | Priority | Step | Approver | Specs |",
+        "| --- | --- | --- | --- | --- | --- | ---: | --- | --- | --- | --- |",
+    ]
+    for index, item in enumerate(items, start=1):
+        specs = ", ".join(extract_resource_specs(item))
+        row = [
+            index,
+            _request_id(item) or "N/A",
+            truncate_cell(item.get("name") or item.get("requestName") or "N/A", limit=36),
+            truncate_cell(item.get("catalogName") or item.get("resourceType") or item.get("type") or "通用请求", limit=24),
+            truncate_cell(item.get("applicant") or item.get("requesterName") or item.get("createdByName") or "N/A", limit=18),
+            format_timestamp(item.get("updatedDate") or ""),
+            calculate_wait_hours(item.get("createdDate"), now_ms=now_ms),
+            item["_priority"]["label"],
+            truncate_cell(get_approval_step_name(item), limit=18),
+            truncate_cell(get_approver_info(item), limit=18),
+            truncate_cell(specs, limit=42),
+        ]
+        lines.append("| " + " | ".join(escape_markdown_cell(value) for value in row) + " |")
+    return "\n".join(lines)
 
 
 def main(argv: list[str]) -> int:
@@ -351,66 +452,21 @@ def main(argv: list[str]) -> int:
 
     for item in items:
         item["_priority"] = calculate_priority(item, now_ms=now_ms)
-    items.sort(key=lambda x: x["_priority"]["score"], reverse=True)
+    items = sort_pending_items(items)
 
-    print("===============================================================")
-    print(f"  待审批列表 - 共 {total} 项 (按优先级排序)")
-    print("===============================================================\n")
-
-    for index, item in enumerate(items, start=1):
-        name = item.get("name") or item.get("requestName") or "N/A"
-        workflow_id = item.get("workflowId") or ""
-        catalog = item.get("catalogName") or item.get("resourceType") or item.get("type") or "通用请求"
-        applicant = item.get("applicant") or item.get("requesterName") or item.get("createdByName") or "N/A"
-        email = item.get("email") or ""
-        description = item.get("description") or item.get("justification") or ""
-
-        created_str = format_timestamp(item.get("createdDate") or "")
-        updated_str = format_timestamp(item.get("updatedDate") or "")
-        wait_hours = calculate_wait_hours(item.get("createdDate"), now_ms=now_ms)
-        priority = item["_priority"]
-        specs = extract_resource_specs(item)
-        cost = extract_cost_info(item)
-        step_name = get_approval_step_name(item)
-        approver = get_approver_info(item)
-
-        print(f"+- [{index}] {priority['label']} -----------------------------------------")
-        print(f"|  名称: {name}")
-        if workflow_id:
-            print(f"|  工单号: {workflow_id}")
-        print(f"|  类型: {catalog}")
-        print("|")
-        print(f"|  申请人: {applicant}" + (f" ({email})" if email else ""))
-        if description:
-            desc_short = description[:80] + "..." if len(description) > 80 else description
-            print(f"|  说明: {desc_short}")
-        print("|")
-        print(f"|  创建时间: {created_str}")
-        print(f"|  更新时间: {updated_str}")
-        print(f"|  已等待: {wait_hours}小时")
-        print("|")
-        print("|  资源规格:")
-        for spec in specs:
-            print(f"|    - {spec}")
-        print(f"|  预估成本: {cost}")
-        print("|")
-        print(f"|  审批阶段: {step_name}")
-        print(f"|  当前审批人: {approver}")
-        if priority["factors"]:
-            print(f"|  优先因素: {', '.join(priority['factors'])}")
-        print("+---------------------------------------------------------------\n")
+    print(render_pending_table(items, total=total, now_ms=now_ms))
+    print("")
 
     high_count = sum(1 for item in items if item["_priority"]["score"] >= 80)
     mid_count = sum(1 for item in items if 60 <= item["_priority"]["score"] < 80)
     low_count = sum(1 for item in items if item["_priority"]["score"] < 60)
 
-    print("===============================================================")
     print(f"  优先级分布: 高 {high_count} | 中 {mid_count} | 低 {low_count}")
-    print("===============================================================\n")
+    print("")
 
-    print("##APPROVAL_META_START##")
-    print(json.dumps(build_meta(items, now_ms=now_ms), ensure_ascii=False))
-    print("##APPROVAL_META_END##")
+    print("##APPROVAL_META_START##", file=sys.stderr)
+    print(json.dumps(build_meta(items, now_ms=now_ms), ensure_ascii=False), file=sys.stderr)
+    print("##APPROVAL_META_END##", file=sys.stderr)
     return 0
 
 
