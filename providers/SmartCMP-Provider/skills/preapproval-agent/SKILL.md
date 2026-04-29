@@ -4,6 +4,92 @@ description: "Approval pre-review agent. Process webhook-driven approval items, 
 provider_type: "smartcmp"
 instance_required: "true"
 
+tool_detail_name: "smartcmp_preapproval_get_request_detail"
+tool_detail_description: "Fetch a specific pending approval/request detail for the preapproval agent and return metadata for continued decision-making."
+tool_detail_entrypoint: "../approval/scripts/get_request_detail.py"
+tool_detail_groups:
+  - cmp
+  - approval
+tool_detail_capability_class: "provider:smartcmp"
+tool_detail_priority: 122
+tool_detail_result_mode: "llm"
+tool_detail_cli_positional:
+  - identifier
+tool_detail_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "identifier": {
+        "type": "string",
+        "description": "Request ID, approval ID, task ID, or process instance ID to inspect."
+      },
+      "days": {
+        "type": "integer",
+        "description": "Lookback window in days when searching pending approvals",
+        "default": 90
+      }
+    },
+    "required": ["identifier"]
+  }
+
+tool_approve_name: "smartcmp_preapproval_approve"
+tool_approve_description: "Approve one or more pending SmartCMP approval activity IDs for the preapproval agent."
+tool_approve_entrypoint: "../approval/scripts/approve.py"
+tool_approve_groups:
+  - cmp
+  - approval
+tool_approve_capability_class: "provider:smartcmp"
+tool_approve_priority: 124
+tool_approve_result_mode: "llm"
+tool_approve_cli_positional:
+  - ids
+tool_approve_cli_split:
+  - ids
+tool_approve_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "ids": {
+        "type": "string",
+        "description": "Approval activity ID(s) to approve. For multiple IDs, separate with spaces."
+      },
+      "reason": {
+        "type": "string",
+        "description": "Approval reason to record in SmartCMP."
+      }
+    },
+    "required": ["ids"]
+  }
+
+tool_reject_name: "smartcmp_preapproval_reject"
+tool_reject_description: "Reject one or more pending SmartCMP approval activity IDs for the preapproval agent."
+tool_reject_entrypoint: "../approval/scripts/reject.py"
+tool_reject_groups:
+  - cmp
+  - approval
+tool_reject_capability_class: "provider:smartcmp"
+tool_reject_priority: 126
+tool_reject_result_mode: "llm"
+tool_reject_cli_positional:
+  - ids
+tool_reject_cli_split:
+  - ids
+tool_reject_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "ids": {
+        "type": "string",
+        "description": "Approval activity ID(s) to reject. For multiple IDs, separate with spaces."
+      },
+      "reason": {
+        "type": "string",
+        "description": "Rejection reason to record in SmartCMP."
+      }
+    },
+    "required": ["ids"]
+  }
+
 # === LLM Context Fields ===
 triggers:
   - webhook approval
@@ -49,11 +135,19 @@ This skill activates when:
 - `agent_identity` is `agent-approver`
 - Valid `approval_id` or `request_id` is provided
 
+## Robot Admin Execution
+
+For webhook-driven backend execution, run this agent against an explicitly selected SmartCMP provider instance with a robot/admin credential. Set `ATLASCLAW_PROVIDER_INSTANCE` to the intended instance name; if that instance is not configured, execution must fail closed rather than falling back to `prod` or another instance.
+
+The robot provider instance should use a SmartCMP `cmp_tk_*` provider token when available. The shared scripts send those tokens as `Authorization: Bearer <token>` and keep non-`cmp_tk_*` session tokens on the existing `CloudChef-Authenticate` header.
+
+Treat `ATLASCLAW_USER_ID=webhook-*` as the AtlasClaw trigger identity, not as a CMP actor. Approval execution uses `../approval/scripts/approve.py` and `../approval/scripts/reject.py`, which load the selected robot credential through `_common.require_config()`.
+
 ## Inputs
 
 | Input | Type | Required | Description |
 |-------|------|----------|-------------|
-| `instance` | string | Yes | CMP provider instance name (e.g., `cmp-prod`) |
+| `provider_instance` | string | Yes | CMP provider instance name (e.g., `cmp-prod`) |
 | `agent_identity` | string | Yes | Must be `agent-approver` |
 | `approval_id` | string | Yes* | Approval ID for execution |
 | `request_id` | string | No | Alternative ID if `approval_id` not available |
@@ -71,9 +165,9 @@ This agent does NOT access the platform directly. It orchestrates:
 
 | Skill | Purpose |
 |-------|---------|
-| `../approval/scripts/list_pending.py` | Fetch pending approval details |
-| `../approval/scripts/approve.py` | Execute approval with reason |
-| `../approval/scripts/reject.py` | Execute rejection with reason |
+| `smartcmp_preapproval_get_request_detail` | Fetch pending approval details |
+| `smartcmp_preapproval_approve` | Execute approval with reason |
+| `smartcmp_preapproval_reject` | Execute rejection with reason |
 
 ## Workflow
 
@@ -83,7 +177,7 @@ This agent does NOT access the platform directly. It orchestrates:
    └── Verify approval_id or request_id exists
          ↓
 2. Fetch Approval Context
-   └── ../approval/scripts/list_pending.py → Filter by approval_id from META
+   └── smartcmp_preapproval_get_request_detail → Verify request/approval id
          ↓
 3. Build Review Summary
    ├── Service/request name
@@ -101,8 +195,8 @@ This agent does NOT access the platform directly. It orchestrates:
    └── manual_review_required
          ↓
 6. Execute Decision
-   ├── approve → ../approval/scripts/approve.py <id> --reason "<comment>"
-   ├── reject  → ../approval/scripts/reject.py <id> --reason "<comment>"
+   ├── approve → smartcmp_preapproval_approve <id> --reason "<comment>"
+   ├── reject  → smartcmp_preapproval_reject <id> --reason "<comment>"
    └── manual  → reject with clear reason
          ↓
 7. Return Structured Result

@@ -241,3 +241,60 @@ def test_submit_request_stays_pending_without_error_when_verification_lookup_fai
     assert "Verify HTTP: 404" in stdout
     assert "Message: Not found" in stdout
     assert "Note: Track this request by Request ID instead of resubmitting it." in stdout
+
+
+def test_submit_robot_token_uses_current_user_instead_of_webhook_runtime_user(monkeypatch):
+    monkeypatch.setenv("ATLASCLAW_COOKIES", "{}")
+    monkeypatch.setenv("ATLASCLAW_USER_ID", "webhook-approval-1")
+    monkeypatch.setenv("ATLASCLAW_PROVIDER_INSTANCE", "robot-admin")
+    monkeypatch.setenv("ATLASCLAW_ROBOT_PROFILE", "request_bot")
+    monkeypatch.setenv(
+        "ATLASCLAW_PROVIDER_CONFIG",
+        json.dumps(
+            {
+                "smartcmp": {
+                    "robot-admin": {
+                        "base_url": "https://cmp.example.com",
+                        "auth_type": "provider_token",
+                        "provider_token": "cmp_tk_test_robot",
+                    }
+                }
+            }
+        ),
+    )
+    submitted = {}
+
+    def fake_post(url, headers=None, json=None, verify=None, timeout=None):
+        assert url == "https://cmp.example.com/platform-api/generic-request/submit"
+        submitted["headers"] = dict(headers or {})
+        submitted["body"] = dict(json or {})
+        return FakeResponse([{"id": "req-robot", "workflowId": "TIC20260422000005", "state": "INITIALING"}])
+
+    def fake_get(url, headers=None, verify=None, timeout=None):
+        assert headers["Authorization"] == "Bearer cmp_tk_test_robot"
+        if url == "https://cmp.example.com/platform-api/users/current-user-details":
+            return FakeResponse({"id": "robot-user-id", "loginId": "robot-admin"})
+        if url == "https://cmp.example.com/platform-api/generic-request/req-robot":
+            return FakeResponse(
+                {
+                    "id": "req-robot",
+                    "workflowId": "TIC20260422000005",
+                    "state": "INITIALING",
+                    "processInstanceId": "proc-robot",
+                }
+            )
+        raise AssertionError(f"Unexpected GET url: {url}")
+
+    exit_code, stdout, _ = run_script(
+        monkeypatch,
+        ["--json", '{"catalogName":"Linux OS","name":"vm-robot","resourceSpecs":[{}]}'],
+        fake_post=fake_post,
+        fake_get=fake_get,
+    )
+
+    assert exit_code == 0
+    assert submitted["headers"]["Authorization"] == "Bearer cmp_tk_test_robot"
+    assert submitted["body"]["userId"] == "robot-user-id"
+    assert submitted["body"]["userLoginId"] == "robot-admin"
+    assert submitted["body"]["userLoginId"] != "webhook-approval-1"
+    assert "[SUCCESS] Request submitted" in stdout

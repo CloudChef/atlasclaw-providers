@@ -45,7 +45,7 @@ When receiving free-form infrastructure or application requirements:
 3. Build structured request payloads with resolved/unresolved fields
 4. Return draft requests for human review
 
-**NOT autonomous fulfillment** — produces reviewable outputs only.
+Default behavior is draft-first. In webhook robot admin execution mode, this agent may submit the decomposed child requests only when the webhook selects an authorized robot profile and the input explicitly allows submission.
 
 ## Trigger Conditions
 
@@ -54,24 +54,34 @@ This skill activates when:
 - `agent_identity` is `agent-request-orchestrator`
 - `request_text` is provided
 
+## Robot Admin Execution
+
+For webhook-driven backend execution, run this agent against an explicitly selected SmartCMP provider instance with a robot/admin credential. Set `ATLASCLAW_PROVIDER_INSTANCE` to the intended instance name; if that instance is not configured, execution must fail closed rather than falling back to `prod` or another instance.
+
+The AtlasClaw webhook user (`ATLASCLAW_USER_ID=webhook-*`) is the trigger identity, not the SmartCMP request actor. In robot execution, `../request/scripts/submit.py` resolves the SmartCMP actor from the selected robot credential, preferring `/users/current-user-details` over the synthetic webhook user id.
+
+Use this mode only for robot profiles whose `allowed_skills` include `smartcmp:request-decomposition-agent`. The CMP side should then show the robot/admin account as the creator of the submitted child requests.
+
 ## Inputs
 
 | Input | Type | Required | Description |
 |-------|------|----------|-------------|
-| `instance` | string | Yes | CMP provider instance name (e.g., `cmp-prod`) |
+| `provider_instance` | string | Yes | CMP provider instance name (e.g., `cmp-prod`) |
+| `robot_profile` | string | For webhook robot mode | Robot profile configured on the selected provider instance |
 | `agent_identity` | string | Yes | Must be `agent-request-orchestrator` |
 | `request_text` | string | Yes | Free-form requirement description |
 | `request_title` | string | No | Short title for the request |
 | `requester_context` | object | No | Metadata: application, BG, environment, urgency, budget |
-| `submission_mode` | string | No | `draft` (default) or `review_required` |
+| `submission_mode` | string | No | `draft` (default), `review_required`, or `submit` |
 
 **Validation Rules:**
 - If `request_text` is empty → **Stop immediately**
 - If `agent_identity` ≠ `agent-request-orchestrator` → **Stop immediately**
+- If `submission_mode=submit` but no robot profile is active → **Stop before submitting**
 
 ## Orchestrated Skills
 
-This agent does NOT access the platform directly. It orchestrates:
+This agent accesses SmartCMP only through the provider tools selected by AtlasClaw runtime:
 
 | Skill | Purpose |
 |-------|---------|
@@ -107,7 +117,8 @@ This agent does NOT access the platform directly. It orchestrates:
          ↓
 7. Execute Based on Mode
    ├── draft → Return candidates, stop
-   └── review_required → Create for human adjustment
+   ├── review_required → Create for human adjustment
+   └── submit → Submit child requests using the selected robot/admin credential
          ↓
 8. Return Decomposition Plan
 ```

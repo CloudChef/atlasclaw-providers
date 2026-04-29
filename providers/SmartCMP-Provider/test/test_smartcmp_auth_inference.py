@@ -188,3 +188,74 @@ def test_skilldeps_cookie_auth_prefers_request_cookie_over_config_cookie(monkeyp
     assert base_url == "https://cmp.example.com/platform-api"
     assert auth_token == "request-cookie-token"
     assert instance["auth_type"] == "cookie"
+
+
+def test_skilldeps_uses_explicit_provider_instance(monkeypatch):
+    monkeypatch.setenv("ATLASCLAW_COOKIES", "{}")
+    monkeypatch.setenv("ATLASCLAW_PROVIDER_INSTANCE", "robot-admin")
+    monkeypatch.setenv(
+        "ATLASCLAW_PROVIDER_CONFIG",
+        json.dumps(
+            {
+                "smartcmp": {
+                    "prod": {
+                        "base_url": "https://prod.example.com",
+                        "auth_type": "provider_token",
+                        "provider_token": "prod-token",
+                    },
+                    "robot-admin": {
+                        "base_url": "https://robot.example.com",
+                        "auth_type": "provider_token",
+                        "provider_token": "cmp_tk_test_robot",
+                    },
+                }
+            }
+        ),
+    )
+
+    base_url, auth_token, instance = common._get_config_from_skilldeps()
+
+    assert base_url == "https://robot.example.com/platform-api"
+    assert auth_token == "cmp_tk_test_robot"
+    assert instance["base_url"] == "https://robot.example.com"
+
+
+def test_missing_explicit_provider_instance_fails_closed_without_env_fallback(monkeypatch):
+    monkeypatch.setenv("ATLASCLAW_COOKIES", "{}")
+    monkeypatch.setenv("ATLASCLAW_PROVIDER_INSTANCE", "missing")
+    monkeypatch.setenv(
+        "ATLASCLAW_PROVIDER_CONFIG",
+        json.dumps(
+            {
+                "smartcmp": {
+                    "prod": {
+                        "base_url": "https://prod.example.com",
+                        "auth_type": "provider_token",
+                        "provider_token": "prod-token",
+                    }
+                }
+            }
+        ),
+    )
+    monkeypatch.setenv("CMP_URL", "https://legacy.example.com")
+    monkeypatch.setenv("CMP_COOKIE", "CloudChef-Authenticate=legacy-token")
+
+    base_url, auth_token, instance = common.get_cmp_config(exit_on_error=False)
+
+    assert base_url == ""
+    assert auth_token == ""
+    assert instance == {}
+
+
+def test_create_headers_uses_bearer_for_cmp_tk_token():
+    headers = common.create_headers("cmp_tk_test_robot")
+
+    assert headers["Authorization"] == "Bearer cmp_tk_test_robot"
+    assert "CloudChef-Authenticate" not in headers
+
+
+def test_create_headers_keeps_cloudchef_header_for_non_cmp_tk_token():
+    headers = common.create_headers("session-token")
+
+    assert headers["CloudChef-Authenticate"] == "session-token"
+    assert "Authorization" not in headers
