@@ -160,6 +160,13 @@ Example:
 
 Use this mode when the entrypoint is an external system calling AtlasClaw through a webhook, and you want a constrained set of provider-qualified skills such as `jira:jira-issue`.
 
+Webhook robot execution is configured in AtlasClaw Core. Provider packages only
+need to document which backend skills are safe to call this way and which
+provider-native credential should be used. For SmartCMP, use
+`args.provider_instance` and `args.robot_profile` in the webhook payload, and
+allowlist the target skills on both the webhook system and the selected robot
+profile.
+
 ## Provider Configuration in `atlasclaw.json`
 
 Provider instances are configured under `service_providers`. AtlasClaw resolves environment placeholders such as `${VAR_NAME}` automatically at load time.

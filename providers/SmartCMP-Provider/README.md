@@ -309,6 +309,29 @@ Transforms descriptive infrastructure or application demands into executable CMP
 - `draft` - Generate drafts only, no submission
 - `review_required` - Create requests pending human adjustment
 
+### Webhook Robot Execution
+
+SmartCMP backend agents can be invoked by AtlasClaw webhooks with a scoped
+robot profile. Use this for external-system automation where SmartCMP should
+show a robot/admin account as the actor instead of the synthetic AtlasClaw
+webhook user.
+
+Recommended SmartCMP setup:
+
+- Configure `robot_auth.<profile>` on the SmartCMP provider instance.
+- Use a SmartCMP `cmp_tk_*` token as the robot `provider_token` when available.
+- Add both `smartcmp:preapproval-agent` and
+  `smartcmp:request-decomposition-agent` to the robot profile only if the same
+  robot account is allowed to run both workflows.
+- Send webhook payloads with `args.provider_instance` and
+  `args.robot_profile`; do not use `args.instance` for robot execution.
+
+When the selected token starts with `cmp_tk_`, SmartCMP scripts send it as
+`Authorization: Bearer <token>`. Approval tools use the selected robot
+credential. In webhook robot dispatches that do not forward SmartCMP user
+cookies, request submission resolves the SmartCMP actor from that same robot
+credential, so SmartCMP audit trails show the configured robot/admin account.
+
 ### cost-optimization - Cost Optimization
 
 List SmartCMP optimization recommendations, analyze savings opportunities, execute SmartCMP-native day2 fixes, and track remediation progress.

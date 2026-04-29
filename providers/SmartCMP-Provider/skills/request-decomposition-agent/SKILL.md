@@ -58,9 +58,11 @@ This skill activates when:
 
 For webhook-driven backend execution, run this agent against an explicitly selected SmartCMP provider instance with a robot/admin credential. Set `ATLASCLAW_PROVIDER_INSTANCE` to the intended instance name; if that instance is not configured, execution must fail closed rather than falling back to `prod` or another instance.
 
-The AtlasClaw webhook user (`ATLASCLAW_USER_ID=webhook-*`) is the trigger identity, not the SmartCMP request actor. In robot execution, `../request/scripts/submit.py` resolves the SmartCMP actor from the selected robot credential, preferring `/users/current-user-details` over the synthetic webhook user id.
+The robot provider instance should use a SmartCMP `cmp_tk_*` provider token when available. The shared scripts send those tokens as `Authorization: Bearer <token>` and keep non-`cmp_tk_*` session tokens on the existing `CloudChef-Authenticate` header.
 
-Use this mode only for robot profiles whose `allowed_skills` include `smartcmp:request-decomposition-agent`. The CMP side should then show the robot/admin account as the creator of the submitted child requests.
+The AtlasClaw webhook user (`ATLASCLAW_USER_ID=webhook-*`) is the trigger identity, not the SmartCMP request actor. In webhook robot dispatches without forwarded SmartCMP user cookies, `../request/scripts/submit.py` resolves the SmartCMP actor from the selected robot credential instead of the synthetic webhook user id.
+
+Use this mode only for robot profiles whose `allowed_skills` include `smartcmp:request-decomposition-agent`. The same SmartCMP robot profile may also allow `smartcmp:preapproval-agent` when the same robot/admin account is approved for both workflows. In webhook robot dispatches without forwarded SmartCMP user cookies, the CMP side should show the robot/admin account as the creator of the submitted child requests.
 
 ## Inputs
 
