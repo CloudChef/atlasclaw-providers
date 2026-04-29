@@ -143,11 +143,14 @@ The robot provider instance should use a SmartCMP `cmp_tk_*` provider token when
 
 Treat `ATLASCLAW_USER_ID=webhook-*` as the AtlasClaw trigger identity, not as a CMP actor. Approval execution uses `../approval/scripts/approve.py` and `../approval/scripts/reject.py`, which load the selected robot credential through `_common.require_config()`.
 
+Use this mode only for robot profiles whose `allowed_skills` include `smartcmp:preapproval-agent`. The same SmartCMP robot profile may also allow `smartcmp:request-decomposition-agent` when the same robot/admin account is approved for both workflows.
+
 ## Inputs
 
 | Input | Type | Required | Description |
 |-------|------|----------|-------------|
 | `provider_instance` | string | Yes | CMP provider instance name (e.g., `cmp-prod`) |
+| `robot_profile` | string | For webhook robot mode | Robot profile configured on the selected provider instance |
 | `agent_identity` | string | Yes | Must be `agent-approver` |
 | `approval_id` | string | Yes* | Approval ID for execution |
 | `request_id` | string | No | Alternative ID if `approval_id` not available |
@@ -173,7 +176,7 @@ This agent does NOT access the platform directly. It orchestrates:
 
 ```
 1. Validate Inputs
-   ├── Check instance, agent_identity
+   ├── Check provider_instance, agent_identity
    └── Verify approval_id or request_id exists
          ↓
 2. Fetch Approval Context

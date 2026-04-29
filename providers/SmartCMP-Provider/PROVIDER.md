@@ -438,13 +438,27 @@ Representative output fields:
 
 ### Agent Skills
 
+#### Webhook robot execution
+
+SmartCMP agent skills can run from AtlasClaw webhook dispatch with a scoped
+robot profile. Configure the robot credential under the SmartCMP provider
+instance and allowlist the exact provider-qualified skills that may use it.
+Webhook payloads should pass `provider_instance` and `robot_profile`.
+
+Use a SmartCMP `cmp_tk_*` token for the robot `provider_token` when available.
+The shared scripts send those tokens as `Authorization: Bearer <token>`, and
+SmartCMP audit trails should show the selected robot/admin account for approval
+actions and for webhook request submissions that do not forward SmartCMP user
+cookies.
+
 #### preapproval-agent
 
 Autonomous agent for approval pre-review. Triggered by webhooks, analyzes request reasonableness, executes approve/reject decisions.
 
 | Input | Type | Required | Description |
 |-------|------|----------|-------------|
-| `instance` | string | Yes | CMP provider instance name |
+| `provider_instance` | string | Yes | CMP provider instance name |
+| `robot_profile` | string | For webhook robot mode | Robot profile configured on the selected provider instance |
 | `agent_identity` | string | Yes | Must be `agent-approver` |
 | `approval_id` | string | Yes | Target approval identifier |
 | `policy_mode` | string | No | Policy preset (default: `balanced`) |
@@ -455,7 +469,8 @@ Orchestration agent that transforms descriptive infrastructure demands into stru
 
 | Input | Type | Required | Description |
 |-------|------|----------|-------------|
-| `instance` | string | Yes | CMP provider instance name |
+| `provider_instance` | string | Yes | CMP provider instance name |
+| `robot_profile` | string | For webhook robot mode | Robot profile configured on the selected provider instance |
 | `agent_identity` | string | Yes | Must be `agent-request-orchestrator` |
 | `request_text` | string | Yes | Free-form requirement description |
 | `submission_mode` | string | No | `draft` or `review_required` |
