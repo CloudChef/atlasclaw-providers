@@ -3,8 +3,9 @@
 
 """SmartCMP Provider Common Utilities - Updated for SkillDeps Integration.
 
-This module now reads configuration from ATLASCLAW_PROVIDER_CONFIG and ATLASCLAW_COOKIES
-instead of individual environment variables, while maintaining backward compatibility.
+This module reads configuration from ATLASCLAW_PROVIDER_CONFIG and ATLASCLAW_COOKIES.
+Webhook robot execution must pass an explicit ATLASCLAW_PROVIDER_INSTANCE and fails
+closed if that instance is not configured.
 
 Features:
   - Read configuration from SkillDeps (via environment variables)
@@ -22,7 +23,7 @@ Environment Variables (from SkillDeps):
   ATLASCLAW_PROVIDER_CONFIG  - JSON string of provider configuration from atlasclaw.json
   ATLASCLAW_USER_ID          - Current user ID
 
-Legacy Environment Variables (fallback):
+Direct Environment Variables (local scripts):
   CMP_URL            - Base URL (IP, hostname, or full path)
   CMP_PROVIDER_TOKEN - Shared provider token for token-based authentication
   CMP_API_TOKEN      - Legacy API token for token-based authentication
@@ -52,6 +53,10 @@ _SAAS_HOSTS = {
     "console.cloudchef.io",
 }
 _SAAS_AUTH_URL = "https://account.smartcmp.cloud/bss-api/api/authentication"
+
+
+class ProviderConfigError(RuntimeError):
+    """Raised when SkillDeps provider configuration is explicitly unusable."""
 
 
 def normalize_url(url: str) -> str:
@@ -197,11 +202,13 @@ def _get_config_from_skilldeps() -> tuple:
     smartcmp_instances = provider_config.get('smartcmp', {})
 
     if not smartcmp_instances:
+        if _provider_instance_requested():
+            raise ProviderConfigError(
+                "ATLASCLAW_PROVIDER_INSTANCE is set, but no SmartCMP provider instances are configured."
+            )
         return None, None, None
 
-    # Select instance (default to first, or use 'prod' if available)
-    instance_name = 'prod' if 'prod' in smartcmp_instances else list(smartcmp_instances.keys())[0]
-    instance = smartcmp_instances.get(instance_name, {})
+    instance_name, instance = _select_smartcmp_instance(smartcmp_instances)
 
     # Extract configuration
     base_url = instance.get('base_url', '')
@@ -255,6 +262,10 @@ def _get_config_from_skilldeps() -> tuple:
             pass
 
     if not base_url:
+        if _provider_instance_requested():
+            raise ProviderConfigError(
+                f"SmartCMP provider instance '{instance_name}' is missing required base_url."
+            )
         return None, None, None
 
     # Normalize URL
@@ -263,8 +274,35 @@ def _get_config_from_skilldeps() -> tuple:
     return base_url, auth_token, instance
 
 
+def _provider_instance_requested() -> bool:
+    """Return whether runtime selected a provider instance explicitly."""
+    return bool(os.environ.get("ATLASCLAW_PROVIDER_INSTANCE", "").strip())
+
+
+def _requested_provider_instance_name() -> str:
+    """Read the explicitly selected provider instance name from the runtime environment."""
+    return os.environ.get("ATLASCLAW_PROVIDER_INSTANCE", "").strip()
+
+
+def _select_smartcmp_instance(smartcmp_instances: dict) -> tuple[str, dict]:
+    """Select the SmartCMP instance, failing closed when runtime selected a missing one."""
+    requested_name = _requested_provider_instance_name()
+    if requested_name:
+        requested_instance = smartcmp_instances.get(requested_name)
+        if isinstance(requested_instance, dict):
+            return requested_name, requested_instance
+        raise ProviderConfigError(
+            f"SmartCMP provider instance '{requested_name}' was explicitly selected but is not configured."
+        )
+
+    # Direct/local script execution without an explicit runtime instance keeps the existing default selection.
+    instance_name = 'prod' if 'prod' in smartcmp_instances else list(smartcmp_instances.keys())[0]
+    instance = smartcmp_instances.get(instance_name, {})
+    return instance_name, instance if isinstance(instance, dict) else {}
+
+
 def _get_config_from_env() -> tuple:
-    """Get configuration from legacy environment variables (backward compatibility).
+    """Get configuration from direct local-script environment variables.
 
     Returns:
         Tuple of (base_url, auth_token, instance_config) or (None, None, None) if not available
@@ -311,7 +349,7 @@ def _get_config_from_env() -> tuple:
 
     base_url = normalize_url(raw_url)
 
-    # Build a minimal instance config for compatibility
+    # Build a minimal instance config for direct environment usage.
     instance = {
         'base_url': raw_url,
         'cookie': cookie,
@@ -339,7 +377,19 @@ def get_cmp_config(exit_on_error: bool = True) -> tuple:
         SystemExit: When exit_on_error=True and config unavailable
     """
     # Try SkillDeps first
-    base_url, auth_token, instance = _get_config_from_skilldeps()
+    try:
+        base_url, auth_token, instance = _get_config_from_skilldeps()
+    except ProviderConfigError as e:
+        if exit_on_error:
+            print(f"[ERROR] {e}")
+            sys.exit(1)
+        return "", "", {}
+
+    if _provider_instance_requested() and (not base_url or not auth_token):
+        if exit_on_error:
+            print("[ERROR] Explicit SmartCMP provider instance is not usable with the current credentials.")
+            sys.exit(1)
+        return "", "", {}
 
     # Fall back to legacy environment variables
     if not base_url or not auth_token:

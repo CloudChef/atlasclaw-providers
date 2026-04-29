@@ -445,6 +445,14 @@ def _load_runtime_cookies() -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
+def _is_robot_execution() -> bool:
+    return bool(_normalize_value(os.environ.get("ATLASCLAW_ROBOT_PROFILE", "")))
+
+
+def _is_webhook_runtime_user(user_id: str) -> bool:
+    return _normalize_value(user_id).lower().startswith("webhook-")
+
+
 def _fetch_current_user() -> dict:
     """Fetch current user info from CMP API. Returns dict with userId/userLoginId or empty dict."""
     try:
@@ -487,14 +495,29 @@ def _enrich_request_body(body: object) -> object:
     if cookie_login_id and not enriched.get("userLoginId"):
         enriched["userLoginId"] = cookie_login_id
 
-    # Source 2: ATLASCLAW_USER_ID env var
+    if enriched.get("userId") and enriched.get("userLoginId"):
+        return enriched
+
+    # Source 2: robot credential current user. A webhook-* AtlasClaw user is not a CMP actor.
+    api_user = {}
+    if _is_robot_execution():
+        api_user = _fetch_current_user()
+        if api_user.get("userId") and not enriched.get("userId"):
+            enriched["userId"] = api_user["userId"]
+        if api_user.get("userLoginId") and not enriched.get("userLoginId"):
+            enriched["userLoginId"] = api_user["userLoginId"]
+
+    # Source 3: ATLASCLAW_USER_ID env var
     runtime_user_id = str(os.environ.get("ATLASCLAW_USER_ID", "") or "").strip()
-    if runtime_user_id and not enriched.get("userLoginId"):
+    if runtime_user_id and not enriched.get("userLoginId") and (
+        not _is_robot_execution() or not _is_webhook_runtime_user(runtime_user_id)
+    ):
         enriched["userLoginId"] = runtime_user_id
 
-    # Source 3: CMP API /users/current (final fallback)
+    # Source 4: CMP API /users/current (final fallback)
     if not enriched.get("userLoginId") or not enriched.get("userId"):
-        api_user = _fetch_current_user()
+        if not api_user:
+            api_user = _fetch_current_user()
         if api_user.get("userId") and not enriched.get("userId"):
             enriched["userId"] = api_user["userId"]
         if api_user.get("userLoginId") and not enriched.get("userLoginId"):
