@@ -1,6 +1,6 @@
 ---
 name: pptx
-description: "Use this skill any time a .pptx file is involved in any way — as input, output, or both. This includes: creating slide decks, pitch decks, or presentations; reading, parsing, or extracting text from any .pptx file (even if the extracted content will be used elsewhere, like in an email or summary); editing, modifying, or updating existing presentations; combining or splitting slide files; working with templates, layouts, speaker notes, or comments. Trigger whenever the user mentions \"deck,\" \"slides,\" \"presentation,\" or references a .pptx filename, regardless of what they plan to do with the content afterward. If a .pptx file needs to be opened, created, or touched, use this skill."
+description: "Use this skill only when the user explicitly asks to create, read, edit, or export a PowerPoint/PPT/PPTX presentation, slide deck, slides, or a .pptx file. Do not trigger it for unrelated workflows, resource requests, retries, or status follow-ups just because prior context mentioned a missing PPTX artifact."
 license: Proprietary. LICENSE.txt has complete terms
 triggers:
   - ppt
@@ -17,6 +17,9 @@ use_when:
   - User asks to export existing results into PPT or PPTX
   - User asks to summarize items into slides
   - User asks to create 幻灯片、演示文稿、PPT 或 PPTX 文件
+avoid_when:
+  - User is asking for a non-presentation workflow such as a VM/resource request, approval, ticket, or retry
+  - The only PPTX mention comes from previous assistant error or artifact-fallback text
 tool_create_name: "pptx_create_deck"
 tool_create_description: "Create a .pptx presentation in the AtlasClaw workspace from structured items."
 tool_create_entrypoint: "scripts/handler.py:create_deck_handler"
@@ -37,6 +40,9 @@ tool_create_use_when:
   - User wants a real PPTX file to be created from structured content
   - User asks to save current results into a PowerPoint deck
   - User asks to export the current list into PPT/PPTX
+tool_create_avoid_when:
+  - User is retrying a provider workflow without asking for PPT/PPTX/slides/presentation output
+  - PPTX appears only in prior runtime or assistant fallback text
 tool_create_parameters: {"type":"object","properties":{"title":{"type":"string","description":"Deck title shown on the title slide."},"subtitle":{"type":"string","description":"Optional subtitle shown on the title slide."},"items":{"type":"array","description":"Structured items to place into the deck.","items":{"type":"object"}},"output_filename":{"type":"string","description":"Optional output file name ending with .pptx."}},"required":["items"]}
 ---
 
