@@ -49,6 +49,17 @@ def test_request_skill_rejects_permissive_confirmation_language():
     assert "Ask one concise selection question" in skill_text
 
 
+def test_request_skill_follows_current_user_message_language():
+    skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
+
+    assert "User Response Language" in skill_text
+    assert "Use the current user's message language" in skill_text
+    assert "English requests must get English follow-ups" in skill_text
+    assert "Short summary of the request in the user's language" in skill_text
+    assert "Short Chinese summary" not in skill_text
+    assert "Ask `请确认以上信息是否正确？（是/否）`" not in skill_text
+
+
 def test_request_skill_contracts_ticket_and_linux_vm_flow_expectations():
     skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
 
