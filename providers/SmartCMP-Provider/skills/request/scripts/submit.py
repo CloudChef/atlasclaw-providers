@@ -662,14 +662,14 @@ for index, record in enumerate(records):
         continue
 
     if verified.get("failed"):
-        overall_failed = True
-        print("[FAILED] Request was created but initialization failed")
+        print("[PARTIAL] Request submitted, but SmartCMP reported initialization failure")
         print(f"  Request ID: {display_request_id}")
         print(f"  State: {verified_state}")
         if provision_state:
             print(f"  Provision State: {provision_state}")
         if verified_error:
             print(f"  Error: {verified_error}")
+        print("  Warning: SmartCMP created the request, then reported initialization failure.")
         diagnostics = _build_failure_diagnostics(verified)
         if diagnostics:
             print("  Diagnosis:")

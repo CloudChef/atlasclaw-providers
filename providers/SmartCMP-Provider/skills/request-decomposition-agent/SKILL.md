@@ -1,6 +1,6 @@
 ---
 name: request-decomposition-agent
-description: "Request orchestration agent. Transform natural language infrastructure or application needs into structured, reviewable service request drafts."
+description: "Request decomposition agent. Split broad natural language infrastructure or application environment needs into structured, reviewable multi-service request drafts."
 provider_type: "smartcmp"
 instance_required: "true"
 

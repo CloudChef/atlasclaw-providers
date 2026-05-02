@@ -69,7 +69,7 @@ def run_script(monkeypatch, argv: list[str], *, fake_post=None, fake_get=None):
     return exit_code, stdout.getvalue(), stderr.getvalue()
 
 
-def test_submit_request_fails_when_verified_request_enters_failed_state(monkeypatch):
+def test_submit_request_reports_success_when_created_request_later_enters_failed_state(monkeypatch):
     def fake_post(url, headers=None, json=None, verify=None, timeout=None):
         assert url == "https://cmp.example.com/platform-api/generic-request/submit"
         return FakeResponse([{"id": "req-1", "workflowId": "TIC20260422000001", "state": "INITIALING"}])
@@ -133,12 +133,14 @@ def test_submit_request_fails_when_verified_request_enters_failed_state(monkeypa
         fake_get=fake_get,
     )
 
-    assert exit_code == 1
-    assert "[FAILED] Request was created but initialization failed" in stdout
+    assert exit_code == 0
+    assert "[PARTIAL] Request submitted, but SmartCMP reported initialization failure" in stdout
+    assert "[SUCCESS] Request submitted" not in stdout
     assert "Request ID: TIC20260422000001" in stdout
     assert "State: INITIALING_FAILED" in stdout
     assert "Provision State: provisionAllocationFailed" in stdout
     assert "Error: No value present" in stdout
+    assert "Warning: SmartCMP created the request, then reported initialization failure." in stdout
     assert "Diagnosis:" in stdout
     assert "Catalog: Linux OS" in stdout
     assert "Request Name: vm-1" in stdout

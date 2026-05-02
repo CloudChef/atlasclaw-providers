@@ -5,8 +5,6 @@
 
 from __future__ import annotations
 
-import json
-import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -23,12 +21,13 @@ def _safe_filename(value: str) -> str:
 
 
 def _resolve_output_dir(ctx: Any) -> Path:
+    """Return the core-provided user work_dir for generated artifacts."""
     deps = getattr(ctx, "deps", None)
-    session_manager = getattr(deps, "session_manager", None)
-    workspace_path = Path(getattr(session_manager, "workspace_path", ".")).resolve()
-    user_info = getattr(deps, "user_info", None)
-    user_id = str(getattr(user_info, "user_id", "") or "default")
-    output_dir = workspace_path / "users" / user_id / "exports"
+    extra = getattr(deps, "extra", None)
+    work_dir = str((extra or {}).get("work_dir", "") if isinstance(extra, dict) else "").strip()
+    if not work_dir:
+        raise ValueError("AtlasClaw work_dir is required for PPTX output")
+    output_dir = Path(work_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 
@@ -46,91 +45,6 @@ def _coerce_items(items: Any) -> list[dict[str, Any]]:
             if text:
                 normalized.append({"title": text})
     return normalized
-
-
-def _coerce_tool_payload_to_text(payload: Any) -> str:
-    if isinstance(payload, str):
-        return payload
-    if isinstance(payload, dict):
-        for key in ("output", "text", "summary", "message"):
-            value = payload.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-    return ""
-
-
-def _extract_meta_payload(text: str, marker_name: str) -> list[dict[str, Any]]:
-    if not text:
-        return []
-    pattern = (
-        rf"##{re.escape(marker_name)}_START##\s*(?P<payload>.*?)\s*##{re.escape(marker_name)}_END##"
-    )
-    match = re.search(pattern, text, flags=re.DOTALL)
-    if not match:
-        return []
-    raw_payload = str(match.group("payload") or "").strip()
-    if not raw_payload:
-        return []
-    try:
-        parsed = json.loads(raw_payload)
-    except Exception:
-        return []
-    if not isinstance(parsed, list):
-        return []
-    normalized: list[dict[str, Any]] = []
-    for item in parsed:
-        if isinstance(item, dict):
-            normalized.append(dict(item))
-    return normalized
-
-
-def _resolve_transcript_path(session_manager: Any, session_key: str) -> Optional[Path]:
-    if session_manager is None or not session_key:
-        return None
-    metadata_cache = getattr(session_manager, "_metadata_cache", None)
-    session = metadata_cache.get(session_key) if isinstance(metadata_cache, dict) else None
-    if session is None:
-        return None
-    get_transcript_path = getattr(session_manager, "_get_transcript_path", None)
-    if not callable(get_transcript_path):
-        return None
-    try:
-        transcript_path = get_transcript_path(session)
-    except Exception:
-        return None
-    return transcript_path if isinstance(transcript_path, Path) else Path(str(transcript_path))
-
-
-def _recover_pending_items_from_transcript(ctx: Any) -> list[dict[str, Any]]:
-    deps = getattr(ctx, "deps", None)
-    session_manager = getattr(deps, "session_manager", None)
-    session_key = str(getattr(deps, "session_key", "") or "").strip()
-    transcript_path = _resolve_transcript_path(session_manager, session_key)
-    if transcript_path is None or not transcript_path.is_file():
-        return []
-
-    try:
-        lines = transcript_path.read_text(encoding="utf-8").splitlines()
-    except Exception:
-        return []
-
-    for raw_line in reversed(lines):
-        line = str(raw_line or "").strip()
-        if not line:
-            continue
-        try:
-            entry = json.loads(line)
-        except Exception:
-            continue
-        if str(entry.get("role", "") or "").strip().lower() != "tool":
-            continue
-        if str(entry.get("tool_name", "") or "").strip() != "smartcmp_list_pending":
-            continue
-        payload_text = _coerce_tool_payload_to_text(entry.get("content"))
-        recovered = _extract_meta_payload(payload_text, "APPROVAL_META")
-        if recovered:
-            return recovered
-    return []
 
 
 def _build_deck(
@@ -187,7 +101,8 @@ def _build_deck(
 
     presentation.save(str(output_path))
     return {
-        "file_path": str(output_path),
+        "artifact_path": output_path.name,
+        "file_path": output_path.name,
         "slide_count": len(presentation.slides),
         "item_count": len(items),
         "title": title,
@@ -203,11 +118,6 @@ def create_deck_handler(
 ) -> dict[str, Any]:
     raw_items = items if isinstance(items, list) else []
     normalized_items = _coerce_items(raw_items)
-    raw_items_include_dict = any(isinstance(item, dict) for item in raw_items)
-    if not raw_items_include_dict:
-        recovered_items = _recover_pending_items_from_transcript(ctx)
-        if recovered_items:
-            normalized_items = recovered_items
     if not normalized_items:
         return {"success": False, "error": "items must contain at least one object"}
 
@@ -221,20 +131,3 @@ def create_deck_handler(
     )
     result["success"] = True
     return result
-
-
-def handler(
-    ctx: Any,
-    items: list[dict[str, Any]],
-    title: str = "PPT Export",
-    subtitle: str = "",
-    output_filename: Optional[str] = None,
-) -> dict[str, Any]:
-    """Backward-compatible alias for direct script execution tests."""
-    return create_deck_handler(
-        ctx=ctx,
-        items=items,
-        title=title,
-        subtitle=subtitle,
-        output_filename=output_filename,
-    )
