@@ -32,6 +32,7 @@ def test_resource_skill_includes_power_tool():
     assert "tool_power_name:" in skill_text
     assert "tool_power_parameters:" in skill_text
     assert "smartcmp_operate_resource" in skill_text
+    assert "do not print raw request or response details" in skill_text
 
 
 def test_resource_power_script_exists_in_resource_skill():

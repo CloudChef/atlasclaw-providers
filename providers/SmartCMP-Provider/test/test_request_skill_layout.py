@@ -6,6 +6,7 @@ from pathlib import Path
 
 PROVIDER_ROOT = Path(__file__).resolve().parents[1]
 REQUEST_SKILL = PROVIDER_ROOT / "skills" / "request" / "SKILL.md"
+APPROVAL_SKILL = PROVIDER_ROOT / "skills" / "approval" / "SKILL.md"
 
 
 def test_request_skill_requires_datasource_business_group_resolution():
@@ -82,6 +83,31 @@ def test_request_skill_declares_provider_driven_workflow_metadata():
     assert '- "requestId"' in skill_text
     assert '- "workflowId"' in skill_text
     assert '- "Request ID"' in skill_text
+
+
+def test_request_skill_declares_status_query_tool() -> None:
+    skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
+
+    assert 'tool_status_name: "smartcmp_get_request_status"' in skill_text
+    assert 'tool_status_entrypoint: "scripts/status.py"' in skill_text
+    assert 'tool_status_result_mode: "silent_ok"' in skill_text
+    assert "request_id" in skill_text
+    assert "申请状态" in skill_text
+    assert "是否审批通过" in skill_text
+    assert "我刚才提交的申请是否已经被批准了" in skill_text
+    assert "reuse the most recent `smartcmp_submit_request` Request ID" in skill_text
+    assert "Treat the tool output as" in skill_text
+    assert "current user's message language" in skill_text
+    assert "`APPROVAL_PENDING`: not approved yet" in skill_text
+    assert "do not claim approval or rejection" in skill_text
+
+
+def test_approval_skill_does_not_claim_submitted_request_status_queries() -> None:
+    skill_text = APPROVAL_SKILL.read_text(encoding="utf-8")
+
+    assert "use smartcmp_get_request_status" in skill_text
+    assert '  - "status"' not in skill_text
+    assert "submitted request status" in skill_text
 
 
 def test_request_skill_allows_structural_instruction_metadata_without_params() -> None:

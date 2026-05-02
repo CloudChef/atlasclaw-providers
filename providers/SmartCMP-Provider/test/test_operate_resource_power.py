@@ -101,15 +101,16 @@ def test_render_operation_result_outputs_structured_block():
     result = module.build_operation_result(
         resource_ids=["res-1"],
         action="start",
-        request_payload=module.build_request_payload(["res-1"], "start"),
-        response_body={"taskId": "task-1"},
     )
 
     output = module.render_operation_result(result)
 
     assert "Submitted start request for 1 resource(s)." in output
+    assert "task-1" not in output
     payload = extract_payload(output)
     assert payload == result
+    assert "request" not in payload
+    assert "response" not in payload
 
 
 def test_main_posts_to_resource_operations_endpoint(monkeypatch):
@@ -148,7 +149,37 @@ def test_main_posts_to_resource_operations_endpoint(monkeypatch):
     assert calls["json"]["resourceIds"] == "res-1"
     assert calls["headers"]["CloudChef-Authenticate"] == "token"
     assert payload["action"] == "stop"
-    assert payload["response"] == {"taskId": "task-1"}
+    assert payload["resourceIds"] == ["res-1"]
+    assert payload["submitted"] is True
+    assert "request" not in payload
+    assert "response" not in payload
+    assert "task-1" not in output
+
+
+def test_main_rejects_http_200_business_failure_without_raw_response(monkeypatch):
+    module = load_module()
+
+    def fake_require_config():
+        return "https://cmp.example.com/platform-api", "token", {}, {}
+
+    def fake_post(url, headers, json, verify, timeout):
+        return DummyResponse(
+            text='{"success":false,"message":"resource is already stopped","taskId":"task-1"}',
+            body={"success": False, "message": "resource is already stopped", "taskId": "task-1"},
+        )
+
+    monkeypatch.setattr(module, "require_config", fake_require_config)
+    monkeypatch.setattr(module.requests, "post", fake_post)
+
+    stdout = io.StringIO()
+    with redirect_stdout(stdout):
+        exit_code = module.main(["res-1", "--action", "stop"])
+
+    output = stdout.getvalue()
+    assert exit_code == 1
+    assert "[ERROR] SmartCMP resource operation was not submitted: resource is already stopped" in output
+    assert "##RESOURCE_POWER_OPERATION_START##" not in output
+    assert "task-1" not in output
 
 
 def test_main_rejects_invalid_action():

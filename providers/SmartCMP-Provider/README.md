@@ -4,8 +4,8 @@ SmartCMP Provider is a service provider module for AtlasClaw, integrating with S
 
 ## Features
 
-- **Resource Requests** - Submit cloud resource or application provisioning requests via SmartCMP
-- **Approval Management** - View pending approvals, approve or reject requests
+- **Resource Requests** - Submit cloud resource or application provisioning requests and query submitted request status by Request ID
+- **Approval Management** - View pending approval tasks, approve requests, or reject requests
 - **Alarm Management** - List alerts, analyze one alert, and run explicit alert status operations
 - **Directory Queries** - List business-group scopes such as tenant/租户/部门/BU/项目, resource pools, resources, or cloud hosts from the same UI directory endpoints used by CMP
 - **Resource Power Operations** - Start or stop existing cloud resources and virtual machines through the SmartCMP day2 endpoint
@@ -127,12 +127,18 @@ All example commands below assume your current directory is
 
 ### approval - Approval Management
 
-Manage SmartCMP approval workflows including querying pending approvals, approving requests, and rejecting requests.
+Manage SmartCMP approval workflows including querying pending approval tasks,
+approving requests, and rejecting requests.
 
 **Use Cases:**
 - View pending approval list
 - Batch approve or reject requests
 - Approval operations with reasons
+
+**Boundary:**
+- Use this skill only for pending approval tasks and approval actions.
+- Do not use approval tools for a user's submitted request status or approval-result query.
+- For "check my request status" or "has my submitted request been approved", use `request/scripts/status.py`.
 
 **Examples:**
 ```bash
@@ -258,9 +264,15 @@ python skills/resource/scripts/operate_resource.py res-1 res-2 --action start
 The resource list output includes each item's current status so users can tell
 whether a start or stop action is needed.
 
-### request - Resource Requests
+Power operation output is intentionally concise. Successful start/stop results
+show only the action, resource ID(s), submitted flag, message, and verification
+hint. Raw request payloads and raw SmartCMP response details are not printed.
 
-Submit cloud resource or application provisioning requests through SmartCMP platform with interactive parameter collection.
+### request - Resource Requests & Submitted Request Status
+
+Submit cloud resource or application provisioning requests through SmartCMP
+platform with interactive parameter collection. Also query the status of an
+already submitted request by the SmartCMP Request ID returned from submission.
 
 **Workflow:**
 1. List available service catalogs
@@ -271,6 +283,19 @@ Submit cloud resource or application provisioning requests through SmartCMP plat
 6. Build request body and confirm
 7. Submit request
 
+**Submitted Request Status:**
+- Use `status.py` for questions such as "check my request status" or "has my request been approved?"
+- Input is the user-visible Request ID returned by submission, such as `RES20260501000095` or `TIC20260316000001`.
+- The script searches `/generic-request/search` for an exact request-number match, then fetches detail with `/generic-request/{id}`.
+- The script returns structured fields such as `state`, `statusCategory`, `approvalPassed`, `currentStep`, `currentApprover`, `provisionState`, `error`, and `updatedAt`.
+- The agent should explain those fields in the current user's message language; the script does not hard-code a localized approval sentence.
+
+**Status Semantics:**
+- `APPROVAL_PENDING` means approval has not passed yet.
+- `APPROVAL_REJECTED` and `APPROVAL_RETREATED` mean approval did not pass.
+- `STARTED`, `TASK_RUNNING`, `WAIT_EXECUTE`, and `FINISHED` mean approval passed or the request entered a later execution stage.
+- `INITIALING`, `INITIALING_FAILED`, `FAILED`, and `CANCELED` should be reported as the current state without claiming approval or rejection.
+
 **Examples:**
 ```bash
 # List services
@@ -278,6 +303,9 @@ python skills/datasource/scripts/list_services.py
 
 # Submit request
 python skills/request/scripts/submit.py --file request_body.json
+
+# Query submitted request status
+python skills/request/scripts/status.py RES20260501000095
 ```
 
 ### preapproval-agent - Pre-approval Agent
@@ -410,8 +438,8 @@ SmartCMP-Provider/
 │   ├── preapproval-agent/           # Pre-approval agent
 │   │   ├── references/
 │   │   └── SKILL.md
-│   ├── request/                     # Resource request skill
-│   │   ├── scripts/                 # Submit scripts
+│   ├── request/                     # Resource request and submitted-status skill
+│   │   ├── scripts/                 # Submit and status scripts
 │   │   ├── references/
 │   │   └── SKILL.md
 │   ├── request-decomposition-agent/ # Request decomposition agent
@@ -455,6 +483,8 @@ scripts are located in `datasource/scripts/`:
 4. **Alarm Coverage** - Monitoring and alert workflows are supported directly by the `alarm` skill in this provider
 5. **Error Handling** - On `[ERROR]` output, report to user immediately; do NOT self-debug
 6. **Resource Compliance** - `resource-compliance` reuses the shared normalized resource view from `list_resource.py`, then attempts live external validation for lifecycle and support checks
+7. **Localized Responses** - Scripts should return stable fields and metadata. Agents are responsible for explaining results in the current user's message language.
+8. **No Raw Day2 Dumps** - Resource power operations should not print raw request payloads or raw SmartCMP response details after a successful submission.
 
 ## Related Documentation
 

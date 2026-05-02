@@ -1,6 +1,6 @@
 ---
 name: "approval"
-description: "Approval workflow skill. View pending approvals and approve or reject service requests."
+description: "Approval workflow skill. View pending approval tasks and approve or reject service requests."
 provider_type: "smartcmp"
 instance_required: "true"
 
@@ -10,7 +10,6 @@ triggers:
   - list approvals
   - request detail
   - approval detail
-  - request status
   - approve request
   - reject request
   - approval workflow
@@ -19,21 +18,21 @@ triggers:
   - 请求详情
   - 工单详情
   - 审批详情
-  - 请求状态
   - 查看详情
   - 审批通过
   - 审批拒绝
 
 use_when:
   - User wants to view pending approval items
-  - User wants to inspect one pending SmartCMP request or approval item in detail
+  - User wants to inspect one pending SmartCMP approval item in detail
   - User needs to approve or reject service requests
-  - User asks about approval status, approval queue, or approval workflow
-  - User asks for the detail or status of a SmartCMP request by ticket/workflow/request/task/process identifier
-  - User asks for SmartCMP 待审批、工单详情、审批详情、请求状态
+  - User asks about their approval queue or approval workflow tasks
+  - User asks for the detail of a pending approval task by ticket/workflow/request/task/process identifier
+  - User asks for SmartCMP 待审批、工单详情、审批详情
 
 avoid_when:
   - User wants to provision new resources (use request skill)
+  - User wants to check the status of their own submitted request or whether it has been approved (use request skill `smartcmp_get_request_status`)
   - User wants to query reference data (use datasource skill)
   - User describes infrastructure needs in natural language (use request-decomposition-agent)
 
@@ -42,7 +41,6 @@ examples:
   - "Show me the detail of TIC20260316000001"
   - "查看TIC20260316000001的详情"
   - "看下这个工单的审批详情"
-  - "查下请求状态"
   - "Approve request #12345"
   - "Reject the VM request with reason budget exceeded"
   - "List all items waiting for my approval"
@@ -60,7 +58,7 @@ tool_list_capability_class: "provider:smartcmp"
 tool_list_priority: 100
 tool_list_result_mode: "tool_only_ok"
 tool_detail_name: "smartcmp_get_request_detail"
-tool_detail_description: "Get detail of an existing SmartCMP pending approval item. ONLY use when user explicitly asks for the detail/status of a SPECIFIC request by its Request ID / 编号 (SmartCMP workflowId field, e.g. RES20260427000004 or TIC20260316000001). Human-facing detail output must display this value as 编号, while machine metadata keeps the requestId key. Do NOT use during resource provisioning or request submission workflows."
+tool_detail_description: "Get detail of a SmartCMP pending approval task. ONLY use when user asks for pending approval detail by Request ID / 编号 (SmartCMP workflowId field, e.g. RES20260427000004 or TIC20260316000001). For submitted request status or '是否审批通过/是否被批准', use smartcmp_get_request_status. Do NOT approve, reject, or query submitted request status with this tool."
 tool_detail_entrypoint: "scripts/get_request_detail.py"
 tool_detail_aliases:
   - "approval detail"
@@ -68,7 +66,6 @@ tool_detail_aliases:
   - "工单详情"
 tool_detail_keywords:
   - "detail"
-  - "status"
   - "workflow"
   - "approval detail"
   - "ticket detail"
@@ -76,9 +73,10 @@ tool_detail_keywords:
   - "审批"
   - "TIC"
 tool_detail_use_when:
-  - "User asks for the detail or current status of an EXISTING SmartCMP request by its Request ID / 编号"
-  - "User provides a specific Request ID / 编号 like RES20260427000004 or TIC20260316000001 and asks for its detail"
+  - "User asks for pending approval task detail by Request ID / 编号"
+  - "User provides a specific Request ID / 编号 like RES20260427000004 or TIC20260316000001 and asks for approval detail"
 tool_detail_avoid_when:
+  - "User asks for their own submitted request status or whether it has been approved (use smartcmp_get_request_status)"
   - "User is in the middle of submitting a NEW resource request (use smartcmp_submit_request instead)"
   - "User is providing parameters (name, password, specs) for a new request"
 tool_detail_groups:

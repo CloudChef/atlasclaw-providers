@@ -1,6 +1,6 @@
 ﻿---
 name: "request"
-description: "Self-service request skill. Request cloud resources, application environments, or ticket/work order services. Keywords: request, provision, deploy, create VM, apply resources, submit ticket, 申请资源, 创建虚拟机, 提交工单."
+description: "Self-service request skill. Request cloud resources, application environments, ticket/work order services, or check submitted request status by Request ID. Keywords: request, provision, deploy, create VM, apply resources, submit ticket, request status, 申请资源, 创建虚拟机, 提交工单, 申请状态."
 provider_type: "smartcmp"
 instance_required: "true"
 workflow_role: "request_parent"
@@ -25,17 +25,25 @@ triggers:
   - 申请云主机
   - 申请linux
   - 申请windows
+  - 申请状态
+  - 查询申请状态
+  - 是否审批通过
+  - 是否被批准
+  - request status
 
 use_when:
   - User wants to request a VM, cloud resource, database, or application environment
   - User wants to submit a self-service request through the service catalog
   - User wants to create a ticket or work order
   - User already knows the service they want and is ready to provide request parameters
+  - User wants to check the status of a submitted SmartCMP request by Request ID
+  - User asks whether their submitted request has been approved
 
 avoid_when:
   - User only wants to browse available resources (use datasource skill)
   - User wants to approve or reject requests (use approval skill)
   - User describes requirements in natural language without specific parameters (use request-decomposition-agent)
+  - User wants to list approval tasks waiting for them or perform approval actions (use approval skill)
 
 examples:
   - "Create a new VM with 2c4g"
@@ -45,6 +53,9 @@ examples:
   - "提交一个问题工单"
   - "申请一个机房资源"
   - "申请2c4g的linux云主机"
+  - "帮我查一下我的申请 RES20260501000095 的状态"
+  - "帮我查一下我的申请 RES20260501000095 是否已经审批通过"
+  - "我刚才提交的申请是否已经被批准了"
 
 related:
   - datasource
@@ -102,6 +113,34 @@ tool_submit_success_contract:
   text_labels:
     - "Request ID"
     - "Workflow ID"
+tool_status_name: "smartcmp_get_request_status"
+tool_status_description: "Query a submitted SmartCMP request status by Request ID, e.g. RES20260501000095 or TIC20260316000001. Use only for submitted request status or approval-result questions. For recent-submission follow-ups without an explicit ID, reuse the most recent Request ID from this conversation; if none exists, ask for it. Do NOT approve or reject requests."
+tool_status_entrypoint: "scripts/status.py"
+tool_status_groups:
+  - cmp
+  - request
+tool_status_capability_class: "provider:smartcmp"
+tool_status_priority: 155
+tool_status_result_mode: "silent_ok"
+tool_status_cli_positional:
+  - request_id
+tool_status_use_when:
+  - "User asks for submitted request status or approval result"
+  - "User provides a Request ID, or the current conversation contains a recent submitted Request ID"
+tool_status_avoid_when:
+  - "User wants to approve or reject a request (use approval skill)"
+  - "User wants to list pending approval tasks waiting for them (use approval skill)"
+tool_status_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "request_id": {
+        "type": "string",
+        "description": "SmartCMP Request ID returned by submit, e.g. RES20260501000095 or TIC20260316000001."
+      }
+    },
+    "required": ["request_id"]
+  }
 tool_facets_name: "smartcmp_list_facets"
 tool_facets_description: "List available resource bundle tag facets from SmartCMP. REQUIRES businessGroupId — call this AFTER business group is selected. Returns facet definitions with keys and selectable options. Use the returned facet key and option key (NOT display names) to build resourceBundleTags values."
 tool_facets_entrypoint: "scripts/list_facets.py"
@@ -168,7 +207,25 @@ Submit cloud resource, application environment, or ticket/work order requests th
 
 ## Flow
 
-Five tools exist: `smartcmp_list_services`, `smartcmp_list_available_bgs`, `smartcmp_list_flavors`, `smartcmp_list_facets`, and `smartcmp_submit_request`.
+Six tools exist: `smartcmp_list_services`, `smartcmp_list_available_bgs`, `smartcmp_list_flavors`, `smartcmp_list_facets`, `smartcmp_submit_request`, and `smartcmp_get_request_status`.
+
+### Submitted request status flow
+
+Use `smartcmp_get_request_status` only for submitted request status or
+approval-result checks. Pass an explicit Request ID when present. For "刚才提交的
+申请", reuse the most recent `smartcmp_submit_request` Request ID in this
+conversation; if none exists, ask for the Request ID.
+
+The status script returns structured fields only. Treat the tool output as
+lookup data, not final user-facing text. Explain the result in the current user's message language using
+`state`, `statusCategory`, `approvalPassed`, `currentStep`, `currentApprover`,
+`provisionState`, `error`, and `updatedAt`.
+
+Status semantics:
+- `APPROVAL_PENDING`: not approved yet; approval is still pending.
+- `APPROVAL_REJECTED` / `APPROVAL_RETREATED`: not approved; rejected or returned.
+- `STARTED` / `TASK_RUNNING` / `WAIT_EXECUTE` / `FINISHED`: approval has passed or the request has entered later execution.
+- `INITIALING` / `INITIALING_FAILED` / `FAILED` / `CANCELED`: report the current state as initialization, failure, or cancellation; do not claim approval or rejection.
 
 ### Complete flow
 

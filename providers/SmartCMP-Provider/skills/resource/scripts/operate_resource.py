@@ -101,18 +101,38 @@ def build_operation_result(
     *,
     resource_ids: list[str],
     action: str,
-    request_payload: dict[str, object],
-    response_body=None,
 ) -> dict[str, object]:
     return {
         "action": action,
         "resourceIds": list(resource_ids),
         "submitted": True,
-        "request": request_payload,
         "message": f"SmartCMP {action} request submitted.",
         "verificationHint": "Refresh the resource list or resource detail to confirm the latest state.",
-        "response": {} if response_body is None else response_body,
     }
+
+
+def normalize_flag(value) -> str:
+    return str(value).strip().lower()
+
+
+def business_error_message(body) -> str:
+    if not isinstance(body, dict):
+        return ""
+
+    message = str(body.get("message") or body.get("error") or body.get("errMsg") or "").strip()
+    success = body.get("success")
+    if success is False or normalize_flag(success) == "false":
+        return message or "SmartCMP reported operation failure."
+
+    state = normalize_flag(body.get("status") or body.get("state"))
+    if state in {"failed", "failure", "error", "rejected", "canceled", "cancelled"}:
+        return message or f"SmartCMP reported operation state: {state}."
+
+    code = body.get("code")
+    if code not in (None, "", 0, "0", 200, "200") and normalize_flag(code) not in {"ok", "success"}:
+        return message or f"SmartCMP returned business code: {code}."
+
+    return ""
 
 
 def render_operation_result(result: dict[str, object]) -> str:
@@ -171,20 +191,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[ERROR] HTTP {response.status_code}: {extract_error_message(response)}")
         return 1
 
+    body = {}
     if response.text:
         try:
             body = response.json()
         except (ValueError, TypeError) as exc:
             print(f"[ERROR] SmartCMP returned an invalid JSON response: {exc}")
             return 1
-    else:
-        body = {}
+
+    business_error = business_error_message(body)
+    if business_error:
+        print(f"[ERROR] SmartCMP resource operation was not submitted: {business_error}")
+        return 1
 
     result = build_operation_result(
         resource_ids=resource_ids,
         action=action,
-        request_payload=request_payload,
-        response_body=body,
     )
     print(render_operation_result(result))
     return 0
