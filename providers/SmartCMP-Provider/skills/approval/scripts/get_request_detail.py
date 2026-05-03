@@ -270,15 +270,31 @@ def _query_pending_items(days: int) -> list[dict[str, Any]]:
 
 def main() -> None:
     identifier, days = _parse_args()
-    try:
-        items = _query_pending_items(days)
-    except requests.exceptions.RequestException as error:
-        print(f"[ERROR] Request failed: {error}")
-        sys.exit(1)
 
-    matched = next((item for item in items if _matches_identifier(item, identifier)), None)
+    max_attempts = 5
+    retry_interval = 3
+    matched = None
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            items = _query_pending_items(days)
+        except requests.exceptions.RequestException as error:
+            if attempt == max_attempts:
+                print(f"[ERROR] Request failed: {error}")
+                sys.exit(1)
+            time.sleep(retry_interval)
+            continue
+
+        matched = next((item for item in items if _matches_identifier(item, identifier)), None)
+        if matched is not None:
+            break
+
+        if attempt < max_attempts:
+            print(f"[DEBUG] Attempt {attempt}/{max_attempts}: identifier {identifier} not found in pending list, retrying in {retry_interval}s...")
+            time.sleep(retry_interval)
+
     if matched is None:
-        print(f"[ERROR] No pending SmartCMP approval matched identifier: {identifier}")
+        print(f"[ERROR] No pending SmartCMP approval matched identifier: {identifier} (after {max_attempts} attempts)")
         sys.exit(1)
 
     now_ms = int(time.time() * 1000)

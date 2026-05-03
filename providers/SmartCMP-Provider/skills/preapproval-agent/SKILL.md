@@ -239,18 +239,14 @@ This agent does NOT access the platform directly. It orchestrates:
 
 ## Comment Templates
 
-**Approval:**
+**Approval example:**
 ```
-Approved by agent pre-review. Business purpose is clear, requested resources 
-match the described scenario, and no obvious overprovisioning detected.
+Approved by agent pre-review. Business purpose clear, resource specs reasonable.
 ```
 
-**Rejection:**
+**Rejection example:**
 ```
-Rejected by agent pre-review. The request does not provide sufficient 
-justification for the requested resources or environment. Please clarify 
-the business purpose, expected workload, target environment, and why the 
-selected capacity is necessary.
+Rejected by agent pre-review. Missing business justification, resource specs, and target environment. Please resubmit with details.
 ```
 
 ## Output Contract
