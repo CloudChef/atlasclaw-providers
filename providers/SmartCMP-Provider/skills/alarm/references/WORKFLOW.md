@@ -10,7 +10,7 @@ operations.
 2. Run `scripts/analyze_alert.py <alert_id>` to fetch the alert, its alarm
    policy, optional overview context, and a structured assessment block.
    - If the alert exposes `entityInstanceId` or `nodeInstanceId`, silently call
-     `../shared/scripts/list_resource.py <resource_id ...>` through the shared
+     `../datasource/scripts/list_resource.py <resource_id ...>` through the
      datasource helper path.
    - Merge normalized resource facts into the alert's `facts[].resource`
      section before generating assessment and recommendations.
@@ -37,3 +37,6 @@ operations.
   implementation instead of maintaining a separate resource lookup path.
 - Status operations use English action names and map them to SmartCMP alert
   statuses.
+- For Prometheus-oriented analysis, pass `alarmContext` as the primary input and
+  treat `resource.data` as optional related context. See
+  [PROMETHEUS_ANALYSIS_EXAMPLE.md](PROMETHEUS_ANALYSIS_EXAMPLE.md).

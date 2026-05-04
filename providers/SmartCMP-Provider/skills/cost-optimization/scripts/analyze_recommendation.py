@@ -89,7 +89,7 @@ def _dedupe_strings(values: list[str]) -> list[str]:
 
 
 def _has_resolved_resource(resource_records: list[dict]) -> bool:
-    return any(record.get("fetchStatus") in {"ok", "partial"} for record in resource_records)
+    return any(record.get("fetchStatus") == "ok" for record in resource_records)
 
 
 def _load_resource_records_by_ids(
@@ -208,18 +208,20 @@ def _project_resource_records(resource_records: list | None) -> list[dict]:
         if not isinstance(record, dict):
             continue
         summary = record.get("summary") or {}
-        resource = record.get("resource") or {}
+        resource = record.get("data") or record.get("resource") or {}
         normalized = record.get("normalized") or {}
         projected.append(
             {
                 "resourceId": record.get("resourceId", ""),
+                "sourceEndpoint": record.get("sourceEndpoint", ""),
                 "name": _pick_first(summary.get("name"), resource.get("name")),
-                "resourceType": summary.get("resourceType", ""),
-                "componentType": summary.get("componentType", ""),
-                "status": summary.get("status", ""),
-                "osType": summary.get("osType", ""),
-                "osDescription": summary.get("osDescription", ""),
+                "resourceType": _pick_first(summary.get("resourceType"), resource.get("resourceType")),
+                "componentType": _pick_first(summary.get("componentType"), resource.get("componentType")),
+                "status": _pick_first(summary.get("status"), resource.get("status")),
+                "osType": _pick_first(summary.get("osType"), resource.get("osType")),
+                "osDescription": _pick_first(summary.get("osDescription"), resource.get("osDescription")),
                 "fetchStatus": record.get("fetchStatus", ""),
+                "missingEvidence": list(record.get("missingEvidence") or []),
                 "errors": list(record.get("errors") or []),
                 "normalized": {
                     "type": normalized.get("type", ""),
@@ -232,7 +234,7 @@ def _project_resource_records(resource_records: list | None) -> list[dict]:
 
 def _select_primary_resource(resource_records: list[dict]) -> dict:
     for record in resource_records:
-        if record.get("fetchStatus") in {"ok", "partial"}:
+        if record.get("fetchStatus") == "ok":
             return dict(record)
     return dict(resource_records[0]) if resource_records else {}
 
@@ -248,7 +250,7 @@ def _build_resource_context(resource_id: str, resource_records: list | None) -> 
             requested_resource_ids.append(projected_resource_id)
     return {
         "requestedResourceIds": requested_resource_ids,
-        "resolvedCount": sum(1 for item in projected_records if item.get("fetchStatus") in {"ok", "partial"}),
+        "resolvedCount": sum(1 for item in projected_records if item.get("fetchStatus") == "ok"),
         "resources": projected_records,
     }
 
@@ -263,7 +265,7 @@ def _enrich_violation_with_resource_context(violation: dict, resource_records: l
     enriched_violation["resourceContextAvailable"] = resource_context["resolvedCount"] > 0
     enriched_violation["resourceFetchStatus"] = primary_resource.get("fetchStatus", "")
 
-    if primary_resource.get("fetchStatus") in {"ok", "partial"}:
+    if primary_resource.get("fetchStatus") == "ok":
         enriched_violation["resourceId"] = _pick_first(
             primary_resource.get("resourceId"),
             enriched_violation.get("resourceId"),

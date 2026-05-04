@@ -156,3 +156,47 @@ def test_build_recommendations_include_required_fields():
         assert set(item) == {"action", "confidence", "reason", "evidence"}
         assert isinstance(item["evidence"], list)
         assert item["evidence"]
+
+
+def test_stale_firing_alarm_is_surfaced_in_reasoning_and_evidence():
+    module = load_module()
+    fact = module.normalize_alert_fact(
+        make_alert(lastTriggerAt="2000-01-01T00:00:00Z"),
+        make_policy(),
+    )
+    assessment = module.build_assessment(fact)
+    recommendations = module.build_recommendations(fact, assessment)
+
+    assert fact["alarm_health"]["is_stale_firing"] is True
+    assert any("last trigger timestamp is old" in item for item in assessment["reasoning"])
+    assert any(
+        evidence.startswith("last_trigger_age_days=")
+        for recommendation in recommendations
+        for evidence in recommendation["evidence"]
+    )
+
+
+def test_threshold_direction_mismatch_is_surfaced_for_prometheus_rules():
+    module = load_module()
+    fact = module.normalize_alert_fact(
+        make_alert(
+            ruleExpression='avg_over_time(cloudchef:smartcmp:cpu_usage{tenant_id="default"}[30m]) <= 80.0'
+        ),
+        make_policy(
+            description="当cpu使用率(百分比)的平均值在过去30分钟内,大于80将触发警报",
+            expression='avg_over_time(cloudchef:smartcmp:cpu_usage{tenant_id="default"}[30m]) <= 80.0',
+        ),
+    )
+    assessment = module.build_assessment(fact)
+    recommendations = module.build_recommendations(fact, assessment)
+
+    assert fact["rule_consistency"] == {
+        "description_direction": "greater-than",
+        "expression_operator": "<=",
+        "threshold_direction_mismatch": True,
+    }
+    assert any("threshold direction appear inconsistent" in item for item in assessment["reasoning"])
+    assert any(
+        "rule_threshold_direction_mismatch=true" in recommendation["evidence"]
+        for recommendation in recommendations
+    )

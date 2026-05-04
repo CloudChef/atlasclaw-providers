@@ -49,6 +49,44 @@ def test_resource_power_entrypoint_imports_cleanly():
     assert hasattr(module, "main")
 
 
+def test_resource_detail_uses_view_endpoint(monkeypatch):
+    module = load_module(
+        "test_resource_detail_entrypoint_module",
+        SKILL_ROOT / "scripts" / "resource_detail.py",
+    )
+    calls = []
+
+    class FakeResponse:
+        status_code = 200
+        text = "{}"
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "id": "res-1",
+                "name": "vm-1",
+                "componentType": "resource.iaas.machine.instance.vsphere",
+                "status": "started",
+                "properties": {"cpu": 2, "memoryInGB": 4},
+            }
+
+    def fake_get(*args, **kwargs):
+        raise AssertionError("resource_detail must not call GET until the CMP view API bug is fixed")
+
+    def fake_patch(url, *, headers, verify, timeout):
+        calls.append(("PATCH", url, headers, verify, timeout))
+        return FakeResponse()
+
+    monkeypatch.setattr(module, "require_config", lambda: ("https://cmp.example/platform-api", "", {}, {}))
+    monkeypatch.setattr(module.requests, "get", fake_get)
+    monkeypatch.setattr(module.requests, "patch", fake_patch)
+
+    assert module.main(["res-1"]) == 0
+    assert calls == [("PATCH", "https://cmp.example/platform-api/nodes/res-1/view", {}, False, 30)]
+
+
 def test_resource_power_referenced_in_provider_docs():
     provider_text = (PROVIDER_ROOT / "PROVIDER.md").read_text(encoding="utf-8")
     assert "smartcmp_operate_resource" in provider_text

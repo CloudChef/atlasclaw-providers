@@ -66,6 +66,15 @@ python scripts/list_resource.py <RESOURCE_ID> [RESOURCE_ID ...]
 
 Output: summary lines plus `##RESOURCE_META_START## ... ##RESOURCE_META_END##`
 
+Specific resource evidence comes from `PATCH /nodes/{resourceId}/view` first.
+This is a temporary SmartCMP API compatibility behavior; switch back to GET
+after the CMP API bug is fixed. `resource.data` is the canonical JSON evidence
+pack. If `/view` fails or returns no data, fallback to `GET /nodes/{resourceId}`
+and `GET /nodes/{resourceId}/details`. If fallback provides resource data, keep
+`fetchStatus=ok`, set `fallbackUsed=true`, and preserve the primary `/view`
+error. If both primary and fallback paths fail, the output must expose
+`fetchStatus=error` and `missingEvidence=["resource.data"]`.
+
 **Trigger**: "show resource details" / "按资源ID查看详情"
 
 ---
@@ -76,7 +85,10 @@ Output: summary lines plus `##RESOURCE_META_START## ... ##RESOURCE_META_END##`
 |-------------|-----------------|
 | "查看业务组 / 查看租户 / 查看部门 / 查看项目" | `scripts/list_all_business_groups.py [keyword]` |
 | "查看服务目录" | `scripts/list_services.py` |
-| "查看资源详情" | `../shared/scripts/list_resource.py <resourceId>` |
+| "查看资源详情" | `scripts/list_resource.py <resourceId>` |
+| "查看应用" | `../shared/scripts/list_applications.py <businessGroupId>` |
+| "查看组件 / 模板元数据" | `../shared/scripts/list_components.py <sourceKey>` |
+| "查看镜像" | `../shared/scripts/list_images.py <resourceBundleId> <logicTemplateId> <cloudEntryType>` |
 
 ---
 

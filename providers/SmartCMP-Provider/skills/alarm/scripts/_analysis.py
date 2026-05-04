@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import sys
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -27,9 +28,7 @@ def normalize_alert_fact(
 ) -> dict[str, Any]:
     """Merge SmartCMP alert and policy data into a stable fact object."""
     projected_resources = _project_resource_records(resource_records or [])
-    resolved_resource_count = sum(
-        1 for item in projected_resources if item.get("fetchStatus") in {"ok", "partial"}
-    )
+    resolved_resource_count = sum(1 for item in projected_resources if item.get("fetchStatus") == "ok")
     primary_resource = _select_primary_resource(projected_resources)
     observed_name = _pick_first(
         alert.get("entityInstanceName", ""),
@@ -95,6 +94,8 @@ def normalize_alert_fact(
         },
     }
     fact["trigger_span_minutes"] = calculate_trigger_span_minutes(fact)
+    fact["alarm_health"] = build_alarm_health(fact)
+    fact["rule_consistency"] = assess_rule_consistency(fact)
     return fact
 
 
@@ -234,6 +235,63 @@ def calculate_trigger_span_minutes(fact: Mapping[str, Any]) -> float:
     return max((end - start).total_seconds() / 60.0, 0.0)
 
 
+def build_alarm_health(fact: Mapping[str, Any], *, stale_after_days: int = 7) -> dict[str, Any]:
+    """Detect stale firing alarms from SmartCMP alert timestamps."""
+    status = str(fact.get("status", "") or "")
+    last_trigger_at = parse_timestamp(fact.get("last_trigger_at"))
+    age_days: float | None = None
+    is_stale = False
+
+    if last_trigger_at is not None:
+        now = datetime.now(timezone.utc)
+        age_days = round(max((now - last_trigger_at).total_seconds(), 0.0) / 86400.0, 1)
+        is_stale = status == "ALERT_FIRING" and age_days > stale_after_days
+
+    return {
+        "is_stale_firing": is_stale,
+        "last_trigger_age_days": age_days,
+        "stale_after_days": stale_after_days,
+    }
+
+
+def assess_rule_consistency(fact: Mapping[str, Any]) -> dict[str, Any]:
+    """Detect obvious threshold-direction mismatch between description and expression."""
+    rule = fact.get("rule") or {}
+    description = str(rule.get("description", "") or "").lower()
+    expression = str(rule.get("expression", "") or fact.get("rule_expression", "") or "").lower()
+    description_direction = infer_description_threshold_direction(description)
+    expression_operator = extract_threshold_operator(expression)
+    mismatch = (
+        (description_direction == "greater-than" and expression_operator in {"<", "<="})
+        or (description_direction == "less-than" and expression_operator in {">", ">="})
+    )
+
+    return {
+        "description_direction": description_direction,
+        "expression_operator": expression_operator,
+        "threshold_direction_mismatch": mismatch,
+    }
+
+
+def infer_description_threshold_direction(description: str) -> str:
+    """Infer threshold direction from English or Chinese alarm descriptions."""
+    if not description:
+        return ""
+    if any(marker in description for marker in ("greater than", "more than", "above", "exceeds", "大于", "高于", ">")):
+        return "greater-than"
+    if any(marker in description for marker in ("less than", "below", "under", "小于", "低于", "<")):
+        return "less-than"
+    return ""
+
+
+def extract_threshold_operator(expression: str) -> str:
+    """Extract the first comparison operator from a PromQL-like expression."""
+    match = re.search(r"(<=|>=|==|!=|<|>)\s*[-+]?\d", expression or "")
+    if not match:
+        return ""
+    return match.group(1)
+
+
 def label_risk(fact: Mapping[str, Any], pattern: str) -> str:
     """Assign a coarse risk label from alert level and current status."""
     status = fact.get("status", "")
@@ -282,6 +340,18 @@ def build_reasoning(fact: Mapping[str, Any], pattern: str, risk: str) -> list[st
         )
     elif resource.get("candidate_resource_ids"):
         reasoning.append("Resource identifiers are present, but datasource enrichment did not return normalized details.")
+    alarm_health = fact.get("alarm_health") or {}
+    if alarm_health.get("is_stale_firing"):
+        reasoning.append(
+            "Alert is still marked ALERT_FIRING, but the last trigger timestamp is old; "
+            "verify current alarm state before mute or resolve operations."
+        )
+    rule_consistency = fact.get("rule_consistency") or {}
+    if rule_consistency.get("threshold_direction_mismatch"):
+        reasoning.append(
+            "Alarm policy description and PromQL threshold direction appear inconsistent; "
+            "review the policy expression before treating the alert as a true threshold breach."
+        )
     reasoning.append(f"Overall operational risk is {risk}.")
     return reasoning
 
@@ -306,6 +376,12 @@ def build_evidence(fact: Mapping[str, Any]) -> list[str]:
     resolved_status = resource.get("resolved_status", "")
     if resolved_status:
         evidence.append(f"resource_status={resolved_status}")
+    alarm_health = fact.get("alarm_health") or {}
+    if alarm_health.get("is_stale_firing"):
+        evidence.append(f"last_trigger_age_days={alarm_health.get('last_trigger_age_days')}")
+    rule_consistency = fact.get("rule_consistency") or {}
+    if rule_consistency.get("threshold_direction_mismatch"):
+        evidence.append("rule_threshold_direction_mismatch=true")
     return evidence
 
 
@@ -374,20 +450,23 @@ def _project_resource_records(resource_records: Sequence[Mapping[str, Any]]) -> 
         if not isinstance(record, Mapping):
             continue
         summary = record.get("summary") or {}
+        data = record.get("data") or record.get("resource") or {}
         normalized = record.get("normalized") or {}
         projected.append(
             {
                 "resourceId": record.get("resourceId", ""),
+                "sourceEndpoint": record.get("sourceEndpoint", ""),
                 "name": _pick_first(
                     summary.get("name", ""),
-                    (record.get("resource") or {}).get("name", ""),
+                    data.get("name", ""),
                 ),
-                "resourceType": summary.get("resourceType", ""),
-                "componentType": summary.get("componentType", ""),
-                "status": summary.get("status", ""),
-                "osType": summary.get("osType", ""),
-                "osDescription": summary.get("osDescription", ""),
+                "resourceType": _pick_first(summary.get("resourceType", ""), data.get("resourceType", "")),
+                "componentType": _pick_first(summary.get("componentType", ""), data.get("componentType", "")),
+                "status": _pick_first(summary.get("status", ""), data.get("status", "")),
+                "osType": _pick_first(summary.get("osType", ""), data.get("osType", "")),
+                "osDescription": _pick_first(summary.get("osDescription", ""), data.get("osDescription", "")),
                 "fetchStatus": record.get("fetchStatus", ""),
+                "missingEvidence": list(record.get("missingEvidence") or []),
                 "errors": list(record.get("errors") or []),
                 "normalized": {
                     "type": normalized.get("type", ""),
@@ -400,6 +479,6 @@ def _project_resource_records(resource_records: Sequence[Mapping[str, Any]]) -> 
 
 def _select_primary_resource(resource_records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     for record in resource_records:
-        if record.get("fetchStatus") in {"ok", "partial"}:
+        if record.get("fetchStatus") == "ok":
             return dict(record)
     return {}

@@ -75,6 +75,82 @@ tool_list_all_business_groups_parameters: |
       }
     }
   }
+tool_list_applications_name: "smartcmp_list_applications"
+tool_list_applications_description: "List SmartCMP applications for a selected business group. Use this as shared read-only reference data for request preparation or provider-native analysis workflows."
+tool_list_applications_entrypoint: "../shared/scripts/list_applications.py"
+tool_list_applications_groups:
+  - cmp
+  - datasource
+tool_list_applications_capability_class: "provider:smartcmp"
+tool_list_applications_priority: 95
+tool_list_applications_result_mode: "tool_only_ok"
+tool_list_applications_cli_positional:
+  - business_group_id
+tool_list_applications_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "business_group_id": {
+        "type": "string",
+        "description": "REQUIRED. UUID of the selected SmartCMP business group."
+      }
+    },
+    "required": ["business_group_id"]
+  }
+tool_list_components_name: "smartcmp_list_components"
+tool_list_components_description: "List SmartCMP component metadata for a catalog source key such as resource.windows. Use sourceKey, not catalogId."
+tool_list_components_entrypoint: "../shared/scripts/list_components.py"
+tool_list_components_groups:
+  - cmp
+  - datasource
+tool_list_components_capability_class: "provider:smartcmp"
+tool_list_components_priority: 95
+tool_list_components_result_mode: "tool_only_ok"
+tool_list_components_cli_positional:
+  - source_key
+tool_list_components_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "source_key": {
+        "type": "string",
+        "description": "REQUIRED. Catalog sourceKey or resource type, for example resource.windows. Do not pass BUILD-IN-CATALOG-* catalog IDs."
+      }
+    },
+    "required": ["source_key"]
+  }
+tool_list_images_name: "smartcmp_list_images"
+tool_list_images_description: "List SmartCMP image options for a selected resource pool, logic template, and cloud entry type. Use this as shared read-only reference data when preparing VM requests."
+tool_list_images_entrypoint: "../shared/scripts/list_images.py"
+tool_list_images_groups:
+  - cmp
+  - datasource
+tool_list_images_capability_class: "provider:smartcmp"
+tool_list_images_priority: 95
+tool_list_images_result_mode: "tool_only_ok"
+tool_list_images_cli_positional:
+  - resource_bundle_id
+  - logic_template_id
+  - cloud_entry_type
+tool_list_images_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "resource_bundle_id": {
+        "type": "string",
+        "description": "REQUIRED. Selected SmartCMP resource bundle ID."
+      },
+      "logic_template_id": {
+        "type": "string",
+        "description": "REQUIRED. Selected logic template ID."
+      },
+      "cloud_entry_type": {
+        "type": "string",
+        "description": "REQUIRED. Cloud entry type or shorthand, for example vsphere or yacmp:cloudentry:type:vsphere."
+      }
+    },
+    "required": ["resource_bundle_id", "logic_template_id", "cloud_entry_type"]
+  }
 ---
 
 # datasource
@@ -132,11 +208,19 @@ Most scripts are located in `scripts/`.
 |--------|-------------|-----------|
 | `scripts/list_all_business_groups.py` | List all business-group scopes (tenant / 租户 / 部门 / BU / 项目) from the standalone UI directory endpoint | `[QUERY_VALUE]` |
 | `scripts/list_services.py` | List published service catalogs | `[KEYWORD]` |
-| `scripts/list_resource.py` | List resource details by resource ID | `<RESOURCE_ID> [RESOURCE_ID ...]` |
+| `scripts/list_resource.py` | List resource evidence by resource ID from `/nodes/{resourceId}/view` first, with legacy resource fallback | `<RESOURCE_ID> [RESOURCE_ID ...]` |
+| `../shared/scripts/list_applications.py` | List applications for a selected business group | `<BUSINESS_GROUP_ID>` |
+| `../shared/scripts/list_components.py` | List component metadata for a catalog `sourceKey` | `<SOURCE_KEY>` |
+| `../shared/scripts/list_images.py` | List image options for a selected resource pool and logic template | `<RESOURCE_BUNDLE_ID> <LOGIC_TEMPLATE_ID> <CLOUD_ENTRY_TYPE>` |
 
-`scripts/list_resource.py` also emits a normalized `type + properties` view per
-resource as part of its standard output. That normalized view is shared across
-discovery, troubleshooting, automation, and compliance analysis.
+`scripts/list_resource.py` emits `resource.data` as the canonical SmartCMP
+resource evidence pack and also emits a normalized `type + properties` view per
+resource. It currently calls `PATCH /nodes/{resourceId}/view` because SmartCMP
+exposes this read-only view through PATCH; switch to GET after the CMP API bug
+is fixed. If `/view` is unavailable or returns no data, fallback to
+`GET /nodes/{resourceId}` and `GET /nodes/{resourceId}/details`; preserve the
+primary `/view` error in `errors`. If fallback provides resource data, keep
+`fetchStatus=ok` and set `fallbackUsed=true`.
 
 ## Environment Setup
 
@@ -201,6 +285,11 @@ python scripts/list_services.py
 ```bash
 python scripts/list_resource.py <resource_id>
 ```
+
+This calls `PATCH /nodes/{resourceId}/view` first. `resource.data` is the
+evidence pack passed to standalone IT Ops skills. If the primary view fails,
+the script falls back to the older resource/detail APIs. If fallback provides
+resource data, the result remains `fetchStatus=ok` with `fallbackUsed=true`.
 
 ## Data Flow
 

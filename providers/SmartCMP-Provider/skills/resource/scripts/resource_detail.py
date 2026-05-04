@@ -430,9 +430,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     base_url, _auth_token, headers, _instance = require_config()
     encoded_id = quote(args.resource_id, safe="")
-    url = f"{base_url}/nodes/{encoded_id}/refresh-status"
+    url = f"{base_url}/nodes/{encoded_id}/view"
 
     try:
+        # SmartCMP currently exposes this read-only view through PATCH. The
+        # endpoint is expected to become GET after the CMP API bug is fixed.
         response = requests.patch(url, headers=headers, verify=False, timeout=30)
         response.raise_for_status()
         payload = response.json()

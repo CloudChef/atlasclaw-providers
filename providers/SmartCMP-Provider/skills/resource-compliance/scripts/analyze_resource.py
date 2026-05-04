@@ -256,10 +256,11 @@ def fetch_text(url, accept="text/html"):
 
 def build_failed_result(record):
     summary = record.get("summary") or {}
-    resource = record.get("resource") or {}
+    resource = record.get("data") or record.get("resource") or {}
     normalized = record.get("normalized") or {}
     return {
         "resourceId": record.get("resourceId", ""),
+        "sourceEndpoint": record.get("sourceEndpoint", ""),
         "resourceName": summary.get("name") or resource.get("name", ""),
         "resourceType": summary.get("resourceType") or resource.get("resourceType", ""),
         "type": normalized.get("type")
@@ -278,6 +279,7 @@ def build_failed_result(record):
             "confidence": "low",
         },
         "recommendations": ["Retry resource retrieval or inspect the resource directly in SmartCMP."],
+        "missingEvidence": list(record.get("missingEvidence") or []),
         "uncertainties": record.get("errors", []),
     }
 
@@ -351,13 +353,13 @@ def main(argv=None) -> int:
     analyzed_count = 0
     failed_count = 0
     for record in resource_records:
-        if record.get("fetchStatus") not in {"ok", "partial"}:
+        if record.get("fetchStatus") != "ok":
             results.append(build_failed_result(record))
             failed_count += 1
             continue
 
         summary = record.get("summary") or {}
-        resource = record.get("resource") or {}
+        resource = record.get("data") or record.get("resource") or {}
         normalized = normalize_record_for_analysis(record)
         result = analyze_normalized_resource(normalized, external_checker=external_checker)
         result.update(

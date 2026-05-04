@@ -74,6 +74,18 @@ def extract_list_payload(payload):
     return []
 
 
+def unwrap_record_payload(payload):
+    if isinstance(payload, dict):
+        for key in ("data", "result", "content", "item"):
+            value = payload.get(key)
+            if isinstance(value, dict):
+                return value
+        return payload
+    if isinstance(payload, list) and payload and isinstance(payload[0], dict):
+        return payload[0]
+    return {}
+
+
 def normalize_resource_summary(item):
     return {
         "id": item.get("id", ""),
@@ -160,58 +172,146 @@ def collect_resource_ids_from_summaries(
 
 
 def fetch_resource_record(resource_id, *, base_url, headers, request_fn):
-    errors = []
+    source_endpoint = f"/nodes/{resource_id}/view"
+    primary_errors = []
+    try:
+        payload = request_fn(
+            # SmartCMP currently exposes this read-only view through PATCH.
+            # The provider should switch this back to GET after the CMP API bug
+            # is fixed.
+            "PATCH",
+            source_endpoint,
+            base_url=base_url,
+            headers=headers,
+        )
+    except (RuntimeError, RequestException) as exc:
+        primary_errors.append(f"Primary PATCH {source_endpoint} failed: {exc}")
+        return fetch_legacy_resource_record(
+            resource_id,
+            base_url=base_url,
+            headers=headers,
+            request_fn=request_fn,
+            primary_errors=primary_errors,
+        )
+
+    data = unwrap_record_payload(payload)
+    if not data:
+        primary_errors.append(f"Primary PATCH {source_endpoint} did not return resource data.")
+        return fetch_legacy_resource_record(
+            resource_id,
+            base_url=base_url,
+            headers=headers,
+            request_fn=request_fn,
+            primary_errors=primary_errors,
+        )
+
+    return {
+        "resourceId": resource_id,
+        "sourceEndpoint": source_endpoint,
+        "data": data,
+        "summary": {},
+        # Backward-compatible alias for existing SmartCMP analyzers. New code
+        # should treat data as the canonical resource evidence pack.
+        "resource": data,
+        "details": {},
+        "normalized": {},
+        "fetchStatus": "ok",
+        "missingEvidence": [],
+        "errors": [],
+        "fallbackUsed": False,
+        "fallbackEndpoints": [],
+    }
+
+
+def fetch_legacy_resource_record(resource_id, *, base_url, headers, request_fn, primary_errors):
+    resource_endpoint = f"/nodes/{resource_id}"
+    details_endpoint = f"/nodes/{resource_id}/details"
+    errors = list(primary_errors)
 
     try:
         resource = request_fn(
             "GET",
-            f"/nodes/{resource_id}",
+            resource_endpoint,
             base_url=base_url,
             headers=headers,
         )
-    except RuntimeError as exc:
+    except (RuntimeError, RequestException) as exc:
+        errors.append(f"Fallback GET {resource_endpoint} failed: {exc}")
         return {
             "resourceId": resource_id,
+            "sourceEndpoint": f"/nodes/{resource_id}/view",
+            "data": {},
             "summary": {},
             "resource": {},
             "details": {},
+            "normalized": {"type": "", "properties": {}},
             "fetchStatus": "error",
-            "errors": [str(exc)],
+            "missingEvidence": ["resource.data"],
+            "errors": errors,
+            "fallbackUsed": True,
+            "fallbackEndpoints": [resource_endpoint, details_endpoint],
+        }
+
+    if not isinstance(resource, dict) or not resource:
+        errors.append(f"Fallback GET {resource_endpoint} did not return resource data.")
+        return {
+            "resourceId": resource_id,
+            "sourceEndpoint": f"/nodes/{resource_id}/view",
+            "data": {},
+            "summary": {},
+            "resource": {},
+            "details": {},
+            "normalized": {"type": "", "properties": {}},
+            "fetchStatus": "error",
+            "missingEvidence": ["resource.data"],
+            "errors": errors,
+            "fallbackUsed": True,
+            "fallbackEndpoints": [resource_endpoint, details_endpoint],
         }
 
     details = {}
     try:
-        details = request_fn(
+        details_payload = request_fn(
             "GET",
-            f"/nodes/{resource_id}/details",
+            details_endpoint,
             base_url=base_url,
             headers=headers,
         )
-        if not isinstance(details, dict):
-            details = {}
-    except RuntimeError as exc:
-        errors.append(str(exc))
+        if isinstance(details_payload, dict):
+            details = details_payload
+    except (RuntimeError, RequestException) as exc:
+        errors.append(f"Fallback GET {details_endpoint} failed: {exc}")
 
     return {
         "resourceId": resource_id,
+        "sourceEndpoint": f"/nodes/{resource_id}/view",
+        "data": resource,
         "summary": {},
-        "resource": resource if isinstance(resource, dict) else {},
+        "resource": resource,
         "details": details,
         "normalized": {},
-        "fetchStatus": "partial" if errors else "ok",
+        "fetchStatus": "ok",
+        "missingEvidence": [],
         "errors": errors,
+        "fallbackUsed": True,
+        "fallbackEndpoints": [resource_endpoint, details_endpoint],
     }
 
 
 def build_missing_record(resource_id):
     return {
         "resourceId": resource_id,
+        "sourceEndpoint": f"/nodes/{resource_id}/view",
+        "data": {},
         "summary": {},
         "resource": {},
         "details": {},
         "normalized": {"type": "", "properties": {}},
-        "fetchStatus": "not_found",
-        "errors": ["Resource was not returned by /nodes/search."],
+        "fetchStatus": "error",
+        "missingEvidence": ["resource.data"],
+        "errors": ["Resource view data was not returned."],
+        "fallbackUsed": False,
+        "fallbackEndpoints": [],
     }
 
 
@@ -257,9 +357,19 @@ def _extract_runtime_properties(resource: dict) -> dict:
     return runtime
 
 
+def _resource_data(record: dict) -> dict:
+    data = record.get("data")
+    if isinstance(data, dict):
+        return data
+    resource = record.get("resource")
+    if isinstance(resource, dict):
+        return resource
+    return {}
+
+
 def determine_component_type(record: dict) -> str:
     summary = record.get("summary") or {}
-    resource = record.get("resource") or {}
+    resource = _resource_data(record)
     return (
         resource.get("componentType")
         or summary.get("componentType")
@@ -271,14 +381,26 @@ def determine_component_type(record: dict) -> str:
 
 def build_flat_properties(record: dict) -> dict:
     summary = record.get("summary") or {}
-    resource = record.get("resource") or {}
+    resource = _resource_data(record)
     details = record.get("details") or {}
 
     properties = {}
 
-    # analysis-relevant top-level fields from resource first, then summary fallbacks.
+    # analysis-relevant top-level fields from the /view payload first.
     merge_first_wins(properties, _simple_fields(resource))
     merge_first_wins(properties, _simple_fields(summary))
+
+    for nested_key in (
+        "resource",
+        "node",
+        "basic",
+        "basicInfo",
+        "resourceView",
+        "view",
+        "metadata",
+        "statusInfo",
+    ):
+        merge_first_wins(properties, _simple_fields(resource.get(nested_key) or {}))
 
     merge_first_wins(properties, _simple_fields(resource.get("properties") or {}))
     merge_first_wins(properties, _simple_fields(resource.get("resourceInfo") or {}))
@@ -298,32 +420,16 @@ def build_normalized_resource(record: dict) -> dict:
 
 
 def load_resource_records(resource_ids, *, base_url, headers, request_fn=request_json):
-    search_items = search_resource_summaries(
-        base_url=base_url,
-        headers=headers,
-        request_fn=request_fn,
-        payload={"ids": resource_ids},
-    )
-    summary_by_id = {
-        item.get("id", ""): item
-        for item in search_items
-        if item.get("id")
-    }
-
     records = []
     for resource_id in resource_ids:
-        if resource_id not in summary_by_id:
-            records.append(build_missing_record(resource_id))
-            continue
-
         record = fetch_resource_record(
             resource_id,
             base_url=base_url,
             headers=headers,
             request_fn=request_fn,
         )
-        record["summary"] = summary_by_id[resource_id]
-        record["normalized"] = build_normalized_resource(record)
+        if record.get("fetchStatus") == "ok":
+            record["normalized"] = build_normalized_resource(record)
         records.append(record)
 
     return records

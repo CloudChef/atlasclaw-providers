@@ -124,6 +124,28 @@ def test_datasource_skill_owns_business_group_directory_flow():
     assert not (PROVIDER_ROOT / "skills" / "business-group" / "SKILL.md").exists()
 
 
+def test_datasource_skill_registers_shared_request_reference_tools():
+    datasource_skill = (PROVIDER_ROOT / "skills" / "datasource" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+
+    expected_tools = {
+        "smartcmp_list_applications": "../shared/scripts/list_applications.py",
+        "smartcmp_list_components": "../shared/scripts/list_components.py",
+        "smartcmp_list_images": "../shared/scripts/list_images.py",
+    }
+    for tool_name, entrypoint in expected_tools.items():
+        assert f'"{tool_name}"' in datasource_skill
+        assert f'"{entrypoint}"' in datasource_skill
+
+    provider_doc = (PROVIDER_ROOT / "PROVIDER.md").read_text(encoding="utf-8")
+    assert "| `request` | Provisioning |" in provider_doc
+    request_row = next(
+        line for line in provider_doc.splitlines() if line.startswith("| `request` |")
+    )
+    assert "list_components" not in request_row
+
+
 def test_list_all_resource_pools_supports_keyword_filter(monkeypatch):
     captured = {}
 

@@ -1,6 +1,6 @@
 ---
 name: "resource"
-description: "SmartCMP resource browsing, detail inspection, and power operations skill. Use when the user asks to 查看云资源列表、查看云主机列表、查看云主机详情、分析云主机属性、启动云主机、停止云主机、开机、关机. Use `/nodes/search` for list browsing with visible status, `PATCH /nodes/{id}/refresh-status` for one-host detail inspection, and `POST /nodes/resource-operations` for start/stop power actions."
+description: "SmartCMP resource browsing, detail inspection, and power operations skill. Use when the user asks to 查看云资源列表、查看云主机列表、查看云主机详情、分析云主机属性、启动云主机、停止云主机、开机、关机. Use `/nodes/search` for list browsing with visible status, `PATCH /nodes/{id}/view` for one-host detail inspection until the CMP view API bug is fixed, and `POST /nodes/resource-operations` for start/stop power actions."
 provider_type: "smartcmp"
 instance_required: "true"
 
@@ -99,7 +99,7 @@ tool_list_parameters: |
     }
   }
 tool_detail_name: "smartcmp_resource_detail"
-tool_detail_description: "Refresh and summarize one SmartCMP cloud host by resource ID using `PATCH /nodes/{id}/refresh-status`. Use this for 查看云主机详情 or 分析云主机属性."
+tool_detail_description: "Summarize one SmartCMP cloud host by resource ID using `PATCH /nodes/{id}/view` until the CMP view API bug is fixed. Use this for 查看云主机详情 or 分析云主机属性."
 tool_detail_entrypoint: "scripts/resource_detail.py"
 tool_detail_groups:
   - cmp
@@ -163,7 +163,7 @@ Provide one skill for resource browsing, per-host property inspection, and day2 
 
 - Query `/nodes/search` for all-resource or virtual-machine lists
 - Show each listed item's current status so users can decide whether to start or stop it
-- Call `PATCH /nodes/{id}/refresh-status` for one cloud host detail snapshot
+- Call `PATCH /nodes/{id}/view` for one cloud host detail snapshot until the CMP view API bug is fixed
 - Present cloud-host detail in a compact CMP-style layout instead of dumping raw metadata
 - Use `POST /nodes/resource-operations` for immediate start/stop power actions
 
@@ -178,7 +178,7 @@ Provide one skill for resource browsing, per-host property inspection, and day2 
 
 - Do not switch to resource-compliance analysis unless the user explicitly asks for compliance, supportability, lifecycle, or security risk.
 - Do not use the list endpoint when the user already provided a concrete resource ID for host detail analysis.
-- `smartcmp_resource_detail` uses `PATCH /nodes/{id}/refresh-status` to fetch the latest host state. This may trigger a backend refresh in SmartCMP.
+- `smartcmp_resource_detail` uses `PATCH /nodes/{id}/view` to fetch the host evidence view until the CMP view API bug is fixed. Do not use older resource/detail APIs as fallback in this interactive detail skill.
 - Keep list-mode output to a numbered list of resource names plus current status.
 - For host detail, present only grouped key facts. Do not dump raw properties, top-level keys, source endpoints, or every key/value returned by the API.
 - **NEVER claim a power operation was submitted or succeeded without actually calling `smartcmp_operate_resource`.** You must call the tool and receive a real response before telling the user the operation is done.
@@ -223,5 +223,5 @@ Never show:
 | Script | Description |
 |--------|-------------|
 | `scripts/list_all_resource.py` | Call the standalone resource list endpoint and emit a numbered resource directory with visible status |
-| `scripts/resource_detail.py` | Refresh one cloud host and emit a compact grouped detail summary |
+| `scripts/resource_detail.py` | Fetch one cloud host view and emit a compact grouped detail summary |
 | `scripts/operate_resource.py` | Submit SmartCMP start/stop operations for one or more resource IDs |

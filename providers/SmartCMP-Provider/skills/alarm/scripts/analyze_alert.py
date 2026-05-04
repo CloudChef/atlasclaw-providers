@@ -120,7 +120,7 @@ def _dedupe_strings(values: list[str]) -> list[str]:
 
 
 def _has_resolved_resource(records: list[dict[str, Any]]) -> bool:
-    return any(record.get("fetchStatus") in {"ok", "partial"} for record in records)
+    return any(record.get("fetchStatus") == "ok" for record in records)
 
 
 def _load_resource_records_by_ids(

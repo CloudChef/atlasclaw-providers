@@ -165,7 +165,7 @@ def test_main_accepts_webhook_payload_json(monkeypatch):
     assert payload["results"][0]["type"] == "resource.os.windows"
 
 
-def test_main_reports_partial_success_when_one_fetch_failed(monkeypatch):
+def test_main_reports_fetch_failure_when_one_resource_has_no_data(monkeypatch):
     module = load_module()
 
     monkeypatch.setattr(
@@ -176,10 +176,12 @@ def test_main_reports_partial_success_when_one_fetch_failed(monkeypatch):
             {
                 "resourceId": "res-missing",
                 "summary": {"componentType": "resource.software.db.mysql"},
+                "data": {},
                 "resource": {},
                 "details": {},
-                "fetchStatus": "not_found",
-                "errors": ["Resource was not returned by /nodes/search."],
+                "fetchStatus": "error",
+                "missingEvidence": ["resource.data"],
+                "errors": ["Resource view data was not returned."],
             },
         ],
     )

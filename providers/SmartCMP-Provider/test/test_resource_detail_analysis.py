@@ -57,7 +57,7 @@ def test_main_renders_compact_resource_detail(monkeypatch):
     def fake_require_config():
         return "https://cmp.example.com/platform-api", "token", {"CloudChef-Authenticate": "token"}, {}
 
-    def fake_patch(url, headers=None, verify=None, timeout=None):
+    def fake_get(url, headers=None, verify=None, timeout=None):
         captured["url"] = url
         return FakeResponse(
             {
@@ -99,7 +99,7 @@ def test_main_renders_compact_resource_detail(monkeypatch):
         )
 
     monkeypatch.setattr(module, "require_config", fake_require_config)
-    monkeypatch.setattr(requests, "patch", fake_patch)
+    monkeypatch.setattr(requests, "patch", fake_get)
 
     stdout = io.StringIO()
     with redirect_stdout(stdout):
@@ -108,7 +108,7 @@ def test_main_renders_compact_resource_detail(monkeypatch):
     output = stdout.getvalue()
 
     assert exit_code == 0
-    assert captured["url"] == "https://cmp.example.com/platform-api/nodes/res-1/refresh-status"
+    assert captured["url"] == "https://cmp.example.com/platform-api/nodes/res-1/view"
     assert "mysqlLinux2" in output
     assert "- Status: started" in output
     assert "- Compute: 1 CPU / 1 GB" in output
@@ -131,14 +131,14 @@ def test_main_prints_response_body_for_request_errors(monkeypatch):
     def fake_require_config():
         return "https://cmp.example.com/platform-api", "token", {"CloudChef-Authenticate": "token"}, {}
 
-    def fake_patch(url, headers=None, verify=None, timeout=None):
+    def fake_get(url, headers=None, verify=None, timeout=None):
         raise requests.HTTPError(
             "HTTP 400",
             response=FakeResponse({}, status_code=400, text='{"message":"bad request"}'),
         )
 
     monkeypatch.setattr(module, "require_config", fake_require_config)
-    monkeypatch.setattr(requests, "patch", fake_patch)
+    monkeypatch.setattr(requests, "patch", fake_get)
 
     stdout = io.StringIO()
     with redirect_stdout(stdout):

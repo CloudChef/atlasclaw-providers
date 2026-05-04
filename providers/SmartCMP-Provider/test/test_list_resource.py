@@ -81,7 +81,7 @@ def make_resource_item(resource_id: str, name: str):
     }
 
 
-def test_main_merges_search_resource_and_detail_calls(monkeypatch):
+def test_main_fetches_resource_views_with_patch_first(monkeypatch):
     module = load_module()
     calls = []
 
@@ -90,17 +90,10 @@ def test_main_merges_search_resource_and_detail_calls(monkeypatch):
 
     def fake_request_json(method, path, *, base_url, headers, payload=None, params=None):
         calls.append((method, path, payload, params))
-        if method == "POST" and path == "/nodes/search":
-            assert payload == {"ids": ["res-1", "res-2"]}
-            return {"content": [make_search_item("res-1", "db-01"), make_search_item("res-2", "db-02")]}
-        if method == "GET" and path == "/nodes/res-1":
+        if method == "PATCH" and path == "/nodes/res-1/view":
             return make_resource_item("res-1", "db-01")
-        if method == "GET" and path == "/nodes/res-1/details":
-            return {"osVersion": "Ubuntu 20.04", "kernel": "5.15.0"}
-        if method == "GET" and path == "/nodes/res-2":
+        if method == "PATCH" and path == "/nodes/res-2/view":
             return make_resource_item("res-2", "db-02")
-        if method == "GET" and path == "/nodes/res-2/details":
-            return {"osVersion": "Ubuntu 20.04", "kernel": "5.15.1"}
         raise AssertionError(f"Unexpected call: {method} {path}")
 
     monkeypatch.setattr(module, "require_config", fake_require_config)
@@ -117,32 +110,37 @@ def test_main_merges_search_resource_and_detail_calls(monkeypatch):
     assert "Found 2 resource(s)." in output
     assert len(payload) == 2
     assert payload[0]["resourceId"] == "res-1"
+    assert payload[0]["sourceEndpoint"] == "/nodes/res-1/view"
     assert payload[0]["fetchStatus"] == "ok"
-    assert payload[0]["details"]["osVersion"] == "Ubuntu 20.04"
-    assert payload[0]["resource"]["softwares"] == "Tomcat 9.0.0.M10"
+    assert payload[0]["data"]["softwares"] == "Tomcat 9.0.0.M10"
+    assert payload[0]["resource"] == payload[0]["data"]
+    assert payload[0]["details"] == {}
+    assert payload[0]["missingEvidence"] == []
+    assert payload[0]["fallbackUsed"] is False
     assert payload[0]["normalized"]["type"] == "resource.software.app.tomcat"
     assert payload[0]["normalized"]["properties"]["softwareVersion"] == "9.0.0.M10"
     assert payload[0]["normalized"]["properties"]["status"] == "started"
-    assert calls[0][1] == "/nodes/search"
+    assert calls == [
+        ("PATCH", "/nodes/res-1/view", None, None),
+        ("PATCH", "/nodes/res-2/view", None, None),
+    ]
 
 
-def test_main_marks_partial_failure_for_one_resource(monkeypatch):
+def test_main_uses_legacy_fallback_when_view_fails(monkeypatch):
     module = load_module()
 
     def fake_require_config():
         return "https://cmp.example.com/platform-api", "token", {"CloudChef-Authenticate": "token"}, {}
 
     def fake_request_json(method, path, *, base_url, headers, payload=None, params=None):
-        if method == "POST" and path == "/nodes/search":
-            return {"content": [make_search_item("res-1", "db-01"), make_search_item("res-2", "db-02")]}
-        if method == "GET" and path == "/nodes/res-1":
+        if method == "PATCH" and path == "/nodes/res-1/view":
             return make_resource_item("res-1", "db-01")
-        if method == "GET" and path == "/nodes/res-1/details":
-            return {"osVersion": "Ubuntu 20.04"}
+        if method == "PATCH" and path == "/nodes/res-2/view":
+            raise RuntimeError("HTTP 400: No value present")
         if method == "GET" and path == "/nodes/res-2":
             return make_resource_item("res-2", "db-02")
         if method == "GET" and path == "/nodes/res-2/details":
-            raise RuntimeError("details unavailable")
+            return {"runtime": "legacy"}
         raise AssertionError(f"Unexpected call: {method} {path}")
 
     monkeypatch.setattr(module, "require_config", fake_require_config)
@@ -158,24 +156,29 @@ def test_main_marks_partial_failure_for_one_resource(monkeypatch):
     assert exit_code == 0
     assert len(payload) == 2
     assert payload[1]["resourceId"] == "res-2"
-    assert payload[1]["fetchStatus"] == "partial"
-    assert payload[1]["details"] == {}
-    assert payload[1]["errors"] == ["details unavailable"]
+    assert payload[1]["fetchStatus"] == "ok"
+    assert payload[1]["data"]["name"] == "db-02"
+    assert payload[1]["details"] == {"runtime": "legacy"}
+    assert payload[1]["missingEvidence"] == []
+    assert payload[1]["fallbackUsed"] is True
+    assert payload[1]["errors"] == [
+        "Primary PATCH /nodes/res-2/view failed: HTTP 400: No value present"
+    ]
 
 
-def test_main_marks_missing_resource_as_not_found(monkeypatch):
+def test_main_marks_missing_resource_view_as_error(monkeypatch):
     module = load_module()
 
     def fake_require_config():
         return "https://cmp.example.com/platform-api", "token", {"CloudChef-Authenticate": "token"}, {}
 
     def fake_request_json(method, path, *, base_url, headers, payload=None, params=None):
-        if method == "POST" and path == "/nodes/search":
-            return {"content": [make_search_item("res-1", "db-01")]}
-        if method == "GET" and path == "/nodes/res-1":
+        if method == "PATCH" and path == "/nodes/res-1/view":
             return make_resource_item("res-1", "db-01")
-        if method == "GET" and path == "/nodes/res-1/details":
-            return {"osVersion": "Ubuntu 20.04"}
+        if method == "PATCH" and path == "/nodes/res-missing/view":
+            raise RuntimeError("HTTP 404: missing")
+        if method == "GET" and path == "/nodes/res-missing":
+            raise RuntimeError("HTTP 404: missing")
         raise AssertionError(f"Unexpected call: {method} {path}")
 
     monkeypatch.setattr(module, "require_config", fake_require_config)
@@ -191,8 +194,13 @@ def test_main_marks_missing_resource_as_not_found(monkeypatch):
     assert exit_code == 0
     assert len(payload) == 2
     assert payload[1]["resourceId"] == "res-missing"
-    assert payload[1]["fetchStatus"] == "not_found"
-    assert payload[1]["errors"] == ["Resource was not returned by /nodes/search."]
+    assert payload[1]["fetchStatus"] == "error"
+    assert payload[1]["missingEvidence"] == ["resource.data"]
+    assert payload[1]["fallbackUsed"] is True
+    assert payload[1]["errors"] == [
+        "Primary PATCH /nodes/res-missing/view failed: HTTP 404: missing",
+        "Fallback GET /nodes/res-missing failed: HTTP 404: missing",
+    ]
 
 
 def test_main_prefers_first_value_when_duplicate_properties_exist(monkeypatch):
@@ -202,12 +210,8 @@ def test_main_prefers_first_value_when_duplicate_properties_exist(monkeypatch):
         return "https://cmp.example.com/platform-api", "token", {"CloudChef-Authenticate": "token"}, {}
 
     def fake_request_json(method, path, *, base_url, headers, payload=None, params=None):
-        if method == "POST" and path == "/nodes/search":
-            return {"content": [make_search_item("res-1", "tomcat-01")]}
-        if method == "GET" and path == "/nodes/res-1":
+        if method == "PATCH" and path == "/nodes/res-1/view":
             return make_resource_item("res-1", "tomcat-01")
-        if method == "GET" and path == "/nodes/res-1/details":
-            return {"status": "from-details", "port": 9090}
         raise AssertionError(f"Unexpected call: {method} {path}")
 
     monkeypatch.setattr(module, "require_config", fake_require_config)

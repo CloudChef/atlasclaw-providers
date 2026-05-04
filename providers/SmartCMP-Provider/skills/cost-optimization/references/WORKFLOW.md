@@ -10,8 +10,8 @@ This skill manages SmartCMP-native cost optimization findings end to end, provid
    - Add `--with-related-policies` to show count of related policies in the same category.
 2. Run `analyze_recommendation.py --id <violation_id>` to get detailed insights.
    - If the violation exposes `resourceId`, silently call
-     `../shared/scripts/list_resource.py <resource_id>` via the shared
-     datasource helper path.
+     `../datasource/scripts/list_resource.py <resource_id>` via the datasource
+     helper path.
    - Merge the returned normalized `type + properties` data into analysis
      facts before scoring recommendations and rendering output.
    - If datasource lookup fails, keep the violation/policy analysis and mark
@@ -49,5 +49,5 @@ Best Practice:
 - Execution uses SmartCMP remediation only.
 - The implementation targets `POST /compliance-policies/violations/day2/fix/{id}`.
 - Best-practice guidance is provided for user reference before execution.
-- Resource enrichment reuses datasource's shared `list_resource.py` instead of a
+- Resource enrichment reuses datasource's `list_resource.py` instead of a
   separate lookup implementation.

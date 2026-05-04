@@ -306,7 +306,7 @@ def run_tests():
     print_result("list_all_resource.py", success, f"Exit code: {0 if success else 1}")
     print_skip(
         "resource_detail.py",
-        "Skipped by default because refresh-status may trigger a backend refresh and requires a known resource ID",
+        "Skipped by default because /nodes/{resourceId}/view requires a known resource ID",
     )
     print_skip("operate_resource.py", "Skipped by default to avoid power-operation side effects")
     
