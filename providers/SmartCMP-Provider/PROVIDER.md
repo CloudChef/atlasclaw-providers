@@ -383,8 +383,8 @@ Manage approval workflows.
 
 ```bash
 python skills/approval/scripts/list_pending.py                           # List pending approvals
-python skills/approval/scripts/approve.py <id> --reason "Approved"       # Approve
-python skills/approval/scripts/reject.py <id> --reason "Budget exceeded" # Reject
+python skills/approval/scripts/approve.py <request_id> --reason "Approved"       # Approve
+python skills/approval/scripts/reject.py <request_id> --reason "Budget exceeded" # Reject
 ```
 
 #### alarm
@@ -463,7 +463,7 @@ Autonomous agent for approval pre-review. Triggered by webhooks, analyzes reques
 | `provider_instance` | string | Yes | CMP provider instance name |
 | `robot_profile` | string | For webhook robot mode | Robot profile configured on the selected provider instance |
 | `agent_identity` | string | Yes | Must be `agent-approver` |
-| `approval_id` | string | Yes | Target approval identifier |
+| `request_id` | string | Yes | Target SmartCMP Request ID |
 | `policy_mode` | string | No | Policy preset (default: `balanced`) |
 
 #### request-decomposition-agent

@@ -21,6 +21,8 @@ SCRIPT_PATH = (
     / "scripts"
     / "submit.py"
 )
+INTERNAL_REQUEST_UUID = "20fef12e-5015-4df5-822b-e1e87c4f64fd"
+ROBOT_INTERNAL_REQUEST_UUID = "6d279970-c2f6-4b09-ab63-319abf913c06"
 
 
 class FakeResponse:
@@ -72,13 +74,14 @@ def run_script(monkeypatch, argv: list[str], *, fake_post=None, fake_get=None):
 def test_submit_request_reports_success_when_created_request_later_enters_failed_state(monkeypatch):
     def fake_post(url, headers=None, json=None, verify=None, timeout=None):
         assert url == "https://cmp.example.com/platform-api/generic-request/submit"
-        return FakeResponse([{"id": "req-1", "workflowId": "TIC20260422000001", "state": "INITIALING"}])
+        return FakeResponse([{"id": INTERNAL_REQUEST_UUID, "workflowId": "TIC20260422000001", "state": "INITIALING"}])
 
     def fake_get(url, headers=None, verify=None, timeout=None):
-        if url == "https://cmp.example.com/platform-api/generic-request/req-1":
+        if url == f"https://cmp.example.com/platform-api/generic-request/{INTERNAL_REQUEST_UUID}":
             return FakeResponse(
                 {
-                    "id": "req-1",
+                    "id": INTERNAL_REQUEST_UUID,
+                    "workflowId": "TIC20260422000001",
                     "name": "vm-1",
                     "catalogName": "Linux OS",
                     "businessGroupId": "bg-1",
@@ -137,6 +140,7 @@ def test_submit_request_reports_success_when_created_request_later_enters_failed
     assert "[PARTIAL] Request submitted, but SmartCMP reported initialization failure" in stdout
     assert "[SUCCESS] Request submitted" not in stdout
     assert "Request ID: TIC20260422000001" in stdout
+    assert INTERNAL_REQUEST_UUID not in stdout
     assert "State: INITIALING_FAILED" in stdout
     assert "Provision State: provisionAllocationFailed" in stdout
     assert "Error: No value present" in stdout
@@ -162,13 +166,13 @@ def test_submit_request_reports_success_when_created_request_later_enters_failed
 def test_submit_request_succeeds_when_verified_request_is_visible(monkeypatch):
     def fake_post(url, headers=None, json=None, verify=None, timeout=None):
         assert url == "https://cmp.example.com/platform-api/generic-request/submit"
-        return FakeResponse([{"id": "req-1", "workflowId": "TIC20260422000002", "state": "INITIALING"}])
+        return FakeResponse([{"id": INTERNAL_REQUEST_UUID, "workflowId": "TIC20260422000002", "state": "INITIALING"}])
 
     def fake_get(url, headers=None, verify=None, timeout=None):
-        assert url == "https://cmp.example.com/platform-api/generic-request/req-1"
+        assert url == f"https://cmp.example.com/platform-api/generic-request/{INTERNAL_REQUEST_UUID}"
         return FakeResponse(
             {
-                "id": "req-1",
+                "id": INTERNAL_REQUEST_UUID,
                 "workflowId": "TIC20260422000002",
                 "state": "INITIALING",
                 "processInstanceId": "proc-1",
@@ -185,6 +189,7 @@ def test_submit_request_succeeds_when_verified_request_is_visible(monkeypatch):
     assert exit_code == 0
     assert "[SUCCESS] Request submitted" in stdout
     assert "Request ID: TIC20260422000002" in stdout
+    assert INTERNAL_REQUEST_UUID not in stdout
     assert "State: INITIALING" in stdout
     assert "Catalog: Linux OS" in stdout
     assert "Name: vm-1" in stdout
@@ -193,13 +198,13 @@ def test_submit_request_succeeds_when_verified_request_is_visible(monkeypatch):
 def test_submit_request_stays_pending_without_error_when_request_never_leaves_initialing(monkeypatch):
     def fake_post(url, headers=None, json=None, verify=None, timeout=None):
         assert url == "https://cmp.example.com/platform-api/generic-request/submit"
-        return FakeResponse([{"id": "req-1", "workflowId": "TIC20260422000003", "state": "INITIALING"}])
+        return FakeResponse([{"id": INTERNAL_REQUEST_UUID, "workflowId": "TIC20260422000003", "state": "INITIALING"}])
 
     def fake_get(url, headers=None, verify=None, timeout=None):
-        assert url == "https://cmp.example.com/platform-api/generic-request/req-1"
+        assert url == f"https://cmp.example.com/platform-api/generic-request/{INTERNAL_REQUEST_UUID}"
         return FakeResponse(
             {
-                "id": "req-1",
+                "id": INTERNAL_REQUEST_UUID,
                 "state": "INITIALING",
                 "provisionState": "",
                 "processInstanceId": "",
@@ -216,6 +221,7 @@ def test_submit_request_stays_pending_without_error_when_request_never_leaves_in
     assert exit_code == 0
     assert "[PENDING] Request submitted, but workflow has not been confirmed yet" in stdout
     assert "Request ID: TIC20260422000003" in stdout
+    assert INTERNAL_REQUEST_UUID not in stdout
     assert "State: INITIALING" in stdout
     assert "Note: Track this request by Request ID instead of resubmitting it." in stdout
 
@@ -223,11 +229,15 @@ def test_submit_request_stays_pending_without_error_when_request_never_leaves_in
 def test_submit_request_stays_pending_without_error_when_verification_lookup_fails(monkeypatch):
     def fake_post(url, headers=None, json=None, verify=None, timeout=None):
         assert url == "https://cmp.example.com/platform-api/generic-request/submit"
-        return FakeResponse([{"id": "req-1", "workflowId": "TIC20260422000004", "state": "INITIALING"}])
+        return FakeResponse([{"id": INTERNAL_REQUEST_UUID, "workflowId": "TIC20260422000004", "state": "INITIALING"}])
 
     def fake_get(url, headers=None, verify=None, timeout=None):
-        assert url == "https://cmp.example.com/platform-api/generic-request/req-1"
-        return FakeResponse({"message": "Not found"}, status_code=404, text="Not found")
+        assert url == f"https://cmp.example.com/platform-api/generic-request/{INTERNAL_REQUEST_UUID}"
+        return FakeResponse(
+            {"message": f"Not found {INTERNAL_REQUEST_UUID}"},
+            status_code=404,
+            text=f"Not found {INTERNAL_REQUEST_UUID}",
+        )
 
     exit_code, stdout, _ = run_script(
         monkeypatch,
@@ -239,10 +249,28 @@ def test_submit_request_stays_pending_without_error_when_verification_lookup_fai
     assert exit_code == 0
     assert "[PENDING] Request submitted, but not yet verifiable in SmartCMP" in stdout
     assert "Request ID: TIC20260422000004" in stdout
+    assert INTERNAL_REQUEST_UUID not in stdout
     assert "Submit State: INITIALING" in stdout
     assert "Verify HTTP: 404" in stdout
-    assert "Message: Not found" in stdout
+    assert "Message: Not found [internal-id]" in stdout
     assert "Note: Track this request by Request ID instead of resubmitting it." in stdout
+
+
+def test_submit_request_fails_without_user_facing_request_id(monkeypatch):
+    def fake_post(url, headers=None, json=None, verify=None, timeout=None):
+        assert url == "https://cmp.example.com/platform-api/generic-request/submit"
+        return FakeResponse([{"id": INTERNAL_REQUEST_UUID, "state": "INITIALING"}])
+
+    exit_code, stdout, _ = run_script(
+        monkeypatch,
+        ["--json", '{"catalogName":"Linux OS","name":"vm-1","resourceSpecs":[{}]}'],
+        fake_post=fake_post,
+    )
+
+    assert exit_code == 1
+    assert "[FAILED] Submission failed" in stdout
+    assert "no user-facing Request ID" in stdout
+    assert INTERNAL_REQUEST_UUID not in stdout
 
 
 def test_submit_robot_token_uses_current_user_instead_of_webhook_runtime_user(monkeypatch):
@@ -270,16 +298,18 @@ def test_submit_robot_token_uses_current_user_instead_of_webhook_runtime_user(mo
         assert url == "https://cmp.example.com/platform-api/generic-request/submit"
         submitted["headers"] = dict(headers or {})
         submitted["body"] = dict(json or {})
-        return FakeResponse([{"id": "req-robot", "workflowId": "TIC20260422000005", "state": "INITIALING"}])
+        return FakeResponse(
+            [{"id": ROBOT_INTERNAL_REQUEST_UUID, "workflowId": "TIC20260422000005", "state": "INITIALING"}]
+        )
 
     def fake_get(url, headers=None, verify=None, timeout=None):
         assert headers["Authorization"] == "Bearer cmp_tk_test_robot"
         if url == "https://cmp.example.com/platform-api/users/current-user-details":
             return FakeResponse({"id": "robot-user-id", "loginId": "robot-admin"})
-        if url == "https://cmp.example.com/platform-api/generic-request/req-robot":
+        if url == f"https://cmp.example.com/platform-api/generic-request/{ROBOT_INTERNAL_REQUEST_UUID}":
             return FakeResponse(
                 {
-                    "id": "req-robot",
+                    "id": ROBOT_INTERNAL_REQUEST_UUID,
                     "workflowId": "TIC20260422000005",
                     "state": "INITIALING",
                     "processInstanceId": "proc-robot",
@@ -300,3 +330,4 @@ def test_submit_robot_token_uses_current_user_instead_of_webhook_runtime_user(mo
     assert submitted["body"]["userLoginId"] == "robot-admin"
     assert submitted["body"]["userLoginId"] != "webhook-approval-1"
     assert "[SUCCESS] Request submitted" in stdout
+    assert ROBOT_INTERNAL_REQUEST_UUID not in stdout

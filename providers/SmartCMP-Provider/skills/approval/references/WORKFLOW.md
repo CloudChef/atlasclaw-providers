@@ -21,6 +21,16 @@ $env:CMP_COOKIE = '<full cookie string>'   # MUST use single quotes
 4. **NEVER redirect output** — Run scripts directly, read stdout.
 5. **Parse META blocks silently** — Do NOT display raw JSON to user.
 
+### Request ID Contract
+
+`approve.py` and `reject.py` accept only SmartCMP user-facing Request IDs from
+`APPROVAL_META.requestId`, such as `RES20260505000010`, `TIC20260502000003`,
+or `CHG20260413000011`. The scripts resolve those Request IDs to the SmartCMP
+approval action identifiers internally before calling SmartCMP action APIs.
+
+Do not pass display row numbers, UUID-shaped internal IDs, or placeholder values
+such as `dummy-id-placeholder`.
+
 ---
 
 ## Full Workflow
@@ -30,7 +40,7 @@ $env:CMP_COOKIE = '<full cookie string>'   # MUST use single quotes
 ```
 ACTION: python scripts/list_pending.py
 SHOW:   numbered list of pending items
-PARSE:  ##APPROVAL_META_START## silently → cache {index, id, name, requester}
+PARSE:  ##APPROVAL_META_START## silently → cache {index, requestId, name, requester}
 ASK:    "Would you like to approve or reject any of these?"
 STOP → wait for user selection
 ```
@@ -45,17 +55,17 @@ python scripts/list_pending.py --days 7
 
 ### Step 2a — Approve (single item)
 
-When user says "approve #1" or "approve the first one":
+When user says "approve #1", "approve the first one", "同意 1", or "批准 1":
 
 ```
-LOOKUP: id from cached ##APPROVAL_META## by index
-ACTION: python scripts/approve.py <id>
+LOOKUP: requestId from cached ##APPROVAL_META## by index
+ACTION: python scripts/approve.py <requestId>
 SHOW:   "[SUCCESS] Approval completed."
 ```
 
 **With reason:**
 ```bash
-python scripts/approve.py <id> --reason "Approved per policy"
+python scripts/approve.py <requestId> --reason "Approved per policy"
 ```
 
 ---
@@ -65,10 +75,10 @@ python scripts/approve.py <id> --reason "Approved per policy"
 When user says "approve all" or "approve #1, #2, #3":
 
 ```
-LOOKUP: ids from cached ##APPROVAL_META##
+LOOKUP: requestIds from cached ##APPROVAL_META##
 CONFIRM: "You are about to approve N items. Proceed? (yes/no)"
 STOP → wait for confirmation
-ACTION: python scripts/approve.py <id1> <id2> <id3>
+ACTION: python scripts/approve.py <requestId1> <requestId2> <requestId3>
 SHOW:   "[SUCCESS] Approval completed."
 ```
 
@@ -79,10 +89,10 @@ SHOW:   "[SUCCESS] Approval completed."
 When user says "reject #2":
 
 ```
-LOOKUP: id from cached ##APPROVAL_META## by index
+LOOKUP: requestId from cached ##APPROVAL_META## by index
 ASK:    "Would you like to provide a rejection reason?"
 STOP → wait for user input (optional)
-ACTION: python scripts/reject.py <id> [--reason "..."]
+ACTION: python scripts/reject.py <requestId> [--reason "..."]
 SHOW:   "[SUCCESS] Rejection completed."
 ```
 
@@ -93,12 +103,12 @@ SHOW:   "[SUCCESS] Rejection completed."
 When user says "reject all" or "reject #1 and #2":
 
 ```
-LOOKUP: ids from cached ##APPROVAL_META##
+LOOKUP: requestIds from cached ##APPROVAL_META##
 CONFIRM: "You are about to reject N items. Proceed? (yes/no)"
 STOP → wait for confirmation
 ASK:    "Would you like to provide a rejection reason?"
 STOP → wait for user input (optional)
-ACTION: python scripts/reject.py <id1> <id2> [--reason "..."]
+ACTION: python scripts/reject.py <requestId1> <requestId2> [--reason "..."]
 SHOW:   "[SUCCESS] Rejection completed."
 ```
 
@@ -109,8 +119,8 @@ SHOW:   "[SUCCESS] Rejection completed."
 | Script | Purpose | Arguments |
 |--------|---------|-----------|
 | `list_pending.py` | List pending approvals | `[--days N]` |
-| `approve.py` | Approve items | `<id1> [id2...] [--reason "..."]` |
-| `reject.py` | Reject items | `<id1> [id2...] [--reason "..."]` |
+| `approve.py` | Approve items | `<requestId1> [requestId2...] [--reason "..."]` |
+| `reject.py` | Reject items | `<requestId1> [requestId2...] [--reason "..."]` |
 
 ---
 
@@ -126,13 +136,13 @@ GET /generic-request/current-activity-approval
 
 ### Approve batch
 ```
-POST /approval-activity/approve/batch?ids=<id1>,<id2>
+POST /approval-activity/approve/batch
 Body: {"reason": "<optional>"}
 ```
 
 ### Reject batch
 ```
-POST /approval-activity/reject/batch?ids=<id1>,<id2>
+POST /approval-activity/reject/batch
 Body: {"reason": "<optional>"}
 ```
 
@@ -142,7 +152,8 @@ Body: {"reason": "<optional>"}
 
 | Error | Action |
 |-------|--------|
+| `Invalid SmartCMP Request ID(s)` | Re-list pending approvals, then resolve the selected row to `APPROVAL_META.requestId` |
 | `401 Unauthorized` | Cookie expired → ask user to re-login |
-| `404 Not Found` | Invalid approval ID → re-run list_pending.py |
+| `404 Not Found` | Invalid or stale Request ID → re-run list_pending.py |
 | `400 Bad Request` | Check API response for details |
 | Network timeout | Retry or check connectivity |

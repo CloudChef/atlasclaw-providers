@@ -114,3 +114,30 @@ def test_detail_uses_chinese_number_label_and_extensible_resource_specs(monkeypa
     meta = json.loads(payload)
     assert meta["requestId"] == "RES20260427000004"
     assert meta["resourceSpecs"][:2] == ["内存: 1.0GB", "类型: aliyun"]
+    for internal_field in ("approvalId", "internalRequestId", "workflowId", "taskId", "processInstanceId"):
+        assert internal_field not in meta
+
+
+def test_detail_rejects_internal_uuid_before_http(monkeypatch) -> None:
+    module = _load_module(monkeypatch)
+    internal_id = "15919c7d-67c4-45a6-8603-91c6f6b9e644"
+    monkeypatch.setattr(sys, "argv", ["get_request_detail.py", internal_id])
+
+    def unexpected_http_call(*args, **kwargs):
+        raise AssertionError("Unexpected HTTP call.")
+
+    monkeypatch.setattr(module.requests, "get", unexpected_http_call)
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    with redirect_stdout(stdout), redirect_stderr(stderr):
+        try:
+            module.main()
+        except SystemExit as exc:
+            assert exc.code == 1
+
+    rendered = stdout.getvalue()
+    assert "[ERROR] Invalid SmartCMP Request ID." in rendered
+    assert "RES20260505000010" in rendered
+    assert internal_id not in rendered
+    assert "APPROVAL_DETAIL_META" not in stderr.getvalue()

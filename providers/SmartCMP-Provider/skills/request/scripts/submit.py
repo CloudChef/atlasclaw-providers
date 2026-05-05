@@ -29,6 +29,7 @@ import sys
 import json
 import os
 import argparse
+import re
 import time
 import requests
 
@@ -47,11 +48,27 @@ _VERIFY_INTERVAL_SECONDS = max(
     0.0,
     float(os.environ.get("CMP_SUBMIT_VERIFY_INTERVAL_SECONDS", "1") or "1"),
 )
+_REQUEST_ID_PATTERN = re.compile(r"^[A-Z]{3}\d{14}$", re.IGNORECASE)
+_UUID_PATTERN = re.compile(
+    r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
+    re.IGNORECASE,
+)
 
 
 def _normalize_value(value: object) -> str:
     normalized = str(value or "").strip()
     return normalized
+
+
+def _is_user_facing_request_id(value: object) -> bool:
+    return bool(_REQUEST_ID_PATTERN.fullmatch(_normalize_value(value)))
+
+
+def _safe_verification_message(value: object, lookup_id: str) -> str:
+    message = _normalize_value(value)
+    if lookup_id:
+        message = message.replace(lookup_id, "[internal-id]")
+    return _UUID_PATTERN.sub("[uuid]", message)
 
 
 def _unwrap_value(value: object) -> object:
@@ -196,29 +213,49 @@ def _extract_ticket_id(payload: object) -> str:
     if not isinstance(payload, dict):
         return ""
 
-    for key in ("workflowId", "workflow_id", "ticketId", "ticket_id"):
+    for key in (
+        "workflowId",
+        "workflow_id",
+        "requestId",
+        "request_id",
+        "requestNo",
+        "requestNumber",
+        "customizedId",
+        "ticketId",
+        "ticket_id",
+    ):
         candidate = _normalize_value(payload.get(key))
-        if candidate:
+        if _is_user_facing_request_id(candidate):
             return candidate
 
     current_activity = payload.get("currentActivity")
     if isinstance(current_activity, dict):
-        for key in ("workflowId", "workflow_id", "ticketId", "ticket_id"):
+        for key in (
+            "workflowId",
+            "workflow_id",
+            "requestId",
+            "request_id",
+            "requestNo",
+            "requestNumber",
+            "customizedId",
+            "ticketId",
+            "ticket_id",
+        ):
             candidate = _normalize_value(current_activity.get(key))
-            if candidate:
+            if _is_user_facing_request_id(candidate):
                 return candidate
 
     return ""
 
 
 def _resolve_display_request_id(ticket_id: str) -> str:
-    return ticket_id
+    return ticket_id if _is_user_facing_request_id(ticket_id) else ""
 
 
-def _fetch_request_snapshot(request_id: str) -> dict:
+def _fetch_request_snapshot(lookup_id: str) -> dict:
     try:
         resp = requests.get(
-            f"{BASE_URL}/generic-request/{request_id}",
+            f"{BASE_URL}/generic-request/{lookup_id}",
             headers=create_headers(AUTH_TOKEN),
             verify=False,
             timeout=30,
@@ -226,16 +263,16 @@ def _fetch_request_snapshot(request_id: str) -> dict:
     except requests.exceptions.RequestException as exc:
         return {
             "ok": False,
-            "request_id": request_id,
-            "message": str(exc),
+            "lookup_id": lookup_id,
+            "message": _safe_verification_message(type(exc).__name__, lookup_id),
         }
 
     if resp.status_code != 200:
         return {
             "ok": False,
-            "request_id": request_id,
+            "lookup_id": lookup_id,
             "status_code": resp.status_code,
-            "message": (resp.text or "").strip(),
+            "message": _safe_verification_message(resp.text, lookup_id),
         }
 
     try:
@@ -243,23 +280,24 @@ def _fetch_request_snapshot(request_id: str) -> dict:
     except json.JSONDecodeError:
         return {
             "ok": False,
-            "request_id": request_id,
+            "lookup_id": lookup_id,
             "status_code": resp.status_code,
-            "message": f"Invalid verification response: {resp.text}",
+            "message": "Invalid verification response.",
         }
 
     if not isinstance(payload, dict):
         return {
             "ok": False,
-            "request_id": request_id,
+            "lookup_id": lookup_id,
             "status_code": resp.status_code,
-            "message": f"Unexpected verification payload: {payload}",
+            "message": "Unexpected verification payload.",
         }
 
+    display_request_id = _extract_ticket_id(payload)
     return {
         "ok": True,
-        "request_id": _normalize_value(payload.get("id")) or request_id,
-        "workflow_id": _extract_ticket_id(payload),
+        "request_id": display_request_id,
+        "workflow_id": display_request_id,
         "state": _normalize_value(payload.get("state")),
         "provision_state": _normalize_value(payload.get("provisionState")),
         "error": _normalize_value(payload.get("errMsg") or payload.get("errorMessage")),
@@ -403,15 +441,15 @@ def _build_failure_diagnostics(verified: dict) -> list[str]:
     return diagnostics
 
 
-def _verify_submitted_request(request_id: str) -> dict:
+def _verify_submitted_request(lookup_id: str) -> dict:
     last_snapshot = {
         "ok": False,
-        "request_id": request_id,
+        "lookup_id": lookup_id,
         "message": "Verification did not return any response.",
     }
 
     for attempt in range(_VERIFY_ATTEMPTS):
-        snapshot = _fetch_request_snapshot(request_id)
+        snapshot = _fetch_request_snapshot(lookup_id)
         last_snapshot = snapshot
 
         if snapshot.get("ok"):
@@ -597,16 +635,16 @@ request_name = body.get("name", "")
 if resp.status_code != 200:
     print(f"[FAILED] HTTP {resp.status_code}")
     if isinstance(result, dict):
-        print(f"  Message: {result.get('message', result.get('error', json.dumps(result, ensure_ascii=False)))}")
+        message = result.get("message") or result.get("error") or "SmartCMP returned an error."
+        print(f"  Message: {_safe_verification_message(message, '')}")
     else:
-        print(f"  Response: {result}")
+        print("  Message: SmartCMP returned an unexpected error payload.")
     sys.exit(1)
 
 records = _extract_request_records(result)
 if not records:
     print("[FAILED] Submission failed")
     print("  Message: SmartCMP returned HTTP 200 but no request record.")
-    print(f"  Response: {result}")
     sys.exit(1)
 
 overall_failed = False
@@ -615,11 +653,11 @@ for index, record in enumerate(records):
     if index > 0:
         print("  ---")
 
-    req_id = _normalize_value(record.get("id"))
+    detail_lookup_id = _normalize_value(record.get("id"))
     ticket_id = _extract_ticket_id(record)
     display_request_id = _resolve_display_request_id(ticket_id)
     submit_state = _normalize_value(record.get("state"))
-    submit_error = _normalize_value(record.get("errorMessage"))
+    submit_error = _safe_verification_message(record.get("errorMessage"), detail_lookup_id)
 
     if submit_error:
         overall_failed = True
@@ -631,20 +669,22 @@ for index, record in enumerate(records):
         print(f"  Error: {submit_error}")
         continue
 
-    if not req_id or req_id.lower() in {"n/a", "none", "null"}:
+    if not display_request_id:
         overall_failed = True
         print("[FAILED] Submission failed")
-        if display_request_id:
-            print(f"  Request ID: {display_request_id}")
-        print("  Message: SmartCMP returned HTTP 200 but no Request ID.")
+        print("  Message: SmartCMP returned HTTP 200 but no user-facing Request ID.")
         continue
 
-    verified = _verify_submitted_request(req_id)
-    ticket_id = _normalize_value(verified.get("workflow_id")) or ticket_id
-    display_request_id = _resolve_display_request_id(ticket_id)
+    if not detail_lookup_id or detail_lookup_id.lower() in {"n/a", "none", "null"}:
+        detail_lookup_id = display_request_id
+
+    verified = _verify_submitted_request(detail_lookup_id)
+    verified_request_id = _normalize_value(verified.get("request_id") or verified.get("workflow_id"))
+    if verified_request_id:
+        display_request_id = _resolve_display_request_id(verified_request_id) or display_request_id
     verified_state = _normalize_value(verified.get("state")) or submit_state or "N/A"
     provision_state = _normalize_value(verified.get("provision_state"))
-    verified_error = _normalize_value(verified.get("error"))
+    verified_error = _safe_verification_message(verified.get("error"), detail_lookup_id)
 
     if not verified.get("ok"):
         # The submit endpoint already returned a concrete Request ID, so treat

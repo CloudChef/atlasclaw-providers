@@ -83,7 +83,7 @@ def test_parse_days_from_argv_accepts_positive_integer_only() -> None:
     assert module.parse_days_from_argv(["--days", "abc"]) is None
 
 
-def test_build_meta_uses_workflow_id_as_request_id() -> None:
+def test_build_meta_exposes_only_canonical_request_id() -> None:
     module = _load_module()
     item = {
         "id": "internal-request-uuid",
@@ -101,10 +101,28 @@ def test_build_meta_uses_workflow_id_as_request_id() -> None:
 
     meta = module.build_meta([item], now_ms=1_772_000_120_000)
 
-    assert meta[0]["id"] == "approval-activity-uuid"
     assert meta[0]["requestId"] == "RES20260427000004"
-    assert meta[0]["workflowId"] == "RES20260427000004"
-    assert meta[0]["internalRequestId"] == "internal-request-uuid"
+    for internal_field in ("id", "workflowId", "internalRequestId", "taskId", "processInstanceId"):
+        assert internal_field not in meta[0]
+
+
+def test_build_meta_accepts_request_id_alias_fields() -> None:
+    module = _load_module()
+    items = [
+        {"requestId": "RES20260427000004"},
+        {"customizedId": "TIC20260427000005"},
+        {"currentActivity": {"workflowId": "CHG20260427000006"}},
+    ]
+    for item in items:
+        item["_priority"] = module.calculate_priority(item, now_ms=1_772_000_120_000)
+
+    meta = module.build_meta(items, now_ms=1_772_000_120_000)
+
+    assert [item["requestId"] for item in meta] == [
+        "RES20260427000004",
+        "TIC20260427000005",
+        "CHG20260427000006",
+    ]
 
 
 def test_main_renders_newest_first_table_and_hides_internal_meta(monkeypatch) -> None:
@@ -178,5 +196,5 @@ def test_main_renders_newest_first_table_and_hides_internal_meta(monkeypatch) ->
     )[0]
     meta = json.loads(payload)
     assert [item["requestId"] for item in meta] == ["RES20260427000004", "RES20260426000003"]
-    assert meta[0]["id"] == "new-approval-uuid"
-    assert meta[0]["internalRequestId"] == "new-internal-request-uuid"
+    for internal_field in ("id", "workflowId", "internalRequestId", "taskId", "processInstanceId"):
+        assert internal_field not in meta[0]

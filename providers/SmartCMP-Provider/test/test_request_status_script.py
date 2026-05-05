@@ -81,18 +81,19 @@ def test_status_script_has_no_hardcoded_chinese_output() -> None:
 
 def test_status_resolves_visible_request_id_via_search_then_detail(monkeypatch):
     request_id = "RES20260501000095"
+    internal_id = "20fef12e-5015-4df5-822b-e1e87c4f64fd"
     calls: list[str] = []
 
     def fake_get(url, headers=None, params=None, verify=None, timeout=None):
         calls.append(url)
         if url == "https://cmp.example.com/platform-api/generic-request/search":
             assert params["queryValue"] == request_id
-            return FakeResponse({"content": [{"id": "req-internal-95", "workflowId": request_id}]})
-        if url == "https://cmp.example.com/platform-api/generic-request/req-internal-95":
+            return FakeResponse({"content": [{"id": internal_id, "requestId": request_id}]})
+        if url == f"https://cmp.example.com/platform-api/generic-request/{internal_id}":
             return FakeResponse(
                 {
-                    "id": "req-internal-95",
-                    "workflowId": request_id,
+                    "id": internal_id,
+                    "requestId": request_id,
                     "name": "Linux-test-agent",
                     "catalogName": "Linux VM",
                     "state": "APPROVAL_PENDING",
@@ -112,9 +113,11 @@ def test_status_resolves_visible_request_id_via_search_then_detail(monkeypatch):
     assert exit_code == 0
     assert calls == [
         "https://cmp.example.com/platform-api/generic-request/search",
-        "https://cmp.example.com/platform-api/generic-request/req-internal-95",
+        f"https://cmp.example.com/platform-api/generic-request/{internal_id}",
     ]
     assert f"Request ID: {request_id}" in stdout
+    assert internal_id not in stdout
+    assert internal_id not in stderr
     assert "State: APPROVAL_PENDING" in stdout
     assert "Status Category: approval_pending" in stdout
     assert "Approval Passed: false" in stdout
@@ -123,53 +126,35 @@ def test_status_resolves_visible_request_id_via_search_then_detail(monkeypatch):
 
     meta = extract_meta(stderr)
     assert meta["requestId"] == request_id
-    assert meta["internalRequestId"] == "req-internal-95"
+    assert "internalRequestId" not in meta
     assert meta["statusCategory"] == "approval_pending"
     assert meta["approvalPassed"] is False
     assert "approvalMessage" not in meta
 
 
-def test_status_accepts_internal_request_id_when_search_has_no_exact_match(monkeypatch):
-    internal_id = "req-internal-100"
+def test_status_rejects_internal_uuid_before_http(monkeypatch):
+    internal_id = "20fef12e-5015-4df5-822b-e1e87c4f64fd"
 
-    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
-        if url == "https://cmp.example.com/platform-api/generic-request/search":
-            return FakeResponse({"content": []})
-        if url == f"https://cmp.example.com/platform-api/generic-request/{internal_id}":
-            return FakeResponse(
-                {
-                    "id": internal_id,
-                    "workflowId": "TIC20260501000100",
-                    "name": "ticket-100",
-                    "catalogName": "Ticket",
-                    "state": "FINISHED",
-                    "updatedDate": "2026-05-01T12:00:00",
-                }
-            )
-        raise AssertionError(f"Unexpected GET url: {url}")
+    exit_code, stdout, stderr = run_script(monkeypatch, [internal_id])
 
-    exit_code, stdout, stderr = run_script(monkeypatch, [internal_id], fake_get=fake_get)
-
-    assert exit_code == 0
-    assert "Request ID: TIC20260501000100" in stdout
-    assert "State: FINISHED" in stdout
-    assert "Status Category: approval_passed" in stdout
-    assert "Approval Passed: true" in stdout
-    meta = extract_meta(stderr)
-    assert meta["internalRequestId"] == internal_id
-    assert meta["approvalPassed"] is True
+    assert exit_code == 1
+    assert "[ERROR] Invalid SmartCMP Request ID." in stdout
+    assert "REQ20260501000095" in stdout
+    assert internal_id not in stdout
+    assert "REQUEST_STATUS_META" not in stderr
 
 
 def test_status_does_not_treat_success_message_as_error(monkeypatch):
     request_id = "RES20260501000101"
+    internal_id = "6d279970-c2f6-4b09-ab63-319abf913c06"
 
     def fake_get(url, headers=None, params=None, verify=None, timeout=None):
         if url == "https://cmp.example.com/platform-api/generic-request/search":
-            return FakeResponse({"content": [{"id": "req-internal-101", "workflowId": request_id}]})
-        if url == "https://cmp.example.com/platform-api/generic-request/req-internal-101":
+            return FakeResponse({"content": [{"id": internal_id, "workflowId": request_id}]})
+        if url == f"https://cmp.example.com/platform-api/generic-request/{internal_id}":
             return FakeResponse(
                 {
-                    "id": "req-internal-101",
+                    "id": internal_id,
                     "workflowId": request_id,
                     "name": "Linux-finished",
                     "catalogName": "Linux VM",
@@ -184,6 +169,8 @@ def test_status_does_not_treat_success_message_as_error(monkeypatch):
 
     assert exit_code == 0
     assert "State: FINISHED" in stdout
+    assert internal_id not in stdout
+    assert internal_id not in stderr
     assert "Error:" not in stdout
     meta = extract_meta(stderr)
     assert meta["statusCategory"] == "approval_passed"
@@ -218,25 +205,23 @@ def test_status_returns_clear_error_when_no_request_matches(monkeypatch):
     def fake_get(url, headers=None, params=None, verify=None, timeout=None):
         if url == "https://cmp.example.com/platform-api/generic-request/search":
             return FakeResponse({"content": []})
-        if url == f"https://cmp.example.com/platform-api/generic-request/{request_id}":
-            return FakeResponse({"message": "Not found"}, status_code=404, text="Not found")
         raise AssertionError(f"Unexpected GET url: {url}")
 
     exit_code, stdout, stderr = run_script(monkeypatch, [request_id], fake_get=fake_get)
 
     assert exit_code == 1
     assert "[ERROR] No SmartCMP request matched Request ID: RES20260501999999" in stdout
-    assert "direct detail failed: HTTP 404" in stdout
     assert "REQUEST_STATUS_META" not in stderr
 
 
 def test_status_does_not_fallback_to_partial_search_row_when_detail_fails(monkeypatch):
     request_id = "RES20260501000095"
+    internal_id = "1eeb334e-01c9-4e2b-bf72-b57d5ce2216d"
 
     def fake_get(url, headers=None, params=None, verify=None, timeout=None):
         if url == "https://cmp.example.com/platform-api/generic-request/search":
-            return FakeResponse({"content": [{"id": "req-internal-95", "workflowId": request_id}]})
-        if url == "https://cmp.example.com/platform-api/generic-request/req-internal-95":
+            return FakeResponse({"content": [{"id": internal_id, "workflowId": request_id}]})
+        if url == f"https://cmp.example.com/platform-api/generic-request/{internal_id}":
             return FakeResponse({"message": "Forbidden"}, status_code=403, text="Forbidden")
         raise AssertionError(f"Unexpected GET url: {url}")
 
@@ -244,6 +229,7 @@ def test_status_does_not_fallback_to_partial_search_row_when_detail_fails(monkey
 
     assert exit_code == 1
     assert "Matched Request ID RES20260501000095, but detail lookup failed" in stdout
+    assert internal_id not in stdout
     assert "HTTP 403" in stdout
     assert "REQUEST_STATUS_META" not in stderr
 
@@ -251,28 +237,8 @@ def test_status_does_not_fallback_to_partial_search_row_when_detail_fails(monkey
 def test_status_does_not_match_approval_task_or_process_ids_from_search(monkeypatch):
     task_id = "task-123"
 
-    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
-        if url == "https://cmp.example.com/platform-api/generic-request/search":
-            return FakeResponse(
-                {
-                    "content": [
-                        {
-                            "id": "req-internal-95",
-                            "workflowId": "RES20260501000095",
-                            "currentActivity": {
-                                "taskId": task_id,
-                                "processInstanceId": "process-123",
-                            },
-                        }
-                    ]
-                }
-            )
-        if url == f"https://cmp.example.com/platform-api/generic-request/{task_id}":
-            return FakeResponse({"message": "Not found"}, status_code=404, text="Not found")
-        raise AssertionError(f"Unexpected GET url: {url}")
-
-    exit_code, stdout, stderr = run_script(monkeypatch, [task_id], fake_get=fake_get)
+    exit_code, stdout, stderr = run_script(monkeypatch, [task_id])
 
     assert exit_code == 1
-    assert "[ERROR] No SmartCMP request matched Request ID: task-123" in stdout
+    assert "[ERROR] Invalid SmartCMP Request ID." in stdout
     assert "REQUEST_STATUS_META" not in stderr

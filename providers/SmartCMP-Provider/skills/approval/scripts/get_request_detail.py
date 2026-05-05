@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 # Copyright 2026  Qianyun, Inc., www.cloudchef.io, All rights reserved.
 
-"""Get SmartCMP pending approval/request detail by workflow or related identifiers.
+"""Get SmartCMP pending approval/request detail by user-facing Request ID.
 
 Usage:
   python get_request_detail.py <identifier> [--days N]
 
 Arguments:
-  identifier   Request ID (SmartCMP workflowId field), approval ID, task ID, or process instance ID
+  identifier   SmartCMP user-facing Request ID, for example RES20260505000029
   --days N     Search approvals updated in the last N days (default: 90)
 
 Output:
@@ -42,6 +42,8 @@ except ImportError:
         ),
     )
     from _common import require_config
+
+from _approval_validation import APPROVAL_ID_FORMAT_HINT, is_request_id, request_id_from_item
 
 
 BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()
@@ -214,28 +216,12 @@ def _extract_items(payload: Any) -> list[dict[str, Any]]:
 
 def _matches_identifier(item: dict[str, Any], identifier: str) -> bool:
     normalized = identifier.strip().lower()
-    activity = item.get("currentActivity") or {}
-    candidates = [
-        activity.get("id"),
-        item.get("id"),
-        item.get("workflowId"),
-        activity.get("taskId"),
-        activity.get("processInstanceId"),
-    ]
-    for candidate in candidates:
-        if str(candidate or "").strip().lower() == normalized:
-            return True
-    return False
+    return bool(normalized and _request_id(item).lower() == normalized)
 
 
 def _request_id(item: dict[str, Any]) -> str:
-    """Return the SmartCMP user-facing request number (RES/TIC...), not an internal UUID."""
-    return str(item.get("workflowId") or item.get("requestNo") or item.get("requestNumber") or "").strip()
-
-
-def _internal_request_id(item: dict[str, Any]) -> str:
-    """Return the SmartCMP internal request UUID when present."""
-    return str(item.get("id") or "").strip()
+    """Return the SmartCMP user-facing request number, not an internal UUID."""
+    return request_id_from_item(item)
 
 
 def _query_pending_items(days: int) -> list[dict[str, Any]]:
@@ -270,6 +256,10 @@ def _query_pending_items(days: int) -> list[dict[str, Any]]:
 
 def main() -> None:
     identifier, days = _parse_args()
+    if not is_request_id(identifier):
+        print("[ERROR] Invalid SmartCMP Request ID.")
+        print(APPROVAL_ID_FORMAT_HINT)
+        sys.exit(1)
 
     max_attempts = 5
     retry_interval = 3
@@ -298,7 +288,6 @@ def main() -> None:
         sys.exit(1)
 
     now_ms = int(time.time() * 1000)
-    activity = matched.get("currentActivity") or {}
     name = matched.get("name") or matched.get("requestName") or "N/A"
     request_id = _request_id(matched)
     catalog = matched.get("catalogName") or matched.get("resourceType") or matched.get("type") or "通用请求"
@@ -334,12 +323,7 @@ def main() -> None:
         print(f"说明: {description}")
 
     meta = {
-        "approvalId": activity.get("id") or matched.get("id") or "",
         "requestId": request_id,
-        "internalRequestId": _internal_request_id(matched),
-        "workflowId": request_id,
-        "taskId": activity.get("taskId") or "",
-        "processInstanceId": activity.get("processInstanceId") or "",
         "name": name,
         "catalogName": catalog,
         "applicant": applicant,

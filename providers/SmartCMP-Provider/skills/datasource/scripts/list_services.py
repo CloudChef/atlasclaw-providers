@@ -31,6 +31,7 @@ import sys
 import json
 import uuid
 import os
+import re
 import requests
 
 # Import shared utilities (handles URL normalization, SSL warnings)
@@ -122,6 +123,70 @@ def _normalize_instructions(raw_instructions: dict) -> dict:
 
     return normalized
 
+
+_NODE_TEMPLATE_PATTERN = re.compile(r"^\s{2}([A-Za-z0-9_.-]+):\s*$")
+_NODE_TYPE_PATTERN = re.compile(r"^\s{4}type:\s*[\"']?([^\"'\s]+)[\"']?\s*$")
+
+
+def _iter_blueprint_yaml(raw_catalog: dict):
+    blueprint = raw_catalog.get("blueprint")
+    if not isinstance(blueprint, dict):
+        return
+    for key in ("mainYaml", "toscaYaml", "originalToscaYaml", "plannedMainYaml", "bpYaml"):
+        value = blueprint.get(key)
+        if isinstance(value, str) and value.strip():
+            yield value
+
+
+def _extract_node_types_from_yaml(yaml_text: str) -> list[tuple[str, str]]:
+    nodes: list[tuple[str, str]] = []
+    current_node = ""
+    in_node_templates = False
+
+    for line in yaml_text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        if stripped == "node_templates:":
+            in_node_templates = True
+            current_node = ""
+            continue
+
+        if not in_node_templates:
+            continue
+
+        if line and not line.startswith(" "):
+            in_node_templates = False
+            current_node = ""
+            continue
+
+        node_match = _NODE_TEMPLATE_PATTERN.match(line)
+        if node_match:
+            current_node = node_match.group(1)
+            continue
+
+        type_match = _NODE_TYPE_PATTERN.match(line)
+        if current_node and type_match:
+            node_type = type_match.group(1).strip()
+            if node_type.startswith("cloudchef.nodes."):
+                nodes.append((current_node, node_type))
+
+    return nodes
+
+
+def _derive_blueprint_resource_type(raw_catalog: dict) -> dict:
+    for yaml_text in _iter_blueprint_yaml(raw_catalog) or ():
+        nodes = _extract_node_types_from_yaml(yaml_text)
+        if not nodes:
+            continue
+        for node_name, node_type in nodes:
+            if node_type == "cloudchef.nodes.Compute":
+                return {"node": node_name, "type": node_type}
+        node_name, node_type = nodes[0]
+        return {"node": node_name, "type": node_type}
+    return {}
+
 keyword = sys.argv[1] if len(sys.argv) > 1 else ""
 url = f"{BASE_URL}/catalogs/published"
 params = {"query": "", "states": "PUBLISHED", "page": 1, "size": 50, "sort": "catalogIndex,asc"}
@@ -156,6 +221,11 @@ for i, c in enumerate(items):
         "sourceKey":   c.get("sourceKey", ""),
         "serviceCategory": c.get("serviceCategory", ""),
     }
+    catalog_type = c.get("type")
+    if catalog_type:
+        entry["catalogType"] = catalog_type
+
+    derived_resource_type = _derive_blueprint_resource_type(c)
     # Extract normalized instruction parameters from instructions
     raw_instructions = (c.get("instructions") or "").strip()
     if raw_instructions:
@@ -172,6 +242,10 @@ for i, c in enumerate(items):
                             entry[key] = value
         except (json.JSONDecodeError, TypeError):
             pass
+
+    for key in ("node", "type"):
+        if key not in entry and derived_resource_type.get(key):
+            entry[key] = derived_resource_type[key]
     meta.append(entry)
 
 # ── User-visible output (brief summary only) ─────────────────────────────

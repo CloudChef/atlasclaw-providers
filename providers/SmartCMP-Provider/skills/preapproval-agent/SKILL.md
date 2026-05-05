@@ -33,7 +33,7 @@ tool_detail_parameters: |
   }
 
 tool_approve_name: "smartcmp_preapproval_approve"
-tool_approve_description: "Approve one or more pending SmartCMP approval activity IDs for the preapproval agent."
+tool_approve_description: "Approve one or more pending SmartCMP Request IDs for the preapproval agent. Use user-facing IDs such as RES20260505000010, TIC20260502000003, or CHG20260413000011; the shared approval script resolves them to currentActivity.id internally."
 tool_approve_entrypoint: "../approval/scripts/approve.py"
 tool_approve_groups:
   - cmp
@@ -51,7 +51,7 @@ tool_approve_parameters: |
     "properties": {
       "ids": {
         "type": "string",
-        "description": "Approval activity ID(s) to approve. For multiple IDs, separate with spaces."
+        "description": "SmartCMP Request ID(s) to approve. For multiple IDs, separate with spaces. Do not pass approval activity UUIDs."
       },
       "reason": {
         "type": "string",
@@ -62,7 +62,7 @@ tool_approve_parameters: |
   }
 
 tool_reject_name: "smartcmp_preapproval_reject"
-tool_reject_description: "Reject one or more pending SmartCMP approval activity IDs for the preapproval agent."
+tool_reject_description: "Reject one or more pending SmartCMP Request IDs for the preapproval agent. Use user-facing IDs such as RES20260505000010, TIC20260502000003, or CHG20260413000011; the shared rejection script resolves them to currentActivity.id internally."
 tool_reject_entrypoint: "../approval/scripts/reject.py"
 tool_reject_groups:
   - cmp
@@ -80,7 +80,7 @@ tool_reject_parameters: |
     "properties": {
       "ids": {
         "type": "string",
-        "description": "Approval activity ID(s) to reject. For multiple IDs, separate with spaces."
+        "description": "SmartCMP Request ID(s) to reject. For multiple IDs, separate with spaces. Do not pass approval activity UUIDs."
       },
       "reason": {
         "type": "string",
@@ -133,7 +133,7 @@ When triggered by a webhook:
 This skill activates when:
 - Webhook payload targets approval pre-review
 - `agent_identity` is `agent-approver`
-- Valid `approval_id` or `request_id` is provided
+- Valid `request_id` is provided
 
 ## Robot Admin Execution
 
@@ -152,14 +152,13 @@ Use this mode only for robot profiles whose `allowed_skills` include `smartcmp:p
 | `provider_instance` | string | Yes | CMP provider instance name (e.g., `cmp-prod`) |
 | `robot_profile` | string | For webhook robot mode | Robot profile configured on the selected provider instance |
 | `agent_identity` | string | Yes | Must be `agent-approver` |
-| `approval_id` | string | Yes* | Approval ID for execution |
-| `request_id` | string | No | Alternative ID if `approval_id` not available |
+| `request_id` | string | Yes | SmartCMP Request ID for execution, e.g. `RES20260505000010`, `TIC20260502000003`, or `CHG20260413000011` |
 | `trigger_source` | string | No | Source label (e.g., `cmp-webhook`) |
 | `policy_mode` | string | No | Policy preset (default: `balanced`) |
 
 **Validation Rules:**
-- If both `approval_id` and `request_id` are missing → **Stop immediately**
-- If only `request_id` and cannot resolve to `approval_id` → **Fail closed**
+- If `request_id` is missing → **Stop immediately**
+- If `request_id` cannot resolve to a pending approval activity → **Fail closed**
 - If `agent_identity` ≠ `agent-approver` → **Stop immediately**
 
 ## Orchestrated Skills
@@ -177,10 +176,10 @@ This agent does NOT access the platform directly. It orchestrates:
 ```
 1. Validate Inputs
    ├── Check provider_instance, agent_identity
-   └── Verify approval_id or request_id exists
+   └── Verify request_id exists
          ↓
 2. Fetch Approval Context
-   └── smartcmp_preapproval_get_request_detail → Verify request/approval id
+   └── smartcmp_preapproval_get_request_detail → Verify request_id
          ↓
 3. Build Review Summary
    ├── Service/request name
@@ -198,8 +197,8 @@ This agent does NOT access the platform directly. It orchestrates:
    └── manual_review_required
          ↓
 6. Execute Decision
-   ├── approve → smartcmp_preapproval_approve <id> --reason "<comment>"
-   ├── reject  → smartcmp_preapproval_reject <id> --reason "<comment>"
+   ├── approve → smartcmp_preapproval_approve <request_id> --reason "<comment>"
+   ├── reject  → smartcmp_preapproval_reject <request_id> --reason "<comment>"
    └── manual  → reject with clear reason
          ↓
 7. Return Structured Result

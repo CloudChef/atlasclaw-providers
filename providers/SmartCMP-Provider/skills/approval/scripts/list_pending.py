@@ -47,6 +47,9 @@ except ImportError:
     )
     from _common import require_config
 
+from _approval_validation import request_id_from_item
+
+
 def parse_days_from_argv(argv: list[str]) -> Optional[int]:
     """Parse optional --days argument from CLI argv."""
     for index, arg in enumerate(argv):
@@ -340,28 +343,19 @@ def get_approver_info(item: dict[str, Any]) -> str:
 
 
 def _request_id(item: dict[str, Any]) -> str:
-    """Return the SmartCMP user-facing request number (RES/TIC...), not an internal UUID."""
-    return str(item.get("workflowId") or item.get("requestNo") or item.get("requestNumber") or "").strip()
-
-
-def _internal_request_id(item: dict[str, Any]) -> str:
-    """Return the SmartCMP internal request UUID when present."""
-    return str(item.get("id") or "").strip()
+    """Return the SmartCMP user-facing request number, not an internal UUID."""
+    return request_id_from_item(item)
 
 
 def build_meta(items: list[dict[str, Any]], *, now_ms: int) -> list[dict[str, Any]]:
     """Build the structured approval meta payload."""
     meta: list[dict[str, Any]] = []
     for index, item in enumerate(items, start=1):
-        activity = item.get("currentActivity") or {}
         meta.append(
             {
                 "index": index,
-                "id": activity.get("id") or item.get("id") or "",
                 "requestId": _request_id(item),
-                "internalRequestId": _internal_request_id(item),
                 "name": item.get("name") or item.get("requestName") or "",
-                "workflowId": _request_id(item),
                 "catalogName": item.get("catalogName") or "",
                 "applicant": item.get("applicant") or "",
                 "email": item.get("email") or "",
@@ -376,8 +370,6 @@ def build_meta(items: list[dict[str, Any]], *, now_ms: int) -> list[dict[str, An
                 "currentApprover": get_approver_info(item),
                 "costEstimate": extract_cost_info(item),
                 "resourceSpecs": extract_resource_specs(item),
-                "processInstanceId": activity.get("processInstanceId") or "",
-                "taskId": activity.get("taskId") or "",
             }
         )
     return meta

@@ -246,6 +246,99 @@ def test_list_services_keeps_plain_defaults_when_runtime_only_flag_is_absent(mon
     ]
 
 
+def test_list_services_derives_resource_type_from_blueprint_when_instructions_are_empty(monkeypatch):
+    main_yaml = """
+tosca_definitions_version: cloudify_dsl_1_3
+node_templates:
+  Compute:
+    type: cloudchef.nodes.Compute
+    properties:
+      tags: []
+  Network:
+    type: cloudchef.nodes.Network
+""".strip()
+
+    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        assert url == "https://cmp.example.com/platform-api/catalogs/published"
+        return FakeResponse(
+            {
+                "content": [
+                    {
+                        "id": "catalog-linux",
+                        "name": "Linux VM",
+                        "sourceKey": "resource.iaas.machine.instance.abstract",
+                        "serviceCategory": "CLOUD_COMPONENT_SERVICE",
+                        "type": "APPLICATION",
+                        "instructions": "",
+                        "blueprint": {
+                            "id": "bp-1",
+                            "name": "Linux VM",
+                            "type": "OWNED_BY_CATALOG",
+                            "mainYaml": main_yaml,
+                        },
+                    }
+                ],
+                "totalElements": 1,
+            }
+        )
+
+    _, stderr = run_script(
+        monkeypatch,
+        "list_services.py",
+        [],
+        fake_get=fake_get,
+        scripts_dir=DATASOURCE_SCRIPTS_DIR,
+    )
+    payload = extract_meta(stderr, "CATALOG_META")
+    catalog = payload["catalogs"][0]
+
+    assert catalog["catalogType"] == "APPLICATION"
+    assert catalog["node"] == "Compute"
+    assert catalog["type"] == "cloudchef.nodes.Compute"
+
+
+def test_list_services_prefers_instruction_type_over_blueprint_resource_type(monkeypatch):
+    instructions = {"node": "Database", "type": "cloudchef.nodes.Database", "parameters": []}
+    main_yaml = """
+node_templates:
+  Compute:
+    type: cloudchef.nodes.Compute
+""".strip()
+
+    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        assert url == "https://cmp.example.com/platform-api/catalogs/published"
+        return FakeResponse(
+            {
+                "content": [
+                    {
+                        "id": "catalog-db",
+                        "name": "Database",
+                        "sourceKey": "resource.paas.database",
+                        "serviceCategory": "CLOUD_COMPONENT_SERVICE",
+                        "type": "APPLICATION",
+                        "instructions": json.dumps(instructions, ensure_ascii=False),
+                        "blueprint": {"mainYaml": main_yaml},
+                    }
+                ],
+                "totalElements": 1,
+            }
+        )
+
+    _, stderr = run_script(
+        monkeypatch,
+        "list_services.py",
+        [],
+        fake_get=fake_get,
+        scripts_dir=DATASOURCE_SCRIPTS_DIR,
+    )
+    payload = extract_meta(stderr, "CATALOG_META")
+    catalog = payload["catalogs"][0]
+
+    assert catalog["catalogType"] == "APPLICATION"
+    assert catalog["node"] == "Database"
+    assert catalog["type"] == "cloudchef.nodes.Database"
+
+
 def test_list_applications_emits_meta_and_selection_prompt(monkeypatch):
     def fake_get(url, headers=None, params=None, verify=None, timeout=None):
         assert url == "https://cmp.example.com/platform-api/groups"

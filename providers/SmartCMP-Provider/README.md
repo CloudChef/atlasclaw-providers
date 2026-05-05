@@ -146,10 +146,10 @@ approving requests, and rejecting requests.
 python skills/approval/scripts/list_pending.py
 
 # Approve request
-python skills/approval/scripts/approve.py <approval_id> --reason "Approved per policy"
+python skills/approval/scripts/approve.py <request_id> --reason "Approved per policy"
 
 # Reject request
-python skills/approval/scripts/reject.py <approval_id> --reason "Budget exceeded"
+python skills/approval/scripts/reject.py <request_id> --reason "Budget exceeded"
 ```
 
 ### alarm - Alarm Alert Management

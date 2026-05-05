@@ -6,7 +6,7 @@
 
 Usage:
   python status.py RES20260501000095
-  python status.py <internal-request-id>
+  python status.py REQ20260501000095
 
 Output:
   - Human-readable request status summary
@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from datetime import datetime
 from typing import Any
@@ -37,11 +38,20 @@ except ImportError:
 
 
 MATCH_FIELDS = (
+    "requestId",
     "workflowId",
     "requestNo",
     "requestNumber",
     "customizedId",
-    "id",
+)
+REQUEST_ID_FORMAT_HINT = (
+    "Use the SmartCMP user-facing Request ID, such as REQ20260501000095, "
+    "RES20260501000095, TIC20260316000001, or CHG20260413000011."
+)
+REQUEST_ID_PATTERN = re.compile(r"^[A-Z]{3}\d{14}$", re.IGNORECASE)
+UUID_PATTERN = re.compile(
+    r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
+    re.IGNORECASE,
 )
 
 APPROVAL_PENDING_STATES = {"APPROVAL_PENDING"}
@@ -59,7 +69,10 @@ INITIAL_OR_FAILED_STATES = {
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Query SmartCMP request status.")
-    parser.add_argument("request_id", help="SmartCMP Request ID, e.g. RES20260501000095 or TIC20260316000001.")
+    parser.add_argument(
+        "request_id",
+        help="SmartCMP user-facing Request ID, e.g. REQ20260501000095, RES20260501000095, TIC20260316000001, or CHG20260413000011.",
+    )
     return parser.parse_args(argv)
 
 
@@ -69,6 +82,14 @@ def normalize_text(value: Any) -> str:
 
 def canonical_state(value: Any) -> str:
     return normalize_text(value).upper().replace("-", "_")
+
+
+def is_request_id(value: Any) -> bool:
+    return bool(REQUEST_ID_PATTERN.fullmatch(normalize_text(value)))
+
+
+def safe_error_message(value: Any) -> str:
+    return UUID_PATTERN.sub("[uuid]", normalize_text(value))
 
 
 def extract_items(payload: Any) -> list[dict[str, Any]]:
@@ -113,9 +134,9 @@ def matches_request_id(item: dict[str, Any], request_id: str) -> bool:
 
 
 def display_request_id(item: dict[str, Any], fallback: str) -> str:
-    for field in ("workflowId", "requestNo", "requestNumber", "customizedId"):
+    for field in MATCH_FIELDS:
         candidate = normalize_text(item.get(field))
-        if candidate:
+        if is_request_id(candidate):
             return candidate
     return normalize_text(fallback)
 
@@ -205,15 +226,15 @@ def fetch_json(url: str, headers: dict[str, str], *, params: dict[str, Any] | No
     try:
         response = requests.get(url, headers=headers, params=params, verify=False, timeout=30)
     except requests.exceptions.RequestException as exc:
-        return None, str(exc)
+        return None, type(exc).__name__
     if response.status_code != 200:
-        return None, f"HTTP {response.status_code}: {(response.text or '').strip()}"
+        return None, f"HTTP {response.status_code}: {safe_error_message(response.text)}"
     try:
         payload = response.json()
     except (ValueError, TypeError):
-        return None, f"Invalid JSON response: {response.text}"
+        return None, "Invalid JSON response."
     if not isinstance(payload, (dict, list)):
-        return None, f"Unexpected response payload: {payload}"
+        return None, "Unexpected response payload."
     return payload, ""
 
 
@@ -244,21 +265,17 @@ def resolve_request(base_url: str, headers: dict[str, str], request_id: str) -> 
     search_items, search_error = search_requests(base_url, headers, request_id)
     matched = next((item for item in search_items if matches_request_id(item, request_id)), None)
     if matched is not None:
-        detail_id = internal_request_id(matched, request_id)
+        detail_id = internal_request_id(matched)
+        if not detail_id:
+            return None, f"Matched Request ID {request_id}, but SmartCMP did not return a detail lookup ID."
         detail, detail_error = fetch_request_detail(base_url, headers, detail_id)
         if detail is not None:
             return detail, ""
-        return None, f"Matched Request ID {request_id}, but detail lookup failed for {detail_id}: {detail_error}"
-
-    detail, detail_error = fetch_request_detail(base_url, headers, request_id)
-    if detail is not None:
-        return detail, ""
+        return None, f"Matched Request ID {request_id}, but detail lookup failed: {detail_error}"
 
     errors = []
     if search_error:
         errors.append(f"search failed: {search_error}")
-    if detail_error:
-        errors.append(f"direct detail failed: {detail_error}")
     suffix = f" ({'; '.join(errors)})" if errors else ""
     return None, f"No SmartCMP request matched Request ID: {request_id}{suffix}"
 
@@ -270,7 +287,6 @@ def build_status_meta(item: dict[str, Any], requested_id: str) -> dict[str, Any]
     updated_date = item.get("updatedDate") or item.get("completedDate") or item.get("actualEndDate")
     return {
         "requestId": display_request_id(item, requested_id),
-        "internalRequestId": internal_request_id(item),
         "name": normalize_text(item.get("name") or item.get("requestName")),
         "catalogName": normalize_text(item.get("catalogName") or item.get("currentCatalogName") or item.get("currentCatalogNameZh")),
         "state": state,
@@ -290,13 +306,10 @@ def build_status_meta(item: dict[str, Any], requested_id: str) -> dict[str, Any]
 def render_status(meta: dict[str, Any]) -> str:
     lines = [
         "===============================================================",
-        f"  CMP Request Status: {meta.get('requestId') or meta.get('internalRequestId') or 'N/A'}",
+        f"  CMP Request Status: {meta.get('requestId') or 'N/A'}",
         "===============================================================",
         f"Request ID: {meta.get('requestId') or 'N/A'}",
     ]
-    internal_id = normalize_text(meta.get("internalRequestId"))
-    if internal_id and internal_id != normalize_text(meta.get("requestId")):
-        lines.append(f"Internal ID: {internal_id}")
     if meta.get("name"):
         lines.append(f"Name: {meta['name']}")
     if meta.get("catalogName"):
@@ -326,6 +339,10 @@ def main(argv: list[str] | None = None) -> int:
     request_id = normalize_text(args.request_id)
     if not request_id:
         print("[ERROR] Missing required request_id argument.")
+        return 1
+    if not is_request_id(request_id):
+        print("[ERROR] Invalid SmartCMP Request ID.")
+        print(REQUEST_ID_FORMAT_HINT)
         return 1
 
     base_url, _auth_token, headers, _instance = require_config()
