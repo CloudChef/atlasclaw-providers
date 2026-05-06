@@ -8,7 +8,7 @@ SmartCMP Provider is a service provider module for AtlasClaw, integrating with S
 - **Approval Management** - View pending approval tasks, approve requests, or reject requests
 - **Alarm Management** - List alerts, analyze one alert, and run explicit alert status operations
 - **Directory Queries** - List business-group scopes such as tenant/租户/部门/BU/项目, resource pools, resources, or cloud hosts from the same UI directory endpoints used by CMP
-- **Resource Power Operations** - Start or stop existing cloud resources and virtual machines through the SmartCMP day2 endpoint
+- **Resource Operations** - List current-user executable operations and run enabled no-parameter day2 operations on existing cloud resources
 - **Data Queries** - Query service catalogs, applications, templates, images, and other reference data
 - **Intelligent Agents** - Automated pre-approval and request decomposition capabilities
 - **Cost Optimization** - Review optimization recommendations, analyze savings, execute SmartCMP-native fixes, and track remediation progress
@@ -227,7 +227,7 @@ python skills/resource-pool/scripts/list_all_resource_pools.py production
 
 ### resource - Resource Browsing & Operations
 
-Browse, inspect, and operate on SmartCMP resources or cloud hosts.
+Browse, inspect, list current-user executable operations, and operate on SmartCMP resources or cloud hosts.
 
 **Use Cases:**
 - 查看我的云资源
@@ -236,6 +236,8 @@ Browse, inspect, and operate on SmartCMP resources or cloud hosts.
 - 查看所有云主机
 - 查看某个云主机详情
 - 分析某个云主机属性
+- 查看云主机可执行操作
+- 执行云主机操作
 - 把某个云资源关机
 - 把某个云主机开机
 - Query resources or virtual machines by keyword without entering the request workflow
@@ -254,17 +256,21 @@ python skills/resource/scripts/list_all_resource.py --scope virtual_machines --q
 # Refresh and analyze one cloud host
 python skills/resource/scripts/resource_detail.py <resource_id>
 
-# Stop one resource
-python skills/resource/scripts/operate_resource.py res-1 --action stop
+# List current-user executable no-parameter operations
+python skills/resource/scripts/list_resource_operations.py 'https://cmp/#/main/virtual-machines/res-1/details'
 
-# Start multiple resources
-python skills/resource/scripts/operate_resource.py res-1 res-2 --action start
+# Execute one no-parameter operation
+python skills/resource/scripts/operate_resource.py res-1 --action create_snapshot
 ```
 
 The resource list output includes each item's current status so users can tell
 whether a start or stop action is needed.
 
-Power operation output is intentionally concise. Successful start/stop results
+The operation list comes from `GET /nodes/{category}/{id}/resource-actions`
+with the current user's SmartCMP credentials. It does not use resource-type
+definition endpoints as executable-operation fallback.
+
+Resource operation output is intentionally concise. Successful operation results
 show only the action, resource ID(s), submitted flag, message, and verification
 hint. Raw request payloads and raw SmartCMP response details are not printed.
 
@@ -484,7 +490,7 @@ scripts are located in `datasource/scripts/`:
 5. **Error Handling** - On `[ERROR]` output, report to user immediately; do NOT self-debug
 6. **Resource Compliance** - `resource-compliance` reuses the shared normalized resource view from `list_resource.py`, then attempts live external validation for lifecycle and support checks
 7. **Localized Responses** - Scripts should return stable fields and metadata. Agents are responsible for explaining results in the current user's message language.
-8. **No Raw Day2 Dumps** - Resource power operations should not print raw request payloads or raw SmartCMP response details after a successful submission.
+8. **No Raw Day2 Dumps** - Resource operations should not print raw request payloads or raw SmartCMP response details after a successful submission.
 
 ## Related Documentation
 

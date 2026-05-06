@@ -296,7 +296,7 @@ CMP_URL=https://cmp.example.com
 | Skill | Type | Description | Key Operations |
 |-------|------|-------------|----------------|
 | `resource-pool` | Directory Query | Standalone listing of all resource pools from the CMP UI directory endpoint | `smartcmp_list_all_resource_pools` |
-| `resource` | Directory Query + Day2 Operation | Standalone listing of all resources or all cloud hosts, one-host detail analysis via `PATCH /nodes/{id}/view`, and start/stop power operations | `smartcmp_list_all_resource`, `smartcmp_resource_detail`, `smartcmp_operate_resource` |
+| `resource` | Directory Query + Day2 Operation | Standalone listing of all resources or all cloud hosts, one-host detail analysis via `PATCH /nodes/{id}/view`, current-user executable operation discovery, and no-parameter resource operation execution | `smartcmp_list_all_resource`, `smartcmp_resource_detail`, `smartcmp_list_resource_operations`, `smartcmp_operate_resource` |
 | `datasource` | Data Query | Read-only reference data queries, standalone business-group scope discovery, request reference lookups, and resource lookup by ID for service discovery and analysis workflows | `smartcmp_list_all_business_groups`, `smartcmp_list_applications`, `smartcmp_list_components`, `smartcmp_list_images`, `list_services`, `list_resource` |
 | `request` | Provisioning | Cloud resource provisioning requests that use datasource lookups for reference data before submission | `submit`, `status` |
 | `approval` | Workflow | Approval workflow management | `list_pending`, `approve`, `reject` |
@@ -326,23 +326,25 @@ python skills/resource-pool/scripts/list_all_resource_pools.py <keyword>    # Fi
 
 List all resources or all cloud hosts directly from the CMP UI list endpoint,
 inspect one cloud host by resource ID with the `/nodes/{id}/view` evidence view, and
-perform start/stop power operations on existing resources.
+list or execute current-user no-parameter operations on existing resources.
 Use this when the user says "查看我的云资源", "查看所有资源", "查看我的云主机",
 "查看所有云主机", "查看某个云主机详情", "分析某个云主机属性",
-"云资源开机", "云资源关机", "启动云主机", or "停止云主机".
+"查看可执行操作", "执行资源操作", "云资源开机", "云资源关机", "启动云主机", or "停止云主机".
 
 ```bash
 python skills/resource/scripts/list_all_resource.py                                     # List all resources
 python skills/resource/scripts/list_all_resource.py --scope virtual_machines            # List all cloud hosts
 python skills/resource/scripts/list_all_resource.py --scope virtual_machines --query-value production
 python skills/resource/scripts/resource_detail.py <resource_id>              # Fetch and analyze one cloud host evidence view
+python skills/resource/scripts/list_resource_operations.py 'https://cmp/#/main/virtual-machines/<resource_id>/details'
 python skills/resource/scripts/operate_resource.py <resource_id> --action stop
-python skills/resource/scripts/operate_resource.py <resource_id> --action start
-python skills/resource/scripts/operate_resource.py <id1> <id2> --action stop
+python skills/resource/scripts/operate_resource.py <resource_id> --action create_snapshot
+python skills/resource/scripts/operate_resource.py <id1> <id2> --action refresh
 ```
 
-The list output includes each resource's current status so power actions can
-reuse the same browse step.
+The operation list comes from `GET /nodes/{category}/{id}/resource-actions`
+with the current user's SmartCMP credentials. It does not use resource-type
+definition endpoints as executable-operation fallback.
 
 #### datasource
 

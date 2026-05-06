@@ -2,16 +2,37 @@
 # -*- coding: utf-8 -*-
 # Copyright 2026  Qianyun, Inc., www.cloudchef.io, All rights reserved.
 
-"""Start or stop SmartCMP cloud resources through the native power endpoint."""
+"""Execute user-scoped no-parameter SmartCMP resource operations."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import sys
+from typing import Any
 
 import requests
 from requests import RequestException
+
+try:
+    from list_resource_operations import (
+        DEFAULT_RESOURCE_CATEGORY,
+        fetch_resource_operations,
+        normalize_operation_id,
+        operation_rejection_reason,
+        parse_resource_reference,
+    )
+except ImportError:
+    import os
+
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from list_resource_operations import (
+        DEFAULT_RESOURCE_CATEGORY,
+        fetch_resource_operations,
+        normalize_operation_id,
+        operation_rejection_reason,
+        parse_resource_reference,
+    )
 
 try:
     from _common import require_config
@@ -45,34 +66,65 @@ ACTION_ALIASES = {
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments for executing a SmartCMP resource operation."""
     parser = argparse.ArgumentParser(
-        description="Start or stop SmartCMP cloud resources by resource ID."
+        description="Execute SmartCMP no-parameter resource operations by resource ID."
     )
-    parser.add_argument("resource_ids", nargs="+", help="One or more SmartCMP resource IDs.")
-    parser.add_argument("--action", required=True, help="Power action: start or stop.")
+    parser.add_argument("resource_ids", nargs="+", help="One or more SmartCMP resource IDs or detail URLs.")
+    parser.add_argument(
+        "--category",
+        default=DEFAULT_RESOURCE_CATEGORY,
+        help="Fallback resource category when a target is a raw ID. Default: virtual-machines.",
+    )
+    parser.add_argument(
+        "--action",
+        required=True,
+        help="SmartCMP operation ID to execute. start/stop aliases are still supported.",
+    )
     return parser.parse_args(argv)
 
 
 def normalize_action(action: str) -> str:
-    normalized = (action or "").strip().lower().replace("-", "_").replace(" ", "_")
+    """Resolve legacy power aliases and arbitrary operation IDs to SmartCMP IDs."""
+    normalized = normalize_operation_id(action)
     mapped = ACTION_ALIASES.get(normalized)
     if mapped:
         return mapped
+    if normalized:
+        return normalized
 
-    valid_actions = ", ".join(sorted({"start", "stop"}))
-    raise ValueError(f"Unsupported action '{action}'. Expected one of: {valid_actions}.")
+    raise ValueError("action is required.")
 
 
-def normalize_resource_ids(values: list[str]) -> list[str]:
-    resource_ids: list[str] = []
+def normalize_resource_targets(
+    values: list[str],
+    default_category: str = DEFAULT_RESOURCE_CATEGORY,
+) -> list[dict[str, str]]:
+    """Parse resource IDs or detail URLs into category/resource ID targets."""
+    targets: list[dict[str, str]] = []
     for value in values:
         for candidate in str(value).split(","):
             normalized = candidate.strip()
-            if normalized and normalized not in resource_ids:
-                resource_ids.append(normalized)
+            if not normalized:
+                continue
+            category, resource_id = parse_resource_reference(normalized, default_category)
+            target = {"category": category, "resourceId": resource_id}
+            if target not in targets:
+                targets.append(target)
 
-    if not resource_ids:
+    if not targets:
         raise ValueError("At least one resource ID is required.")
+    return targets
+
+
+def normalize_resource_ids(values: list[str]) -> list[str]:
+    """Return de-duplicated resource IDs from raw IDs or SmartCMP detail URLs."""
+    targets = normalize_resource_targets(values)
+    resource_ids: list[str] = []
+    for target in targets:
+        resource_id = target["resourceId"]
+        if resource_id not in resource_ids:
+            resource_ids.append(resource_id)
     return resource_ids
 
 
@@ -95,6 +147,47 @@ def build_request_payload(resource_ids: list[str], action: str) -> dict[str, obj
             "scheduledTime": None,
         },
     }
+
+
+def find_operation(operations: list[dict[str, Any]], action: str) -> dict[str, Any] | None:
+    """Find a SmartCMP operation by normalized operation ID."""
+    normalized_action = normalize_action(action)
+    for operation in operations:
+        if normalize_operation_id(str(operation.get("id") or "")) == normalized_action:
+            return operation
+    return None
+
+
+def validate_operation_for_targets(
+    *,
+    base_url: str,
+    headers: dict[str, str],
+    targets: list[dict[str, str]],
+    action: str,
+) -> None:
+    """Verify the current user can execute the no-parameter action on every target.
+
+    Raises:
+        ValueError: If SmartCMP does not expose the action for this user/resource or
+            the operation requires web/form/parameter handling outside this tool's scope.
+    """
+    normalized_action = normalize_action(action)
+    for target in targets:
+        category = target["category"]
+        resource_id = target["resourceId"]
+        operations = fetch_resource_operations(base_url, headers, category, resource_id)
+        operation = find_operation(operations, normalized_action)
+        if operation is None:
+            raise ValueError(
+                f"Operation '{normalized_action}' is not available for resource {resource_id} "
+                f"under category {category}."
+            )
+
+        reason = operation_rejection_reason(operation)
+        if reason:
+            raise ValueError(
+                f"Operation '{normalized_action}' is not executable for resource {resource_id}: {reason}"
+            )
 
 
 def build_operation_result(
@@ -167,13 +260,24 @@ def main(argv: list[str] | None = None) -> int:
     try:
         args = parse_args(argv)
         action = normalize_action(args.action)
-        resource_ids = normalize_resource_ids(args.resource_ids)
+        targets = normalize_resource_targets(args.resource_ids, args.category)
+        resource_ids = [target["resourceId"] for target in targets]
         request_payload = build_request_payload(resource_ids, action)
     except ValueError as exc:
         print(f"[ERROR] {exc}")
         return 1
 
     base_url, _auth_token, headers, _instance = require_config()
+    try:
+        validate_operation_for_targets(
+            base_url=base_url,
+            headers=headers,
+            targets=targets,
+            action=action,
+        )
+    except (RuntimeError, ValueError) as exc:
+        print(f"[ERROR] {exc}")
+        return 1
 
     try:
         response = requests.post(
