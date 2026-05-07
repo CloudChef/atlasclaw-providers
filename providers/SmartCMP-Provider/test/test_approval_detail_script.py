@@ -118,6 +118,53 @@ def test_detail_uses_chinese_number_label_and_extensible_resource_specs(monkeypa
         assert internal_field not in meta
 
 
+def test_detail_reads_current_approver_from_approval_requests(monkeypatch) -> None:
+    module = _load_module(monkeypatch)
+    monkeypatch.setattr(module.time, "time", lambda: 1_778_135_300)
+    monkeypatch.setattr(sys, "argv", ["get_request_detail.py", "RES20260507000015"])
+
+    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        assert url.endswith("/generic-request/current-activity-approval")
+        return _FakeResponse(
+            {
+                "content": [
+                    {
+                        "workflowId": "RES20260507000015",
+                        "name": "test_vm_2019",
+                        "catalogName": "Windows VM 2019",
+                        "applicant": "平台管理员",
+                        "createdDate": 1_778_135_283_182,
+                        "updatedDate": 1_778_135_294_244,
+                        "currentActivity": {
+                            "processStep": {"name": "一级审批"},
+                            "approvalRequests": [
+                                {"approver": {"name": "user1", "loginId": "user1"}},
+                                {"approver": {"name": "平台管理员", "loginId": "admin"}},
+                            ],
+                        },
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(module.requests, "get", fake_get)
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    with redirect_stdout(stdout), redirect_stderr(stderr):
+        module.main()
+
+    rendered = stdout.getvalue()
+    assert "当前审批人: user1, 平台管理员" in rendered
+
+    payload = stderr.getvalue().split("##APPROVAL_DETAIL_META_START##\n", 1)[1].split(
+        "\n##APPROVAL_DETAIL_META_END##",
+        1,
+    )[0]
+    meta = json.loads(payload)
+    assert meta["currentApprover"] == "user1, 平台管理员"
+
+
 def test_detail_rejects_internal_uuid_before_http(monkeypatch) -> None:
     module = _load_module(monkeypatch)
     internal_id = "15919c7d-67c4-45a6-8603-91c6f6b9e644"

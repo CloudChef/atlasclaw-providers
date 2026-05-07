@@ -125,6 +125,31 @@ def test_build_meta_accepts_request_id_alias_fields() -> None:
     ]
 
 
+def test_build_meta_reads_current_approver_from_approval_requests() -> None:
+    module = _load_module()
+    item = {
+        "workflowId": "RES20260507000015",
+        "name": "test_vm_2019",
+        "createdDate": 1_778_135_283_182,
+        "updatedDate": 1_778_135_294_244,
+        "currentActivity": {
+            "processStep": {"name": "一级审批"},
+            "approvalRequests": [
+                {"approver": {"name": "user1", "loginId": "user1"}},
+                {"approver": {"name": "平台管理员", "loginId": "admin"}},
+            ],
+        },
+    }
+    item["_priority"] = module.calculate_priority(item, now_ms=1_778_135_300_000)
+
+    meta = module.build_meta([item], now_ms=1_778_135_300_000)
+    rendered = module.render_pending_table([item], total=1, now_ms=1_778_135_300_000)
+
+    assert meta[0]["currentApprover"] == "user1, 平台管理员"
+    assert "user1, 平台管理员" in rendered
+    assert "待分配" not in rendered
+
+
 def test_main_renders_newest_first_table_and_hides_internal_meta(monkeypatch) -> None:
     module = _load_module()
     monkeypatch.setattr(

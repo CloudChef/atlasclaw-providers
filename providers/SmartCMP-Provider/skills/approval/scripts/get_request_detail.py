@@ -192,8 +192,17 @@ def _get_approval_step_name(item: dict[str, Any]) -> str:
 
 def _get_approver_info(item: dict[str, Any]) -> str:
     activity = item.get("currentActivity") or {}
-    assignments = activity.get("assignments") or []
     approvers: list[str] = []
+    approval_requests = activity.get("approvalRequests") or []
+    for approval_request in approval_requests[:3]:
+        approver = approval_request.get("approver") or {}
+        name = approver.get("name") or approver.get("loginId") or ""
+        if name:
+            approvers.append(str(name))
+    if approvers:
+        return ", ".join(approvers)
+
+    assignments = activity.get("assignments") or []
     for assignment in assignments[:3]:
         approver = assignment.get("approver") or {}
         name = approver.get("name") or approver.get("loginId") or ""
