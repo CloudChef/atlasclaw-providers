@@ -61,6 +61,22 @@ def test_datasource_skill_mentions_resource_lookup():
     assert "list_resource.py" in workflow_text
 
 
+def test_resource_compliance_prefers_name_and_index_contract():
+    skill_text = SKILL_ROOT.joinpath("SKILL.md").read_text(encoding="utf-8")
+    workflow_text = SKILL_ROOT.joinpath("references", "WORKFLOW.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "tool_analyze_parameters:" in skill_text
+    assert '"resource_name"' in skill_text
+    assert '"resource_index"' in skill_text
+    assert '"resource_directory_json"' in skill_text
+    assert "Prefer resource_name or resource_index" in skill_text
+    assert "Never ask users for SmartCMP UUIDs" in skill_text
+    assert "python scripts/analyze_resource.py <resource_id>" not in skill_text
+    assert "python scripts/analyze_resource.py <resource_id>" not in workflow_text
+
+
 def test_resource_compliance_scripts_import_cleanly():
     helper_module = load_module(
         "test_resource_compliance_analysis_module",

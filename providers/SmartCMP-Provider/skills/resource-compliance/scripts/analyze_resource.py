@@ -49,13 +49,22 @@ list_resource_module = _load_module_from_path(
 )
 load_resource_records = list_resource_module.load_resource_records
 request_json = list_resource_module.request_json
+search_resource_summaries = list_resource_module.search_resource_summaries
+
+
+class ResourceResolutionError(ValueError):
+    """User-facing target resolution error that must not expose SmartCMP IDs."""
 
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Analyze one or more SmartCMP resources for compliance risk."
     )
-    parser.add_argument("resource_ids", nargs="*")
+    parser.add_argument("positional_resource_ids", nargs="*")
+    parser.add_argument("--resource-ids", nargs="*", default=[])
+    parser.add_argument("--resource-name", action="append", default=[])
+    parser.add_argument("--resource-index")
+    parser.add_argument("--resource-directory-json")
     parser.add_argument("--trigger-source", default="user")
     parser.add_argument("--payload-json")
     return parser.parse_args(argv)
@@ -64,23 +73,380 @@ def parse_args(argv=None):
 def normalize_request(args):
     if args.payload_json:
         payload = json.loads(args.payload_json)
-        resource_ids = payload.get("resourceIds") or payload.get("resource_ids") or []
+        resource_ids = _split_resource_id_values(
+            payload.get("resourceIds") or payload.get("resource_ids") or []
+        )
+        resource_names = _normalize_resource_names(
+            payload.get("resourceName")
+            or payload.get("resource_name")
+            or payload.get("resourceNames")
+            or payload.get("resource_names")
+            or []
+        )
+        resource_index = _parse_resource_index(
+            _first_present(payload.get("resourceIndex"), payload.get("resource_index"))
+        )
+        resource_directory_json = (
+            payload.get("resourceDirectory")
+            or payload.get("resource_directory")
+            or payload.get("resourceDirectoryJson")
+            or payload.get("resource_directory_json")
+            or ""
+        )
         trigger_source = payload.get("triggerSource") or payload.get("trigger_source") or args.trigger_source
         raw_metadata = payload.get("rawMetadata") or payload
     else:
-        resource_ids = args.resource_ids
+        resource_ids = _split_resource_id_values(args.resource_ids)
+        resource_ids.extend(_split_resource_id_values(args.positional_resource_ids))
+        resource_names = _normalize_resource_names(args.resource_name)
+        resource_index = _parse_resource_index(args.resource_index)
+        resource_directory_json = args.resource_directory_json
         trigger_source = args.trigger_source
         raw_metadata = {}
 
-    resource_ids = [str(item) for item in resource_ids if str(item).strip()]
-    if not resource_ids:
-        raise ValueError("At least one resource ID is required.")
+    directory_items = parse_resource_directory(resource_directory_json)
+    resource_ids, requested_resources, resolved_resources = resolve_resource_targets(
+        resource_ids=resource_ids,
+        resource_names=resource_names,
+        resource_index=resource_index,
+        directory_items=directory_items,
+        trigger_source=trigger_source,
+    )
 
     return {
         "resourceIds": resource_ids,
+        "requestedResources": requested_resources,
+        "resolvedResources": resolved_resources,
         "triggerSource": trigger_source,
         "rawMetadata": raw_metadata,
     }
+
+
+def _split_resource_id_values(values):
+    """Return de-duplicated internal resource IDs from compatibility inputs."""
+    if values in (None, ""):
+        return []
+    if isinstance(values, str):
+        raw_values = [values]
+    elif isinstance(values, (list, tuple, set)):
+        raw_values = list(values)
+    else:
+        raw_values = [values]
+
+    resource_ids = []
+    for value in raw_values:
+        for candidate in str(value).replace(",", " ").split():
+            normalized = candidate.strip()
+            if normalized and normalized not in resource_ids:
+                resource_ids.append(normalized)
+    return resource_ids
+
+
+def _first_present(*values):
+    """Return the first value that is not absent, preserving falsey user input."""
+    for value in values:
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _normalize_resource_names(values):
+    """Return explicit resource names without splitting names that contain spaces."""
+    if values in (None, ""):
+        return []
+    if isinstance(values, str):
+        raw_values = [values]
+    elif isinstance(values, (list, tuple, set)):
+        raw_values = list(values)
+    else:
+        raw_values = [values]
+    names = []
+    for value in raw_values:
+        normalized = str(value).strip()
+        if normalized and normalized not in names:
+            names.append(normalized)
+    return names
+
+
+def _parse_resource_index(value):
+    """Parse a user-visible list index when one was provided."""
+    if value in (None, ""):
+        return None
+    try:
+        index = int(str(value).strip())
+    except (TypeError, ValueError) as exc:
+        raise ResourceResolutionError("Resource index must be a positive integer.") from exc
+    if index <= 0:
+        raise ResourceResolutionError("Resource index must be a positive integer.")
+    return index
+
+
+def parse_resource_directory(resource_directory_json):
+    """Extract resource list metadata from a raw list or workflow-context JSON value."""
+    if resource_directory_json in (None, ""):
+        return []
+    payload = resource_directory_json
+    if isinstance(resource_directory_json, str):
+        try:
+            payload = json.loads(resource_directory_json)
+        except json.JSONDecodeError as exc:
+            raise ResourceResolutionError("Resource list metadata is not valid JSON.") from exc
+    candidates = _extract_directory_items(payload)
+    return [
+        item for item in candidates
+        if isinstance(item, dict) and str(item.get("id") or "").strip()
+    ]
+
+
+def _extract_directory_items(payload):
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, dict):
+        return []
+
+    for key in ("resources", "items", "metadata", "data"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return value
+
+    recent_metadata = payload.get("recent_tool_metadata")
+    if isinstance(recent_metadata, list):
+        for entry in reversed(recent_metadata):
+            if not isinstance(entry, dict):
+                continue
+            tool_name = str(entry.get("tool_name") or "").strip()
+            metadata = entry.get("metadata")
+            if tool_name == "smartcmp_list_all_resource" and isinstance(metadata, list):
+                return metadata
+        for entry in reversed(recent_metadata):
+            if isinstance(entry, dict) and isinstance(entry.get("metadata"), list):
+                return entry["metadata"]
+
+    return []
+
+
+def resolve_resource_targets(
+    *,
+    resource_ids,
+    resource_names,
+    resource_index,
+    directory_items,
+    trigger_source,
+):
+    """Resolve names or visible list indexes into internal SmartCMP resource IDs."""
+    if resource_ids:
+        return (
+            resource_ids,
+            [
+                {"name": "", "index": None, "source": _request_source(trigger_source)}
+                for _resource_id in resource_ids
+            ],
+            [
+                {"name": "", "index": None, "status": "", "scope": "", "resourceId": resource_id}
+                for resource_id in resource_ids
+            ],
+        )
+
+    if directory_items and (resource_names or resource_index is not None):
+        return resolve_from_directory(
+            resource_names=resource_names,
+            resource_index=resource_index,
+            directory_items=directory_items,
+        )
+
+    if resource_index is not None:
+        raise ResourceResolutionError(
+            f"No recent resource list metadata is available for index {resource_index}. "
+            "List resources first or provide the exact resource name."
+        )
+
+    if resource_names:
+        return resolve_from_name_search(resource_names)
+
+    raise ResourceResolutionError(
+        "Provide an exact resource name or select a resource from the latest numbered list."
+    )
+
+
+def _request_source(trigger_source):
+    if str(trigger_source or "").strip().lower() == "webhook":
+        return "webhook"
+    return "resource_id"
+
+
+def resolve_from_directory(*, resource_names, resource_index, directory_items):
+    """Resolve a target from hidden metadata emitted by the resource list tool."""
+    selected_items = []
+    if resource_index is not None:
+        selected = next(
+            (
+                item for item in directory_items
+                if _safe_int(item.get("index")) == resource_index
+            ),
+            None,
+        )
+        if selected is None:
+            raise ResourceResolutionError(
+                f"No listed resource matched index {resource_index}. "
+                f"Available resources: {format_resource_choices(directory_items)}"
+            )
+        selected_items = [selected]
+
+    if resource_names:
+        name_matches = [
+            item for item in directory_items
+            if display_name(item) in resource_names
+        ]
+        for name in resource_names:
+            exact_matches = [
+                item for item in directory_items
+                if display_name(item) == name
+            ]
+            if not exact_matches:
+                raise ResourceResolutionError(
+                    f"No listed resource exactly matched name '{name}'. "
+                    f"Available resources: {format_resource_choices(directory_items)}"
+                )
+            if len(exact_matches) > 1 and resource_index is None:
+                raise ResourceResolutionError(
+                    f"Multiple listed resources exactly matched name '{name}'. "
+                    f"Choose one by list index: {format_resource_choices(exact_matches)}"
+                )
+
+        if selected_items:
+            selected_name = display_name(selected_items[0])
+            if selected_name not in resource_names:
+                raise ResourceResolutionError(
+                    f"Selected resource does not match the provided name. "
+                    f"Index {resource_index} is '{selected_name}', "
+                    f"but the requested name was '{resource_names[0]}'."
+                )
+        else:
+            selected_items = name_matches
+
+    return build_resolved_request(
+        selected_items,
+        source="resource_directory",
+        include_request_index=resource_index is not None,
+    )
+
+
+def resolve_from_name_search(resource_names):
+    """Resolve exact resource names through SmartCMP search when no list metadata exists."""
+    resolved_items = []
+    for name in resource_names:
+        base_url, _, headers, _ = require_config()
+        summaries = search_resource_summaries(
+            base_url=base_url,
+            headers=headers,
+            request_fn=request_json,
+            params={"page": 1, "size": 20, "queryValue": name},
+            payload={},
+        )
+        exact_matches = [
+            item for item in summaries
+            if display_name(item) == name and str(item.get("id") or "").strip()
+        ]
+        if not exact_matches:
+            choices = format_resource_choices(summaries)
+            if choices:
+                raise ResourceResolutionError(
+                    f"No SmartCMP resource exactly matched name '{name}'. "
+                    f"Closest visible matches: {choices}"
+                )
+            raise ResourceResolutionError(
+                f"No SmartCMP resource exactly matched name '{name}'."
+            )
+        if len(exact_matches) > 1:
+            raise ResourceResolutionError(
+                f"Multiple SmartCMP resources exactly matched name '{name}'. "
+                f"Choose one by list index: {format_resource_choices(exact_matches)}"
+            )
+        resolved_items.append(exact_matches[0])
+
+    return build_resolved_request(
+        resolved_items,
+        source="resource_search",
+        include_request_index=False,
+    )
+
+
+def build_resolved_request(items, *, source, include_request_index):
+    """Build the internal IDs plus name-first request metadata."""
+    resource_ids = []
+    requested_resources = []
+    resolved_resources = []
+
+    for item in items:
+        resource_id = str(item.get("id") or "").strip()
+        if not resource_id or resource_id in resource_ids:
+            continue
+        resource_ids.append(resource_id)
+        index = _safe_int(item.get("index"))
+        name = display_name(item)
+        requested_resources.append(
+            {
+                "name": name,
+                "index": index if include_request_index else None,
+                "source": source,
+            }
+        )
+        resolved_resources.append(
+            {
+                "name": name,
+                "index": index,
+                "status": display_status(item),
+                "scope": str(item.get("scope") or "").strip(),
+                "resourceId": resource_id,
+            }
+        )
+
+    if not resource_ids:
+        raise ResourceResolutionError("No resolvable resource was selected.")
+    return resource_ids, requested_resources, resolved_resources
+
+
+def _safe_int(value):
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def display_name(item):
+    """Return the user-visible name for a resource directory entry."""
+    return str(
+        item.get("name")
+        or item.get("nameZh")
+        or item.get("displayName")
+        or item.get("label")
+        or item.get("instanceName")
+        or "unknown resource"
+    ).strip()
+
+
+def display_status(item):
+    """Return the user-visible status for a resource directory entry."""
+    return str(
+        item.get("status")
+        or item.get("powerState")
+        or item.get("state")
+        or item.get("phase")
+        or "unknown"
+    ).strip()
+
+
+def format_resource_choices(items):
+    """Render name/status choices for clarification without exposing resource IDs."""
+    choices = []
+    for fallback_index, item in enumerate(items, start=1):
+        if not isinstance(item, dict):
+            continue
+        index = _safe_int(item.get("index")) or fallback_index
+        choices.append(f"[{index}] {display_name(item)} | status: {display_status(item)}")
+    return "; ".join(choices)
 
 
 def load_resources(resource_ids):
@@ -299,8 +665,9 @@ def render_output(payload):
     lines.append("")
 
     for index, item in enumerate(payload["results"], start=1):
+        resource_label = item.get("resourceName") or "unknown resource"
         lines.append(
-            f"[{index}] {item.get('resourceName') or item.get('resourceId')} | "
+            f"[{index}] {resource_label} | "
             f"{item['summary']['overallCompliance']} | "
             f"confidence={item['summary']['confidence']}"
         )
@@ -339,7 +706,7 @@ def _is_past_date(value):
 def main(argv=None) -> int:
     try:
         request = normalize_request(parse_args(argv))
-    except (ValueError, json.JSONDecodeError) as exc:
+    except (ResourceResolutionError, ValueError, json.JSONDecodeError) as exc:
         print(f"[ERROR] {exc}")
         return 1
 
@@ -378,6 +745,8 @@ def main(argv=None) -> int:
     payload = {
         "triggerSource": request["triggerSource"],
         "requestedResourceIds": request["resourceIds"],
+        "requestedResources": request["requestedResources"],
+        "resolvedResources": request["resolvedResources"],
         "analyzedCount": analyzed_count,
         "failedCount": failed_count,
         "generatedAt": _now_iso(),

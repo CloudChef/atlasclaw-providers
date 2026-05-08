@@ -12,7 +12,7 @@ SmartCMP Provider is a service provider module for AtlasClaw, integrating with S
 - **Data Queries** - Query service catalogs, applications, templates, images, and other reference data
 - **Intelligent Agents** - Automated pre-approval and request decomposition capabilities
 - **Cost Optimization** - Review optimization recommendations, analyze savings, execute SmartCMP-native fixes, and track remediation progress
-- **Resource Compliance** - Fetch resources by ID, reuse the shared normalized resource view, and analyze lifecycle, patch, security, and configuration posture
+- **Resource Compliance** - Resolve resources by exact name or visible list index, reuse the shared normalized resource view, and analyze lifecycle, patch, security, and configuration posture
 
 ## Quick Start
 
@@ -383,29 +383,38 @@ List SmartCMP optimization recommendations, analyze savings opportunities, execu
 
 ### resource-compliance - Resource Compliance
 
-Fetch one or more existing SmartCMP resources by ID, reuse the shared
-normalized resource view, and analyze lifecycle, patch, security, and
-configuration posture.
+Fetch one or more existing SmartCMP resources by exact resource name or visible
+list selection, reuse the shared normalized resource view, and analyze
+lifecycle, patch, security, and configuration posture.
 
 **Workflow:**
-1. Retrieve resource summary, full resource data, details, and the standard normalized `type + properties` view with `list_resource.py`
-2. Reuse that normalized resource view (`type = componentType`) for analyzer routing
-3. Route cloud/software/OS analyzers (Tomcat, MySQL, PostgreSQL, Redis, Elasticsearch, SQL Server, Linux, Windows, AliCloud OSS)
-4. Perform best-effort live internet validation against authoritative sources when product/version evidence is sufficient
-5. Emit readable output and a stable `##RESOURCE_COMPLIANCE_START##` JSON block
+1. Resolve the resource by visible name or latest resource-list index; keep SmartCMP UUIDs internal
+2. Retrieve resource summary, full resource data, details, and the standard normalized `type + properties` view with `list_resource.py`
+3. Reuse that normalized resource view (`type = componentType`) for analyzer routing
+4. Route cloud/software/OS analyzers (Tomcat, MySQL, PostgreSQL, Redis, Elasticsearch, SQL Server, Linux, Windows, AliCloud OSS)
+5. Perform best-effort live internet validation against authoritative sources when product/version evidence is sufficient
+6. Emit readable output and a stable `##RESOURCE_COMPLIANCE_START##` JSON block
 
 **Examples:**
 ```bash
-# Fetch raw resource facts
-python skills/datasource/scripts/list_resource.py <resource_id>
+# Show visible resource names and indexes
+python skills/resource/scripts/list_all_resource.py --scope virtual_machines
 
-# Analyze one or more resources directly
-python skills/resource-compliance/scripts/analyze_resource.py <resource_id>
+# Analyze one resource by name
+python skills/resource-compliance/scripts/analyze_resource.py --resource-name e2e-newrole-linux3-0501
+
+# Analyze one resource selected from the latest resource list
+python skills/resource-compliance/scripts/analyze_resource.py \
+  --resource-index 2 \
+  --resource-directory-json '[{"index":2,"id":"internal-id","name":"e2e-newrole-linux3-0501"}]'
 
 # Analyze webhook-style input
 python skills/resource-compliance/scripts/analyze_resource.py \
   --payload-json '{"resourceIds":["id-1","id-2"],"triggerSource":"webhook"}'
 ```
+
+Interactive resource-compliance workflows should not ask users for SmartCMP
+UUIDs. Resource IDs are internal API and webhook compatibility values only.
 
 Representative output fields:
 ```json
