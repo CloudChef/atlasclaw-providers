@@ -1,6 +1,6 @@
 ---
 name: text
-description: Use this skill when the user wants to create, save, export, download, convert, format, clean, or localize plain text, TXT, Markdown/MD, or HTML content. This includes saving chat content as .txt, .md, .markdown, or .html files and exposing the final file for download.
+description: Use this skill when the user wants to create, generate, save, export, download, convert, format, clean, or localize plain text, TXT, Markdown/MD, or HTML file deliverables. This skill produces text-family artifacts such as .txt, .text, .md, .markdown, or .html files and exposes the final file for download.
 license: MIT-0
 source: https://clawhub.ai/ivangdavila/text
 artifact_types:
@@ -10,17 +10,60 @@ artifact_types:
   - markdown
   - html
 triggers:
+  - create text
+  - create text file
+  - create txt
+  - create txt file
+  - create markdown
+  - create markdown file
+  - create md
+  - create md file
+  - create html
+  - create html file
+  - generate text
+  - generate text file
+  - generate txt
+  - generate txt file
+  - generate markdown
+  - generate markdown file
+  - generate md
+  - generate md file
+  - generate html
+  - generate html file
   - save as text
   - save as txt
   - save as markdown
   - save as md
   - save as html
   - export text
+  - export text file
   - export markdown
+  - export markdown file
   - export html
+  - export html file
   - download text
   - download markdown
   - download html
+  - 创建文本
+  - 创建文本文件
+  - 创建 txt
+  - 创建 txt 文件
+  - 创建 markdown
+  - 创建 markdown 文件
+  - 创建 md
+  - 创建 md 文件
+  - 创建 html
+  - 创建 html 文件
+  - 生成文本
+  - 生成文本文件
+  - 生成 txt
+  - 生成 txt 文件
+  - 生成 markdown
+  - 生成 markdown 文件
+  - 生成 md
+  - 生成 md 文件
+  - 生成 html
+  - 生成 html 文件
   - 保存为 txt
   - 保存成 txt
   - 保存为 md
@@ -29,12 +72,30 @@ triggers:
   - 保存成 markdown
   - 保存为 html
   - 保存成 html
+  - 导出文本
+  - 导出文本文件
+  - 导出 txt
+  - 导出 txt 文件
+  - 导出 markdown
+  - 导出 markdown 文件
+  - 导出 md
+  - 导出 md 文件
+  - 导出 html
+  - 导出 html 文件
   - 下载文本
+  - 下载文本文件
+  - 下载 txt
+  - 下载 txt 文件
   - 下载 markdown
+  - 下载 markdown 文件
+  - 下载 md
+  - 下载 md 文件
   - 下载 html
+  - 下载 html 文件
 use_when:
-  - User wants current chat content, a generated answer, notes, or provided text saved as TXT, Markdown, or HTML.
-  - User asks to export or download plain text, Markdown, or HTML content.
+  - User wants a text-family file deliverable in TXT, plain text, Markdown/MD, or HTML format.
+  - User asks to create, generate, save, export, or download text-based content as a file.
+  - User wants current context, generated content, notes, provided text, or transformed text saved as TXT, Markdown, or HTML.
   - User asks to clean, normalize, format, localize, or transform text-based content intended for TXT, Markdown, or HTML output.
   - User asks to convert simple text or Markdown content to HTML, or HTML/plain text content to Markdown/text when no dedicated document skill is required.
 avoid_when:
