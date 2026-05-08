@@ -48,6 +48,13 @@ except ImportError:
     from _common import require_config
 
 from _approval_validation import request_id_from_item
+from _approval_specs import (
+    extract_compute_profile_ids,
+    extract_flavor_lookup_ids,
+    extract_flavor_name_map,
+    extract_named_resource_specs,
+    unwrap_value,
+)
 
 
 def parse_days_from_argv(argv: list[str]) -> Optional[int]:
@@ -174,35 +181,30 @@ def calculate_wait_hours(created_ts: Any, *, now_ms: int) -> float:
 
 def extract_from_dict(d: dict[str, Any], specs: list[str], prefix: str = "") -> None:
     """Helper to extract specs from a dictionary."""
+    del prefix
 
     def get_value(val: Any) -> Any:
-        if isinstance(val, dict) and "value" in val:
-            return val["value"]
-        return val
+        return unwrap_value(val)
 
     for key in ["cpu", "vcpu", "cpuCount", "cpu_count"]:
         if key in d:
             value = get_value(d[key])
             if value:
-                specs.append(f"CPU: {value}核")
+                specs.append(f"cpu_cores={value}")
                 break
 
     for key in ["memory", "ram", "memorySize", "memory_size"]:
         if key in d:
             value = get_value(d[key])
             if value:
-                if isinstance(value, (int, float)) and value >= 1024:
-                    value = f"{value/1024:.1f}GB"
-                elif isinstance(value, (int, float)):
-                    value = f"{value}MB"
-                specs.append(f"内存: {value}")
+                specs.append(f"memory={value}")
                 break
 
     for key in ["disk", "storage", "diskSize", "disk_size"]:
         if key in d:
             value = get_value(d[key])
             if value:
-                specs.append(f"存储: {value}")
+                specs.append(f"storage={value}")
                 break
 
     if "tags" in d:
@@ -211,26 +213,69 @@ def extract_from_dict(d: dict[str, Any], specs: list[str], prefix: str = "") -> 
             real_tags = {k: v for k, v in tags_val.items() if v is not None and v != ""}
             if real_tags:
                 tag_str = ", ".join(f"{k}={v}" for k, v in list(real_tags.items())[:3])
-                specs.append(f"标签: {tag_str}")
+                specs.append(f"tags={tag_str}")
 
     for key in ["infra_type", "resourceType", "cloudEntryType"]:
         if key in d:
             value = get_value(d[key])
             if value and value != "vsphere":
-                specs.append(f"类型: {value}")
+                specs.append(f"resource_type={value}")
                 break
 
     if "asset_tag" in d:
         value = get_value(d["asset_tag"])
         if value:
-            specs.append(f"资产标签: {value}")
+            specs.append(f"asset_tag={value}")
 
 
-def extract_resource_specs(item: dict[str, Any]) -> list[str]:
-    """Extract resource specification summary from request params."""
-    specs: list[str] = []
+def fetch_flavor_names_by_id(base_url: str, headers: dict[str, str]) -> dict[str, str]:
+    """Fetch SmartCMP flavor names keyed by flavor ID for approval display."""
+    try:
+        resp = requests.get(
+            f"{base_url}/flavors",
+            headers=headers,
+            params={"page": 1, "size": 500, "query": "", "queryValue": "", "sort": "createdDate,desc"},
+            verify=False,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return extract_flavor_name_map(resp.json())
+    except requests.exceptions.RequestException:
+        return {}
+
+
+def request_params_from_item(item: dict[str, Any]) -> dict[str, Any]:
+    """Return SmartCMP request params for approval spec extraction."""
     activity = item.get("currentActivity") or {}
     params = activity.get("requestParams") or {}
+    return params if isinstance(params, dict) else {}
+
+
+def items_need_flavor_lookup(items: list[dict[str, Any]]) -> bool:
+    """Return whether any approval needs optional flavor-name enrichment."""
+    return any(extract_flavor_lookup_ids(request_params_from_item(item)) for item in items)
+
+
+def extract_resource_specs(
+    item: dict[str, Any],
+    *,
+    flavor_names_by_id: Optional[dict[str, str]] = None,
+) -> list[str]:
+    """Extract resource specification summary from request params."""
+    specs: list[str] = []
+    params = request_params_from_item(item)
+    named_specs = extract_named_resource_specs(params)
+    if named_specs:
+        return named_specs[:6]
+    flavor_names_by_id = flavor_names_by_id or {}
+    compute_profile_ids = extract_compute_profile_ids(params)
+    flavor_names = [
+        flavor_names_by_id[profile_id]
+        for profile_id in compute_profile_ids
+        if profile_id in flavor_names_by_id
+    ]
+    if compute_profile_ids:
+        return flavor_names[:6]
 
     for key, val in params.items():
         if key.startswith("_ra_Compute_") or key.startswith("_ra_"):
@@ -252,11 +297,11 @@ def extract_resource_specs(item: dict[str, Any]) -> list[str]:
 
     compute_profile = params.get("_ra_Compute_compute_profile_id")
     if compute_profile:
-        specs.append(f"计算配置: {compute_profile}")
+        specs.append(f"compute_profile={compute_profile}")
 
     for key in ["quantity", "count", "instanceCount", "serverCount"]:
         if key in params and params[key]:
-            specs.append(f"数量: {params[key]}")
+            specs.append(f"quantity={params[key]}")
             break
 
     seen: set[str] = set()
@@ -267,7 +312,7 @@ def extract_resource_specs(item: dict[str, Any]) -> list[str]:
         seen.add(spec)
         unique_specs.append(spec)
 
-    return unique_specs[:6] if unique_specs else ["无详细规格"]
+    return unique_specs[:6]
 
 
 def extract_cost_info(item: dict[str, Any]) -> str:
@@ -279,7 +324,7 @@ def extract_cost_info(item: dict[str, Any]) -> str:
             if total:
                 return f"¥{total}"
         return str(charge)
-    return "未估算"
+    return "not_estimated"
 
 
 def calculate_priority(item: dict[str, Any], *, now_ms: int) -> dict[str, Any]:
@@ -291,18 +336,18 @@ def calculate_priority(item: dict[str, Any], *, now_ms: int) -> dict[str, Any]:
     wait_hours = calculate_wait_hours(created, now_ms=now_ms)
     if wait_hours > 72:
         score += 30
-        factors.append("等待超3天")
+        factors.append("wait_over_72h")
     elif wait_hours > 24:
         score += 15
-        factors.append("等待超1天")
+        factors.append("wait_over_24h")
 
     if item.get("sla"):
         score += 20
-        factors.append("有SLA")
+        factors.append("has_sla")
 
     if item.get("chargePredictResult"):
         score += 10
-        factors.append("有成本预估")
+        factors.append("has_cost_estimate")
 
     name = (item.get("name") or "").lower()
     catalog = (item.get("catalogName") or "").lower()
@@ -310,14 +355,14 @@ def calculate_priority(item: dict[str, Any], *, now_ms: int) -> dict[str, Any]:
     high_priority_keywords = ["urgent", "紧急", "生产", "prod", "critical", "重要"]
     if any(keyword in combined for keyword in high_priority_keywords):
         score += 25
-        factors.append("关键词标记")
+        factors.append("matched_high_priority_keyword")
 
     if score >= 80:
-        label = "高"
+        label = "high"
     elif score >= 60:
-        label = "中"
+        label = "medium"
     else:
-        label = "低"
+        label = "low"
 
     return {"score": score, "label": label, "factors": factors}
 
@@ -326,7 +371,7 @@ def get_approval_step_name(item: dict[str, Any]) -> str:
     """Get current approval step name."""
     activity = item.get("currentActivity") or {}
     step = activity.get("processStep") or {}
-    return step.get("name") or "审批中"
+    return step.get("name") or "step_unavailable"
 
 
 def get_approver_info(item: dict[str, Any]) -> str:
@@ -348,7 +393,7 @@ def get_approver_info(item: dict[str, Any]) -> str:
         name = approver.get("name") or approver.get("loginId") or ""
         if name:
             approvers.append(name)
-    return ", ".join(approvers) if approvers else "待分配"
+    return ", ".join(approvers) if approvers else "approver_unavailable"
 
 
 def _request_id(item: dict[str, Any]) -> str:
@@ -356,7 +401,12 @@ def _request_id(item: dict[str, Any]) -> str:
     return request_id_from_item(item)
 
 
-def build_meta(items: list[dict[str, Any]], *, now_ms: int) -> list[dict[str, Any]]:
+def build_meta(
+    items: list[dict[str, Any]],
+    *,
+    now_ms: int,
+    flavor_names_by_id: Optional[dict[str, str]] = None,
+) -> list[dict[str, Any]]:
     """Build the structured approval meta payload."""
     meta: list[dict[str, Any]] = []
     for index, item in enumerate(items, start=1):
@@ -378,7 +428,10 @@ def build_meta(items: list[dict[str, Any]], *, now_ms: int) -> list[dict[str, An
                 "approvalStep": get_approval_step_name(item),
                 "currentApprover": get_approver_info(item),
                 "costEstimate": extract_cost_info(item),
-                "resourceSpecs": extract_resource_specs(item),
+                "resourceSpecs": extract_resource_specs(
+                    item,
+                    flavor_names_by_id=flavor_names_by_id,
+                ),
             }
         )
     return meta
@@ -398,21 +451,27 @@ def truncate_cell(value: Any, *, limit: int) -> str:
     return rendered[: max(0, limit - 3)].rstrip() + "..."
 
 
-def render_pending_table(items: list[dict[str, Any]], *, total: int, now_ms: int) -> str:
+def render_pending_table(
+    items: list[dict[str, Any]],
+    *,
+    total: int,
+    now_ms: int,
+    flavor_names_by_id: Optional[dict[str, str]] = None,
+) -> str:
     """Render pending approvals as a compact Markdown table."""
     lines = [
-        f"待审批列表 - 共 {total} 项（按更新时间倒序）",
+        f"Pending approvals - total {total} (sorted by updated time desc)",
         "",
         "| # | Request ID | Name | Catalog | Applicant | Updated At | Wait(h) | Priority | Step | Approver | Specs |",
         "| --- | --- | --- | --- | --- | --- | ---: | --- | --- | --- | --- |",
     ]
     for index, item in enumerate(items, start=1):
-        specs = ", ".join(extract_resource_specs(item))
+        specs = ", ".join(extract_resource_specs(item, flavor_names_by_id=flavor_names_by_id))
         row = [
             index,
             _request_id(item) or "N/A",
             truncate_cell(item.get("name") or item.get("requestName") or "N/A", limit=36),
-            truncate_cell(item.get("catalogName") or item.get("resourceType") or item.get("type") or "通用请求", limit=24),
+            truncate_cell(item.get("catalogName") or item.get("resourceType") or item.get("type") or "uncategorized_request", limit=24),
             truncate_cell(item.get("applicant") or item.get("requesterName") or item.get("createdByName") or "N/A", limit=18),
             format_timestamp(item.get("updatedDate") or ""),
             calculate_wait_hours(item.get("createdDate"), now_ms=now_ms),
@@ -454,19 +513,35 @@ def main(argv: list[str]) -> int:
     for item in items:
         item["_priority"] = calculate_priority(item, now_ms=now_ms)
     items = sort_pending_items(items)
+    flavor_names_by_id = fetch_flavor_names_by_id(base_url, headers) if items_need_flavor_lookup(items) else {}
 
-    print(render_pending_table(items, total=total, now_ms=now_ms))
+    print(
+        render_pending_table(
+            items,
+            total=total,
+            now_ms=now_ms,
+            flavor_names_by_id=flavor_names_by_id,
+        )
+    )
     print("")
 
     high_count = sum(1 for item in items if item["_priority"]["score"] >= 80)
     mid_count = sum(1 for item in items if 60 <= item["_priority"]["score"] < 80)
     low_count = sum(1 for item in items if item["_priority"]["score"] < 60)
 
-    print(f"  优先级分布: 高 {high_count} | 中 {mid_count} | 低 {low_count}")
+    print(f"  Priority distribution: high {high_count} | medium {mid_count} | low {low_count}")
     print("")
 
+    meta = build_meta(items, now_ms=now_ms, flavor_names_by_id=flavor_names_by_id)
+
     print("##APPROVAL_META_START##", file=sys.stderr)
-    print(json.dumps(build_meta(items, now_ms=now_ms), ensure_ascii=False), file=sys.stderr)
+    print(
+        json.dumps(
+            meta,
+            ensure_ascii=False,
+        ),
+        file=sys.stderr,
+    )
     print("##APPROVAL_META_END##", file=sys.stderr)
     return 0
 

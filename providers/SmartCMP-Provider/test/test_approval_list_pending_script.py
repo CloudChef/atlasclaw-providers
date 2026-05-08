@@ -102,6 +102,12 @@ def test_build_meta_exposes_only_canonical_request_id() -> None:
     meta = module.build_meta([item], now_ms=1_772_000_120_000)
 
     assert meta[0]["requestId"] == "RES20260427000004"
+    assert meta[0]["priority"] == "low"
+    assert meta[0]["priorityFactors"] == []
+    assert meta[0]["approvalStep"] == "step_unavailable"
+    assert meta[0]["currentApprover"] == "approver_unavailable"
+    assert meta[0]["costEstimate"] == "not_estimated"
+    assert meta[0]["resourceSpecs"] == []
     for internal_field in ("id", "workflowId", "internalRequestId", "taskId", "processInstanceId"):
         assert internal_field not in meta[0]
 
@@ -147,7 +153,136 @@ def test_build_meta_reads_current_approver_from_approval_requests() -> None:
 
     assert meta[0]["currentApprover"] == "user1, 平台管理员"
     assert "user1, 平台管理员" in rendered
-    assert "待分配" not in rendered
+    assert "approver_unavailable" not in rendered
+
+
+def test_resource_specs_use_language_neutral_codes() -> None:
+    module = _load_module()
+    item = {
+        "currentActivity": {
+            "requestParams": {
+                "quantity": 2,
+                "resourceSpecs": {
+                    "node_1": {
+                        "cpu": 4,
+                        "memory": 2048,
+                        "disk": "100GB",
+                        "cloudEntryType": {"value": "aliyun"},
+                        "asset_tag": "asset-1",
+                    }
+                },
+            }
+        }
+    }
+
+    assert module.extract_resource_specs(item) == [
+        "cpu_cores=4",
+        "memory=2048",
+        "storage=100GB",
+        "resource_type=aliyun",
+        "asset_tag=asset-1",
+        "quantity=2",
+    ]
+
+
+def test_resource_specs_prefer_current_selection_name() -> None:
+    module = _load_module()
+    item = {
+        "currentActivity": {
+            "requestParams": {
+                "resourceSpecs": {
+                    "node_1": {
+                        "currentSelection": "Small,1vCPU,2GB",
+                        "cpu": 1,
+                        "memory": 2048,
+                    }
+                }
+            }
+        }
+    }
+
+    assert module.extract_resource_specs(item) == ["Small"]
+
+
+def test_resource_specs_prefer_flavor_name_from_compute_profile_id() -> None:
+    module = _load_module()
+    compute_profile_id = "306ddaa2-711a-4ec0-8c1c-b512eb80d180"
+    stale_flavor_id = "c8e8311d-3feb-4292-aa73-c3e542f93099"
+    item = {
+        "currentActivity": {
+            "requestParams": {
+                "extensibleParameters": {
+                    "Compute": {
+                        "compute_profile_id": {"value": compute_profile_id},
+                        "flavor_id": {"value": stale_flavor_id},
+                        "cpus": {"value": 1},
+                        "memory": {"value": 2048},
+                    }
+                }
+            }
+        }
+    }
+
+    assert module.extract_resource_specs(
+        item,
+        flavor_names_by_id={compute_profile_id: "Medium", stale_flavor_id: "Small"},
+    ) == ["Medium"]
+
+
+def test_resource_specs_map_top_level_compute_profile_id_to_flavor_name() -> None:
+    module = _load_module()
+    item = {
+        "currentActivity": {
+            "requestParams": {
+                "_ra_Compute_compute_profile_id": "profile-1",
+            }
+        }
+    }
+
+    assert module.extract_resource_specs(
+        item,
+        flavor_names_by_id={"profile-1": "Small"},
+    ) == ["Small"]
+
+
+def test_resource_specs_return_empty_for_unresolved_compute_profile_id() -> None:
+    module = _load_module()
+    item = {
+        "currentActivity": {
+            "requestParams": {
+                "extensibleParameters": {
+                    "Compute": {
+                        "compute_profile_id": {"value": "profile-1"},
+                        "memory": {"value": 2048},
+                        "cpus": {"value": 1},
+                    }
+                }
+            }
+        }
+    }
+
+    assert module.extract_resource_specs(item, flavor_names_by_id={}) == []
+
+
+def test_resource_specs_read_labeled_current_selection_value() -> None:
+    module = _load_module()
+    item = {
+        "currentActivity": {
+            "requestParams": {
+                "resourceSpecs": {
+                    "node_1": {
+                        "selected": {
+                            "label": "Current Selection",
+                            "value": "Medium,2vCPU,4GB",
+                        },
+                        "memory": 4096,
+                    }
+                }
+            }
+        }
+    }
+
+    assert module.extract_resource_specs(item) == ["Medium"]
 
 
 def test_main_renders_newest_first_table_and_hides_internal_meta(monkeypatch) -> None:
@@ -158,8 +293,12 @@ def test_main_renders_newest_first_table_and_hides_internal_meta(monkeypatch) ->
         lambda: ("https://cmp.example.com/platform-api", "token", {"Cookie": "token"}, None),
     )
     monkeypatch.setattr(module.time, "time", lambda: 1_772_000_120)
+    called_urls: list[str] = []
 
     def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        called_urls.append(url)
+        if url == "https://cmp.example.com/platform-api/flavors":
+            return _FakeResponse({"content": []})
         assert url == "https://cmp.example.com/platform-api/generic-request/current-activity-approval"
         assert params["sort"] == "updatedDate,desc"
         return _FakeResponse(
@@ -214,6 +353,7 @@ def test_main_renders_newest_first_table_and_hides_internal_meta(monkeypatch) ->
     assert "new-task-uuid" not in rendered
     assert "new-process-uuid" not in rendered
     assert "##APPROVAL_META_START##" not in rendered
+    assert "DISPLAY_META" not in internal
 
     payload = internal.split("##APPROVAL_META_START##\n", 1)[1].split(
         "\n##APPROVAL_META_END##",
@@ -221,5 +361,72 @@ def test_main_renders_newest_first_table_and_hides_internal_meta(monkeypatch) ->
     )[0]
     meta = json.loads(payload)
     assert [item["requestId"] for item in meta] == ["RES20260427000004", "RES20260426000003"]
+    assert meta[0]["priority"] == "low"
+    assert meta[0]["priorityFactors"] == []
+    assert meta[1]["priority"] == "high"
+    assert meta[1]["priorityFactors"] == [
+        "wait_over_24h",
+        "matched_high_priority_keyword",
+    ]
     for internal_field in ("id", "workflowId", "internalRequestId", "taskId", "processInstanceId"):
         assert internal_field not in meta[0]
+    assert "https://cmp.example.com/platform-api/flavors" not in called_urls
+
+
+def test_main_returns_empty_specs_when_compute_profile_name_cannot_be_resolved(monkeypatch) -> None:
+    module = _load_module()
+    monkeypatch.setattr(
+        module,
+        "require_config",
+        lambda: ("https://cmp.example.com/platform-api", "token", {"Cookie": "token"}, None),
+    )
+    monkeypatch.setattr(module.time, "time", lambda: 1_772_000_120)
+    called_urls: list[str] = []
+
+    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        called_urls.append(url)
+        if url == "https://cmp.example.com/platform-api/flavors":
+            return _FakeResponse({"content": []})
+        assert url == "https://cmp.example.com/platform-api/generic-request/current-activity-approval"
+        return _FakeResponse(
+            {
+                "content": [
+                    {
+                        "workflowId": "RES20260505000029",
+                        "name": "my-linux-vm",
+                        "catalogName": "Linux VM",
+                        "createdDate": 1_772_000_000_000,
+                        "updatedDate": 1_772_000_060_000,
+                        "currentActivity": {
+                            "requestParams": {
+                                "extensibleParameters": {
+                                    "Compute": {
+                                        "compute_profile_id": {"value": "profile-1"},
+                                        "memory": {"value": 2048},
+                                    }
+                                }
+                            }
+                        },
+                    }
+                ],
+                "totalElements": 1,
+            }
+        )
+
+    monkeypatch.setattr(module.requests, "get", fake_get)
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    with redirect_stdout(stdout), redirect_stderr(stderr):
+        assert module.main([]) == 0
+
+    rendered = stdout.getvalue()
+    payload = stderr.getvalue().split("##APPROVAL_META_START##\n", 1)[1].split(
+        "\n##APPROVAL_META_END##",
+        1,
+    )[0]
+    meta = json.loads(payload)
+
+    assert "https://cmp.example.com/platform-api/flavors" in called_urls
+    assert "memory=2048" not in rendered
+    assert meta[0]["resourceSpecs"] == []

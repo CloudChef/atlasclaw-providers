@@ -44,6 +44,13 @@ except ImportError:
     from _common import require_config
 
 from _approval_validation import APPROVAL_ID_FORMAT_HINT, is_request_id, request_id_from_item
+from _approval_specs import (
+    extract_compute_profile_ids,
+    extract_flavor_lookup_ids,
+    extract_flavor_name_map,
+    extract_named_resource_specs,
+    unwrap_value,
+)
 
 
 BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()
@@ -88,53 +95,87 @@ def _calculate_wait_hours(created_ts: Any, now_ms: int) -> float:
 
 
 def _unwrap_value(value: Any) -> Any:
-    if isinstance(value, dict) and "value" in value:
-        return value.get("value")
-    return value
+    return unwrap_value(value)
 
 
 def _extract_from_dict(data: dict[str, Any], specs: list[str], prefix: str = "") -> None:
     del prefix
 
-    def _append(label: str, value: Any) -> None:
+    def _append(key: str, value: Any) -> None:
         normalized = _unwrap_value(value)
         if normalized not in (None, ""):
-            specs.append(f"{label}: {normalized}")
+            specs.append(f"{key}={normalized}")
 
     for key in ("cpu", "vcpu", "cpuCount", "cpu_count"):
         if key in data:
             value = _unwrap_value(data[key])
             if value:
-                specs.append(f"CPU: {value}核")
+                specs.append(f"cpu_cores={value}")
                 break
     for key in ("memory", "ram", "memorySize", "memory_size"):
         if key in data:
             value = _unwrap_value(data[key])
             if value:
-                if isinstance(value, (int, float)) and value >= 1024:
-                    specs.append(f"内存: {value / 1024:.1f}GB")
-                elif isinstance(value, (int, float)):
-                    specs.append(f"内存: {value}MB")
-                else:
-                    specs.append(f"内存: {value}")
+                specs.append(f"memory={value}")
                 break
     for key in ("disk", "storage", "diskSize", "disk_size"):
         if key in data:
-            _append("存储", data[key])
+            _append("storage", data[key])
             break
     if "asset_tag" in data:
-        _append("资产标签", data["asset_tag"])
+        _append("asset_tag", data["asset_tag"])
     for key in ("infra_type", "resourceType", "cloudEntryType"):
         if key in data:
             value = _unwrap_value(data[key])
             if value and value != "vsphere":
-                specs.append(f"类型: {value}")
+                specs.append(f"resource_type={value}")
                 break
 
 
-def _extract_resource_specs(item: dict[str, Any]) -> list[str]:
+def _fetch_flavor_names_by_id() -> dict[str, str]:
+    try:
+        resp = requests.get(
+            f"{BASE_URL}/flavors",
+            headers=HEADERS,
+            params={"page": 1, "size": 500, "query": "", "queryValue": "", "sort": "createdDate,desc"},
+            verify=False,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return extract_flavor_name_map(resp.json())
+    except requests.exceptions.RequestException:
+        return {}
+
+
+def _request_params_from_item(item: dict[str, Any]) -> dict[str, Any]:
     activity = item.get("currentActivity") or {}
     params = activity.get("requestParams") or {}
+    return params if isinstance(params, dict) else {}
+
+
+def _item_needs_flavor_lookup(item: dict[str, Any]) -> bool:
+    return bool(extract_flavor_lookup_ids(_request_params_from_item(item)))
+
+
+def _extract_resource_specs(
+    item: dict[str, Any],
+    *,
+    flavor_names_by_id: dict[str, str] | None = None,
+) -> list[str]:
+    params = _request_params_from_item(item)
+    named_specs = extract_named_resource_specs(params)
+    if named_specs:
+        return named_specs[:8]
+    flavor_names_by_id = flavor_names_by_id or {}
+    compute_profile_ids = extract_compute_profile_ids(params)
+    flavor_names = [
+        flavor_names_by_id[profile_id]
+        for profile_id in compute_profile_ids
+        if profile_id in flavor_names_by_id
+    ]
+    if compute_profile_ids:
+        return flavor_names[:8]
+
     specs: list[str] = []
     for key, value in params.items():
         if key.startswith("_ra_Compute_") or key.startswith("_ra_"):
@@ -156,11 +197,11 @@ def _extract_resource_specs(item: dict[str, Any]) -> list[str]:
 
     compute_profile = params.get("_ra_Compute_compute_profile_id")
     if compute_profile:
-        specs.append(f"计算配置: {compute_profile}")
+        specs.append(f"compute_profile={compute_profile}")
 
     for key in ("quantity", "count", "instanceCount", "serverCount"):
         if key in params and params[key]:
-            specs.append(f"数量: {params[key]}")
+            specs.append(f"quantity={params[key]}")
             break
 
     deduped: list[str] = []
@@ -170,7 +211,7 @@ def _extract_resource_specs(item: dict[str, Any]) -> list[str]:
             continue
         seen.add(spec)
         deduped.append(spec)
-    return deduped[:8] or ["无详细规格"]
+    return deduped[:8]
 
 
 def _extract_cost_info(item: dict[str, Any]) -> str:
@@ -181,13 +222,13 @@ def _extract_cost_info(item: dict[str, Any]) -> str:
             return f"¥{total}"
     if charge:
         return str(charge)
-    return "未估算"
+    return "not_estimated"
 
 
 def _get_approval_step_name(item: dict[str, Any]) -> str:
     activity = item.get("currentActivity") or {}
     step = activity.get("processStep") or {}
-    return str(step.get("name") or "审批中")
+    return str(step.get("name") or "step_unavailable")
 
 
 def _get_approver_info(item: dict[str, Any]) -> str:
@@ -208,7 +249,7 @@ def _get_approver_info(item: dict[str, Any]) -> str:
         name = approver.get("name") or approver.get("loginId") or ""
         if name:
             approvers.append(str(name))
-    return ", ".join(approvers) if approvers else "待分配"
+    return ", ".join(approvers) if approvers else "approver_unavailable"
 
 
 def _extract_items(payload: Any) -> list[dict[str, Any]]:
@@ -299,37 +340,38 @@ def main() -> None:
     now_ms = int(time.time() * 1000)
     name = matched.get("name") or matched.get("requestName") or "N/A"
     request_id = _request_id(matched)
-    catalog = matched.get("catalogName") or matched.get("resourceType") or matched.get("type") or "通用请求"
+    catalog = matched.get("catalogName") or matched.get("resourceType") or matched.get("type") or "uncategorized_request"
     applicant = matched.get("applicant") or matched.get("requesterName") or matched.get("createdByName") or "N/A"
     email = matched.get("email") or ""
     description = matched.get("description") or matched.get("justification") or ""
     created_date = matched.get("createdDate") or ""
     updated_date = matched.get("updatedDate") or ""
     wait_hours = _calculate_wait_hours(created_date, now_ms)
-    resource_specs = _extract_resource_specs(matched)
+    flavor_names_by_id = _fetch_flavor_names_by_id() if _item_needs_flavor_lookup(matched) else {}
+    resource_specs = _extract_resource_specs(matched, flavor_names_by_id=flavor_names_by_id)
     cost_estimate = _extract_cost_info(matched)
     approval_step = _get_approval_step_name(matched)
     current_approver = _get_approver_info(matched)
 
     print("===============================================================")
-    print(f"  CMP 工单详情: {request_id or identifier}")
+    print(f"  CMP Request Detail: {request_id or identifier}")
     print("===============================================================")
     if request_id:
-        print(f"编号: {request_id}")
-    print(f"名称: {name}")
-    print(f"类型: {catalog}")
-    print(f"申请人: {applicant}" + (f" ({email})" if email else ""))
-    print(f"审批阶段: {approval_step}")
-    print(f"当前审批人: {current_approver}")
-    print(f"创建时间: {_format_timestamp(created_date)}")
-    print(f"更新时间: {_format_timestamp(updated_date)}")
-    print(f"已等待: {wait_hours} 小时")
-    print(f"预估成本: {cost_estimate}")
-    print("资源规格:")
+        print(f"Request ID: {request_id}")
+    print(f"Name: {name}")
+    print(f"Catalog: {catalog}")
+    print(f"Applicant: {applicant}" + (f" ({email})" if email else ""))
+    print(f"Approval Step: {approval_step}")
+    print(f"Current Approver: {current_approver}")
+    print(f"Created At: {_format_timestamp(created_date)}")
+    print(f"Updated At: {_format_timestamp(updated_date)}")
+    print(f"Wait Hours: {wait_hours}")
+    print(f"Cost Estimate: {cost_estimate}")
+    print("Resource Specs:")
     for spec in resource_specs:
         print(f"- {spec}")
     if description:
-        print(f"说明: {description}")
+        print(f"Description: {description}")
 
     meta = {
         "requestId": request_id,

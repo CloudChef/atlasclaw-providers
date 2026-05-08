@@ -50,12 +50,14 @@ def _load_module(monkeypatch):
             sys.path.remove(scripts_dir)
 
 
-def test_detail_uses_chinese_number_label_and_extensible_resource_specs(monkeypatch) -> None:
+def test_detail_uses_language_neutral_labels_and_extensible_resource_specs(monkeypatch) -> None:
     module = _load_module(monkeypatch)
     monkeypatch.setattr(module.time, "time", lambda: 1_772_000_120)
     monkeypatch.setattr(sys, "argv", ["get_request_detail.py", "RES20260427000004"])
 
     def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        if url.endswith("/flavors"):
+            return _FakeResponse({"content": []})
         assert url.endswith("/generic-request/current-activity-approval")
         assert params["sort"] == "updatedDate,desc"
         return _FakeResponse(
@@ -76,7 +78,6 @@ def test_detail_uses_chinese_number_label_and_extensible_resource_specs(monkeypa
                             "processInstanceId": "process-uuid",
                             "processStep": {"name": "Level 1 Approval"},
                             "requestParams": {
-                                "_ra_Compute_compute_profile_id": "profile-1",
                                 "extensibleParameters": {
                                     "node_1": {
                                         "memory": {"value": 1024},
@@ -98,11 +99,11 @@ def test_detail_uses_chinese_number_label_and_extensible_resource_specs(monkeypa
         module.main()
 
     rendered = stdout.getvalue()
-    assert "编号: RES20260427000004" in rendered
-    assert "Request ID:" not in rendered
-    assert "内存: 1.0GB" in rendered
-    assert "类型: aliyun" in rendered
-    assert "无详细规格" not in rendered
+    assert "Request ID: RES20260427000004" in rendered
+    assert "编号:" not in rendered
+    assert "memory=1024" in rendered
+    assert "resource_type=aliyun" in rendered
+    assert "no_detailed_specs" not in rendered
     assert "process-uuid" not in rendered
     assert "task-uuid" not in rendered
     assert "internal-request-uuid" not in rendered
@@ -113,9 +114,244 @@ def test_detail_uses_chinese_number_label_and_extensible_resource_specs(monkeypa
     )[0]
     meta = json.loads(payload)
     assert meta["requestId"] == "RES20260427000004"
-    assert meta["resourceSpecs"][:2] == ["内存: 1.0GB", "类型: aliyun"]
+    assert meta["resourceSpecs"][:3] == [
+        "memory=1024",
+        "resource_type=aliyun",
+    ]
     for internal_field in ("approvalId", "internalRequestId", "workflowId", "taskId", "processInstanceId"):
         assert internal_field not in meta
+
+
+def test_detail_returns_empty_resource_specs_when_request_has_no_specs(monkeypatch) -> None:
+    module = _load_module(monkeypatch)
+    monkeypatch.setattr(module.time, "time", lambda: 1_772_000_120)
+    monkeypatch.setattr(sys, "argv", ["get_request_detail.py", "TIC20260427000005"])
+
+    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        if url.endswith("/flavors"):
+            return _FakeResponse({"content": []})
+        assert url.endswith("/generic-request/current-activity-approval")
+        return _FakeResponse(
+            {
+                "content": [
+                    {
+                        "workflowId": "TIC20260427000005",
+                        "name": "General ticket",
+                        "catalogName": "General Request",
+                        "createdDate": 1_772_000_000_000,
+                        "updatedDate": 1_772_000_060_000,
+                        "currentActivity": {"requestParams": {}},
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(module.requests, "get", fake_get)
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    with redirect_stdout(stdout), redirect_stderr(stderr):
+        module.main()
+
+    rendered = stdout.getvalue()
+    assert "Resource Specs:" in rendered
+    assert "no_detailed_specs" not in rendered
+
+    payload = stderr.getvalue().split("##APPROVAL_DETAIL_META_START##\n", 1)[1].split(
+        "\n##APPROVAL_DETAIL_META_END##",
+        1,
+    )[0]
+    meta = json.loads(payload)
+    assert meta["resourceSpecs"] == []
+
+
+def test_detail_prefers_current_selection_name_over_memory(monkeypatch) -> None:
+    module = _load_module(monkeypatch)
+    monkeypatch.setattr(module.time, "time", lambda: 1_772_000_120)
+    monkeypatch.setattr(sys, "argv", ["get_request_detail.py", "RES20260505000029"])
+
+    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        if url.endswith("/flavors"):
+            return _FakeResponse({"content": []})
+        assert url.endswith("/generic-request/current-activity-approval")
+        return _FakeResponse(
+            {
+                "content": [
+                    {
+                        "workflowId": "RES20260505000029",
+                        "name": "my-linux-vm",
+                        "catalogName": "Linux VM",
+                        "createdDate": 1_772_000_000_000,
+                        "updatedDate": 1_772_000_060_000,
+                        "currentActivity": {
+                            "requestParams": {
+                                "resourceSpecs": {
+                                    "node_1": {
+                                        "selectedProfile": {
+                                            "label": "Current Selection",
+                                            "value": "Small,1vCPU,2GB",
+                                        },
+                                        "memory": {"value": 2048},
+                                    }
+                                }
+                            }
+                        },
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(module.requests, "get", fake_get)
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    with redirect_stdout(stdout), redirect_stderr(stderr):
+        module.main()
+
+    rendered = stdout.getvalue()
+    assert "- Small" in rendered
+    assert "memory=2048" not in rendered
+
+    payload = stderr.getvalue().split("##APPROVAL_DETAIL_META_START##\n", 1)[1].split(
+        "\n##APPROVAL_DETAIL_META_END##",
+        1,
+    )[0]
+    meta = json.loads(payload)
+    assert meta["resourceSpecs"] == ["Small"]
+
+
+def test_detail_prefers_flavor_name_from_compute_profile_id(monkeypatch) -> None:
+    module = _load_module(monkeypatch)
+    monkeypatch.setattr(module.time, "time", lambda: 1_772_000_120)
+    monkeypatch.setattr(sys, "argv", ["get_request_detail.py", "RES20260505000029"])
+    compute_profile_id = "306ddaa2-711a-4ec0-8c1c-b512eb80d180"
+    stale_flavor_id = "c8e8311d-3feb-4292-aa73-c3e542f93099"
+
+    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        if url.endswith("/flavors"):
+            return _FakeResponse(
+                {
+                    "content": [
+                        {"id": compute_profile_id, "name": "Medium"},
+                        {"id": stale_flavor_id, "name": "Small"},
+                    ]
+                }
+            )
+        assert url.endswith("/generic-request/current-activity-approval")
+        return _FakeResponse(
+            {
+                "content": [
+                    {
+                        "workflowId": "RES20260505000029",
+                        "name": "my-linux-vm",
+                        "catalogName": "Linux VM",
+                        "createdDate": 1_772_000_000_000,
+                        "updatedDate": 1_772_000_060_000,
+                        "currentActivity": {
+                            "requestParams": {
+                                "extensibleParameters": {
+                                    "Compute": {
+                                        "compute_profile_id": {"value": compute_profile_id},
+                                        "flavor_id": {"value": stale_flavor_id},
+                                        "cpus": {"value": 1},
+                                        "memory": {"value": 2048},
+                                    }
+                                }
+                            }
+                        },
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(module.requests, "get", fake_get)
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    with redirect_stdout(stdout), redirect_stderr(stderr):
+        module.main()
+
+    rendered = stdout.getvalue()
+    assert "- Medium" in rendered
+    assert "- Small" not in rendered
+    assert "memory=2048" not in rendered
+
+    payload = stderr.getvalue().split("##APPROVAL_DETAIL_META_START##\n", 1)[1].split(
+        "\n##APPROVAL_DETAIL_META_END##",
+        1,
+    )[0]
+    meta = json.loads(payload)
+    assert meta["resourceSpecs"] == ["Medium"]
+
+
+def test_detail_returns_empty_specs_when_compute_profile_name_cannot_be_resolved(monkeypatch) -> None:
+    module = _load_module(monkeypatch)
+    monkeypatch.setattr(module.time, "time", lambda: 1_772_000_120)
+    monkeypatch.setattr(sys, "argv", ["get_request_detail.py", "RES20260505000029"])
+    called_urls: list[str] = []
+
+    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        called_urls.append(url)
+        if url.endswith("/flavors"):
+            return _FakeResponse({"content": []})
+        assert url.endswith("/generic-request/current-activity-approval")
+        return _FakeResponse(
+            {
+                "content": [
+                    {
+                        "workflowId": "RES20260505000029",
+                        "name": "my-linux-vm",
+                        "catalogName": "Linux VM",
+                        "createdDate": 1_772_000_000_000,
+                        "updatedDate": 1_772_000_060_000,
+                        "currentActivity": {
+                            "requestParams": {
+                                "extensibleParameters": {
+                                    "Compute": {
+                                        "compute_profile_id": {"value": "profile-1"},
+                                        "memory": {"value": 2048},
+                                    }
+                                }
+                            }
+                        },
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(module.requests, "get", fake_get)
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    with redirect_stdout(stdout), redirect_stderr(stderr):
+        module.main()
+
+    rendered = stdout.getvalue()
+    payload = stderr.getvalue().split("##APPROVAL_DETAIL_META_START##\n", 1)[1].split(
+        "\n##APPROVAL_DETAIL_META_END##",
+        1,
+    )[0]
+    meta = json.loads(payload)
+
+    assert any(url.endswith("/flavors") for url in called_urls)
+    assert "memory=2048" not in rendered
+    assert meta["resourceSpecs"] == []
+
+
+def test_detail_maps_top_level_compute_profile_id_to_flavor_name(monkeypatch) -> None:
+    module = _load_module(monkeypatch)
+    item = {
+        "currentActivity": {
+            "requestParams": {
+                "_ra_Compute_compute_profile_id": "profile-1",
+            }
+        }
+    }
+
+    assert module._extract_resource_specs(
+        item,
+        flavor_names_by_id={"profile-1": "Small"},
+    ) == ["Small"]
 
 
 def test_detail_reads_current_approver_from_approval_requests(monkeypatch) -> None:
@@ -124,6 +360,8 @@ def test_detail_reads_current_approver_from_approval_requests(monkeypatch) -> No
     monkeypatch.setattr(sys, "argv", ["get_request_detail.py", "RES20260507000015"])
 
     def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        if url.endswith("/flavors"):
+            return _FakeResponse({"content": []})
         assert url.endswith("/generic-request/current-activity-approval")
         return _FakeResponse(
             {
@@ -155,7 +393,7 @@ def test_detail_reads_current_approver_from_approval_requests(monkeypatch) -> No
         module.main()
 
     rendered = stdout.getvalue()
-    assert "当前审批人: user1, 平台管理员" in rendered
+    assert "Current Approver: user1, 平台管理员" in rendered
 
     payload = stderr.getvalue().split("##APPROVAL_DETAIL_META_START##\n", 1)[1].split(
         "\n##APPROVAL_DETAIL_META_END##",
@@ -163,6 +401,7 @@ def test_detail_reads_current_approver_from_approval_requests(monkeypatch) -> No
     )[0]
     meta = json.loads(payload)
     assert meta["currentApprover"] == "user1, 平台管理员"
+    assert meta["approvalStep"] == "一级审批"
 
 
 def test_detail_rejects_internal_uuid_before_http(monkeypatch) -> None:
