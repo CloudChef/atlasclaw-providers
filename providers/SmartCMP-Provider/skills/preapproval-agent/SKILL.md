@@ -32,6 +32,29 @@ tool_detail_parameters: |
     "required": ["identifier"]
   }
 
+tool_catalog_name: "smartcmp_preapproval_get_catalog_detail"
+tool_catalog_description: "Fetch SmartCMP catalog/card detail by catalog ID and return pre-approval instruction metadata."
+tool_catalog_entrypoint: "../shared/scripts/get_catalog_detail.py"
+tool_catalog_groups:
+  - cmp
+  - catalog
+tool_catalog_capability_class: "provider:smartcmp"
+tool_catalog_priority: 123
+tool_catalog_result_mode: "llm"
+tool_catalog_cli_positional:
+  - catalog_id
+tool_catalog_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "catalog_id": {
+        "type": "string",
+        "description": "SmartCMP catalog/card ID to inspect."
+      }
+    },
+    "required": ["catalog_id"]
+  }
+
 tool_approve_name: "smartcmp_preapproval_approve"
 tool_approve_description: "Approve one or more pending SmartCMP Request IDs for the preapproval agent. Use user-facing IDs such as RES20260505000010, TIC20260502000003, or CHG20260413000011; the shared approval script resolves them to currentActivity.id internally."
 tool_approve_entrypoint: "../approval/scripts/approve.py"
@@ -168,6 +191,7 @@ This agent does NOT access the platform directly. It orchestrates:
 | Skill | Purpose |
 |-------|---------|
 | `smartcmp_preapproval_get_request_detail` | Fetch pending approval details |
+| `smartcmp_preapproval_get_catalog_detail` | Fetch the service catalog/card Markdown by `catalogId` |
 | `smartcmp_preapproval_approve` | Execute approval with reason |
 | `smartcmp_preapproval_reject` | Execute rejection with reason |
 
@@ -203,6 +227,16 @@ This agent does NOT access the platform directly. It orchestrates:
          ↓
 7. Return Structured Result
 ```
+
+## Catalog Policy Override
+
+For every pending approval, fetch the service catalog/card by the `catalogId` returned from approval metadata. If `catalogId` is missing, fail closed and do not approve.
+
+If the catalog Markdown contains `# Pre Approval Instructions`, that section is the authoritative approval policy for this request. Also accept `# Preapproval Instructions` and `# Pre-Approval Instructions` as heading variants.
+
+Only use the built-in Decision Rubric when the catalog/card was fetched successfully and no pre-approval section exists.
+
+If the catalog/card cannot be fetched, fail closed and do not approve. This avoids approving a request whose card-level policy could not be inspected.
 
 ## Decision Rubric
 

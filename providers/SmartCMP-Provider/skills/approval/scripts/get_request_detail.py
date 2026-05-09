@@ -153,6 +153,29 @@ def _request_params_from_item(item: dict[str, Any]) -> dict[str, Any]:
     return params if isinstance(params, dict) else {}
 
 
+def _first_text(*values: Any) -> str:
+    for value in values:
+        normalized = _unwrap_value(value)
+        if isinstance(normalized, (str, int, float)):
+            text = str(normalized).strip()
+            if text:
+                return text
+    return ""
+
+
+def _extract_catalog_id(item: dict[str, Any]) -> str:
+    catalog = item.get("catalog") or {}
+    params = _request_params_from_item(item)
+    return _first_text(
+        item.get("catalogId"),
+        item.get("catalogID"),
+        item.get("catalog_id"),
+        catalog.get("id") if isinstance(catalog, dict) else "",
+        params.get("catalogId"),
+        params.get("catalog_id"),
+    )
+
+
 def _item_needs_flavor_lookup(item: dict[str, Any]) -> bool:
     return bool(extract_flavor_lookup_ids(_request_params_from_item(item)))
 
@@ -352,6 +375,8 @@ def main() -> None:
     cost_estimate = _extract_cost_info(matched)
     approval_step = _get_approval_step_name(matched)
     current_approver = _get_approver_info(matched)
+    catalog_id = _extract_catalog_id(matched)
+    request_params = _request_params_from_item(matched)
 
     print("===============================================================")
     print(f"  CMP Request Detail: {request_id or identifier}")
@@ -376,6 +401,7 @@ def main() -> None:
     meta = {
         "requestId": request_id,
         "name": name,
+        "catalogId": catalog_id,
         "catalogName": catalog,
         "applicant": applicant,
         "email": email,
@@ -387,6 +413,7 @@ def main() -> None:
         "currentApprover": current_approver,
         "costEstimate": cost_estimate,
         "resourceSpecs": resource_specs,
+        "requestParams": request_params,
     }
     print("##APPROVAL_DETAIL_META_START##", file=sys.stderr)
     print(json.dumps(meta, ensure_ascii=False), file=sys.stderr)

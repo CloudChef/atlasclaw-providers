@@ -67,6 +67,7 @@ def test_detail_uses_language_neutral_labels_and_extensible_resource_specs(monke
                         "id": "internal-request-uuid",
                         "workflowId": "RES20260427000004",
                         "name": "Linux-test-agent",
+                        "catalogId": "catalog-linux",
                         "catalogName": "Linux VM",
                         "applicant": "Admin User",
                         "email": "admin@cmp.com",
@@ -114,6 +115,8 @@ def test_detail_uses_language_neutral_labels_and_extensible_resource_specs(monke
     )[0]
     meta = json.loads(payload)
     assert meta["requestId"] == "RES20260427000004"
+    assert meta["catalogId"] == "catalog-linux"
+    assert meta["requestParams"]["extensibleParameters"]["node_1"]["memory"]["value"] == 1024
     assert meta["resourceSpecs"][:3] == [
         "memory=1024",
         "resource_type=aliyun",
