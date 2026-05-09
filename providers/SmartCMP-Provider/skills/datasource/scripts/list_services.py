@@ -17,7 +17,7 @@ Output:
 
       IMPORTANT: Check 'serviceCategory' to determine service type:
         - "GENERIC_SERVICE" → Ticket/Work Order (use manualRequest structure)
-        - Others → Cloud Resource (use resourceSpecs structure)
+        - Others → Cloud Resource (use resourceSpecs structure, plus optional root params)
 
 Environment:
   CMP_URL    - Base URL (IP, hostname, or full path; auto-normalized)
@@ -27,12 +27,14 @@ Examples:
   python list_services.py              # List all catalogs
   python list_services.py "Linux"      # Filter by keyword
 """
-import sys
 import json
-import uuid
 import os
 import re
+import sys
+import uuid
+
 import requests
+import yaml
 
 # Import shared utilities (handles URL normalization, SSL warnings)
 try:
@@ -75,35 +77,137 @@ def _resolve_runtime_default_only(raw_param: dict) -> bool:
     return False
 
 
+def _default_value(raw_param: dict):
+    if "defaultValue" in raw_param:
+        return raw_param.get("defaultValue")
+    return raw_param.get("default_value")
+
+
 def _normalize_param(raw_param: dict) -> dict:
-    """Preserve the instruction fields that drive the request workflow."""
-    key = raw_param.get("key", "")
-    default_value = raw_param.get("defaultValue")
-    runtime_default_only = (
-        _resolve_runtime_default_only(raw_param) and default_value not in (None, "")
-    )
+    """Preserve generated Markdown fields that drive the request workflow."""
+    key = str(raw_param.get("key") or "")
+    default_value = _default_value(raw_param)
+    runtime_default_only = _resolve_runtime_default_only(raw_param) and default_value not in (None, "")
 
     normalized = {
         "key": key,
         "label": raw_param.get("label") or key,
         "required": bool(raw_param.get("required", False)),
-        "source": raw_param.get("source"),
         "defaultValue": None if runtime_default_only else default_value,
     }
 
     if runtime_default_only:
         normalized["runtimeDefaultOnly"] = True
 
-    if raw_param.get("description") is not None:
-        normalized["description"] = raw_param.get("description")
-    if raw_param.get("type") is not None:
-        normalized["type"] = raw_param.get("type")
+    for field in ("description", "type", "when", "ask", "location", "node"):
+        if raw_param.get(field) is not None:
+            normalized[field] = raw_param.get(field)
+
+    options = raw_param.get("options")
+    if isinstance(options, list):
+        normalized["options"] = options
 
     return normalized
 
 
+def _field_param(field_key: str, raw_field: object, *, location: str, node: str | None = None) -> dict:
+    field = dict(raw_field) if isinstance(raw_field, dict) else {}
+    field["key"] = field_key
+    field["location"] = location
+    if node:
+        field["node"] = node
+    return _normalize_param(field)
+
+
+def _normalize_resource_specs(raw_specs: object) -> list[dict]:
+    """Normalize generated Markdown resource_specs into request metadata."""
+    if not isinstance(raw_specs, list):
+        return []
+
+    reserved_keys = {
+        "node",
+        "type",
+        "resourceBundleId",
+        "resourceBundleParams",
+        "resourceBundleTags",
+        "params",
+        "fields",
+    }
+    normalized_specs: list[dict] = []
+    for raw_spec in raw_specs:
+        if not isinstance(raw_spec, dict):
+            continue
+
+        node = str(raw_spec.get("node") or "").strip()
+        normalized_spec: dict = {}
+        if node:
+            normalized_spec["node"] = node
+
+        spec_type = raw_spec.get("type")
+        if isinstance(spec_type, str) and spec_type.strip():
+            normalized_spec["type"] = spec_type.strip()
+
+        resource_bundle_id = raw_spec.get("resourceBundleId")
+        if isinstance(resource_bundle_id, dict):
+            normalized_spec["resourceBundleId"] = _field_param(
+                "resourceBundleId",
+                resource_bundle_id,
+                location="resourceSpecs",
+                node=node,
+            )
+
+        resource_bundle_params = raw_spec.get("resourceBundleParams")
+        if isinstance(resource_bundle_params, dict):
+            normalized_bundle_params: dict = {}
+            for param_key, raw_param in resource_bundle_params.items():
+                normalized_bundle_params[str(param_key)] = _field_param(
+                    str(param_key),
+                    raw_param,
+                    location="resourceBundleParams",
+                    node=node,
+                )
+            if normalized_bundle_params:
+                normalized_spec["resourceBundleParams"] = normalized_bundle_params
+
+        resource_bundle_tags = raw_spec.get("resourceBundleTags")
+        if isinstance(resource_bundle_tags, dict):
+            normalized_spec["resourceBundleTags"] = _field_param(
+                "resourceBundleTags",
+                resource_bundle_tags,
+                location="resourceBundleTags",
+                node=node,
+            )
+
+        params = raw_spec.get("params")
+        if isinstance(params, dict):
+            normalized_params: dict = {}
+            for param_key, raw_param in params.items():
+                normalized_params[str(param_key)] = _field_param(
+                    str(param_key),
+                    raw_param,
+                    location="params",
+                    node=node,
+                )
+            if normalized_params:
+                normalized_spec["params"] = normalized_params
+
+        for field_key, raw_field in raw_spec.items():
+            if field_key in reserved_keys or not isinstance(raw_field, dict):
+                continue
+            normalized_spec[str(field_key)] = _field_param(
+                str(field_key),
+                raw_field,
+                location="resourceSpecFields",
+                node=node,
+            )
+
+        normalized_specs.append(normalized_spec)
+
+    return normalized_specs
+
+
 def _normalize_instructions(raw_instructions: dict) -> dict:
-    """Preserve workflow-driving instruction metadata for the request skill."""
+    """Preserve generated Markdown instruction metadata for the request skill."""
     normalized: dict = {}
     for key in ("node", "type", "osType", "cloudEntryTypeIds"):
         value = raw_instructions.get(key)
@@ -116,12 +220,100 @@ def _normalize_instructions(raw_instructions: dict) -> dict:
             continue
         normalized[key] = value
 
-    params_list = raw_instructions.get("parameters", [])
-    if isinstance(params_list, list):
-        normalized_params = [_normalize_param(p) for p in params_list if isinstance(p, dict)]
-        normalized["parameters"] = normalized_params
+    catalog_metadata = raw_instructions.get("catalog")
+    if isinstance(catalog_metadata, dict):
+        component_type = catalog_metadata.get("component_type") or catalog_metadata.get("componentType")
+        if isinstance(component_type, str) and component_type.strip():
+            normalized["componentType"] = component_type.strip()
+
+    root_params = raw_instructions.get("params")
+    if isinstance(root_params, dict):
+        normalized_root_params: dict = {}
+        for param_key, raw_param in root_params.items():
+            normalized_root_params[str(param_key)] = _field_param(
+                str(param_key),
+                raw_param,
+                location="rootParams",
+            )
+        if normalized_root_params:
+            normalized["params"] = normalized_root_params
+
+    resource_specs = _normalize_resource_specs(
+        raw_instructions.get("resource_specs") or raw_instructions.get("resourceSpecs")
+    )
+    if resource_specs:
+        normalized["resourceSpecs"] = resource_specs
+        if "node" not in normalized and resource_specs[0].get("node"):
+            normalized["node"] = resource_specs[0]["node"]
+        if "type" not in normalized and resource_specs[0].get("type"):
+            normalized["type"] = resource_specs[0]["type"]
+    top_level_required = raw_instructions.get("top_level_required") or raw_instructions.get("topLevelRequired")
+    if isinstance(top_level_required, list):
+        normalized["topLevelRequired"] = [v for v in top_level_required if isinstance(v, str) and v.strip()]
+
+    top_level_fields = raw_instructions.get("top_level_fields") or raw_instructions.get("topLevelFields")
+    if isinstance(top_level_fields, dict):
+        normalized_top_level_fields: dict = {}
+        for field_key, raw_field in top_level_fields.items():
+            normalized_top_level_fields[str(field_key)] = _field_param(
+                str(field_key),
+                raw_field,
+                location="topLevel",
+            )
+        if normalized_top_level_fields:
+            normalized["topLevelFields"] = normalized_top_level_fields
 
     return normalized
+
+
+def _add_request_instruction_section(normalized: dict, raw_instructions_text: str) -> None:
+    """Attach only the request instruction section to normalized metadata."""
+    request_section = _extract_markdown_section(raw_instructions_text, "# Request Instructions")
+    if request_section:
+        normalized["requestInstructions"] = request_section
+
+
+def _extract_markdown_section(markdown_text: str, heading: str) -> str:
+    """Extract one top-level Markdown section by exact heading."""
+    lines = markdown_text.splitlines()
+    start_index = -1
+    for index, line in enumerate(lines):
+        if line.strip().lstrip("\ufeff") == heading:
+            start_index = index + 1
+            break
+    if start_index == -1:
+        return ""
+
+    section_lines: list[str] = []
+    for line in lines[start_index:]:
+        if line.startswith("# "):
+            break
+        section_lines.append(line)
+    return "\n".join(section_lines).strip()
+
+
+def _strip_markdown_code_fence(section_text: str) -> str:
+    """Strip an optional fenced code block around section content."""
+    lines = section_text.strip().splitlines()
+    if not lines:
+        return ""
+    if lines[0].strip().startswith("```"):
+        lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
+def _parse_markdown_instructions(raw_instructions: str) -> dict | None:
+    parameter_section = _extract_markdown_section(raw_instructions, "# Request Parameter Instructions")
+    yaml_text = _strip_markdown_code_fence(parameter_section)
+    if not yaml_text:
+        return None
+    try:
+        parsed = yaml.safe_load(yaml_text)
+    except (TypeError, ValueError, yaml.YAMLError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 _NODE_TEMPLATE_PATTERN = re.compile(r"^\s{2}([A-Za-z0-9_.-]+):\s*$")
@@ -187,6 +379,7 @@ def _derive_blueprint_resource_type(raw_catalog: dict) -> dict:
         return {"node": node_name, "type": node_type}
     return {}
 
+
 keyword = sys.argv[1] if len(sys.argv) > 1 else ""
 url = f"{BASE_URL}/catalogs/published"
 params = {"query": "", "states": "PUBLISHED", "page": 1, "size": 50, "sort": "catalogIndex,asc"}
@@ -206,7 +399,7 @@ total = result.get("totalElements", len(items))
 # ── Machine-readable metadata (agent reads silently, do NOT display to user)
 # IMPORTANT: Do NOT show this block to user. Parse it silently.
 #   - serviceCategory: "GENERIC_SERVICE" = Ticket, others = Cloud Resource
-#   - params: normalized instruction parameters for the workflow
+#   - instructions: normalized generated Markdown metadata for the workflow
 #   - internal_request_trace_id: unique flow instance ID for this request session
 
 # Generate a new trace ID for this request flow instance
@@ -226,22 +419,19 @@ for i, c in enumerate(items):
         entry["catalogType"] = catalog_type
 
     derived_resource_type = _derive_blueprint_resource_type(c)
-    # Extract normalized instruction parameters from instructions
+    # Extract normalized generated Markdown instructions from catalog instructions.
     raw_instructions = (c.get("instructions") or "").strip()
     if raw_instructions:
-        try:
-            instr = json.loads(raw_instructions)
-            if isinstance(instr, dict):
-                normalized_instructions = _normalize_instructions(instr)
-                if normalized_instructions:
-                    entry["instructions"] = normalized_instructions
-                    entry["params"] = list(normalized_instructions.get("parameters", []) or [])
-                    for key in ("node", "type", "osType", "cloudEntryTypeIds"):
-                        value = normalized_instructions.get(key)
-                        if value is not None:
-                            entry[key] = value
-        except (json.JSONDecodeError, TypeError):
-            pass
+        instr = _parse_markdown_instructions(raw_instructions)
+        if isinstance(instr, dict):
+            normalized_instructions = _normalize_instructions(instr)
+            _add_request_instruction_section(normalized_instructions, raw_instructions)
+            if normalized_instructions:
+                entry["instructions"] = normalized_instructions
+                for key in ("node", "type", "osType", "cloudEntryTypeIds", "componentType"):
+                    value = normalized_instructions.get(key)
+                    if value is not None:
+                        entry[key] = value
 
     for key in ("node", "type"):
         if key not in entry and derived_resource_type.get(key):

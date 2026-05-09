@@ -21,13 +21,20 @@ SCRIPTS_DIR = (
     / "shared"
     / "scripts"
 )
-
 DATASOURCE_SCRIPTS_DIR = (
     REPO_ROOT
     / "providers"
     / "SmartCMP-Provider"
     / "skills"
     / "datasource"
+    / "scripts"
+)
+REQUEST_SCRIPTS_DIR = (
+    REPO_ROOT
+    / "providers"
+    / "SmartCMP-Provider"
+    / "skills"
+    / "request"
     / "scripts"
 )
 
@@ -87,32 +94,131 @@ def extract_meta(stderr: str, block_name: str):
     return json.loads(match.group(1))
 
 
-def test_list_services_preserves_instruction_fields(monkeypatch):
-    instructions = {
-        "parameters": [
-            {
-                "key": "name",
-                "label": "Resource Name",
-                "required": True,
-                "source": None,
-                "defaultValue": None,
-            },
-            {
-                "key": "businessGroupId",
-                "label": "Business Group",
-                "required": True,
-                "source": "list:business_groups",
-                "defaultValue": None,
-            },
-            {
-                "key": "cpu",
-                "label": "CPU",
-                "required": False,
-                "source": None,
-                "defaultValue": 2,
-            },
-        ]
-    }
+def run_main_script(monkeypatch, script_path: Path, argv: list[str], *, fake_get=None, fake_post=None):
+    module_name = f"test_{script_path.stem}_main_module"
+
+    monkeypatch.setenv("CMP_URL", "https://cmp.example.com")
+    monkeypatch.setenv("CMP_COOKIE", "CloudChef-Authenticate=test-token")
+    monkeypatch.setattr(requests, "get", fake_get or _unexpected_http_call)
+    monkeypatch.setattr(requests, "post", fake_post or _unexpected_http_call)
+
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    assert spec is not None
+    assert spec.loader is not None
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    exit_code = 0
+    try:
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            spec.loader.exec_module(module)
+            exit_code = module.main(argv)
+    finally:
+        sys.modules.pop(module_name, None)
+
+    return exit_code, stdout.getvalue(), stderr.getvalue()
+
+
+def test_list_services_preserves_generated_markdown_resource_specs(monkeypatch):
+    instructions = """
+# Request Parameter Instructions
+
+catalog:
+  id: "catalog-slb"
+  source_key: "resource.iaas.network.load_balancer.alicloud_slb"
+  component_type: "resource.iaas.network.load_balancer.alicloud_slb"
+  service_category: "CLOUD_COMPONENT_SERVICE"
+top_level_required:
+- "catalogId"
+- "businessGroupId"
+- "name"
+top_level_fields:
+  name:
+    type: "string"
+    required: true
+    ask: true
+params:
+  workComments:
+    type: "string"
+    required: true
+    default_value: "222333"
+  requestType:
+    type: "string"
+    required: false
+    default_value: "normal"
+    options:
+    - id: "normal"
+      label: "Normal"
+    - id: "urgent"
+      label: "Urgent"
+resource_specs:
+- node: "alicloud_slb"
+  type: "resource.iaas.network.load_balancer.alicloud_slb"
+  resourceBundleId:
+    type: "string"
+    required: true
+    default_value: "rb-1"
+  resourceBundleParams:
+    available_zone_id:
+      type: "string"
+      required: true
+      default_value: "cn-shanghai-a"
+    resource_group_id:
+      type: "string"
+      required: false
+  resourceBundleTags:
+    type: "array"
+    required: false
+    default_value:
+    - "env:prod"
+  credentialUser:
+    type: "string"
+    required: true
+    ask: true
+  systemDisk:
+    type: "object"
+    required: true
+    default_value:
+      size: 50
+  networkId:
+    type: "string"
+    required: true
+    default_value: "vsw-1"
+  securityGroupIds:
+    type: "array"
+    required: false
+    default_value:
+    - "sg-1"
+  params:
+    InstanceChargeType:
+      type: "string"
+      required: true
+      default_value: "PayByCLCU"
+    AddressType:
+      type: "string"
+      required: true
+      default_value: "intranet"
+      options:
+      - id: "internet"
+        label: "公网"
+      - id: "intranet"
+        label: "私网"
+    VpcId:
+      type: "string"
+      required: true
+      default_value: "vpc-1"
+      when: "AddressType == intranet"
+
+# Request Instructions
+
+Build from the request parameter section only.
+
+# Preapproval Instructions
+
+This section is not for request building.
+""".strip()
 
     def fake_get(url, headers=None, params=None, verify=None, timeout=None):
         assert url == "https://cmp.example.com/platform-api/catalogs/published"
@@ -120,133 +226,195 @@ def test_list_services_preserves_instruction_fields(monkeypatch):
             {
                 "content": [
                     {
-                        "id": "catalog-1",
-                        "nameZh": "Linux VM",
-                        "sourceKey": "resource.iaas.machine.instance.abstract",
-                        "serviceCategory": "VM",
-                        "instructions": json.dumps(instructions, ensure_ascii=False),
+                        "id": "catalog-slb",
+                        "nameZh": "Load Balancer",
+                        "sourceKey": "resource.iaas.network.load_balancer.alicloud_slb",
+                        "serviceCategory": "CLOUD_COMPONENT_SERVICE",
+                        "instructions": instructions,
                     }
                 ],
                 "totalElements": 1,
             }
         )
 
-    stdout, stderr = run_script(monkeypatch, "list_services.py", [], fake_get=fake_get, scripts_dir=DATASOURCE_SCRIPTS_DIR)
+    stdout, stderr = run_script(
+        monkeypatch,
+        "list_services.py",
+        [],
+        fake_get=fake_get,
+        scripts_dir=DATASOURCE_SCRIPTS_DIR,
+    )
     payload = extract_meta(stderr, "CATALOG_META")
-    catalogs = payload["catalogs"]
+    catalog = payload["catalogs"][0]
+    spec = catalog["instructions"]["resourceSpecs"][0]
 
     assert "Found 1 published catalog(s)." in stdout
-    assert catalogs[0]["instructions"]["parameters"][0]["defaultValue"] is None
-    assert catalogs[0]["params"][0]["source"] is None
-    assert catalogs[0]["params"][0]["required"] is True
-    assert catalogs[0]["params"][1]["source"] == "list:business_groups"
-    assert catalogs[0]["params"][2]["defaultValue"] == 2
-
-
-def test_list_services_marks_explicit_runtime_defaults_as_non_serializable(monkeypatch):
-    instructions = {
-        "parameters": [
-            {
-                "key": "resourceBundleName",
-                "label": "Resource Pool",
-                "required": False,
-                "source": None,
-                "defaultValue": "vsphere资源池",
-                "runtimeDefaultOnly": True,
-            },
-            {
-                "key": "computeProfileName",
-                "label": "Compute Profile",
-                "required": False,
-                "source": None,
-                "defaultValue": "微型计算",
-                "metadata": {"runtimeDefaultOnly": True},
-            },
-            {
-                "key": "networkId",
-                "label": "Network",
-                "required": True,
-                "source": None,
-                "defaultValue": "network-78",
-            },
-        ]
-    }
-
-    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
-        assert url == "https://cmp.example.com/platform-api/catalogs/published"
-        return FakeResponse(
-            {
-                "content": [
-                    {
-                        "id": "catalog-1",
-                        "nameZh": "Linux VM",
-                        "sourceKey": "resource.iaas.machine.instance.abstract",
-                        "serviceCategory": "VM",
-                        "instructions": json.dumps(instructions, ensure_ascii=False),
-                    }
-                ],
-                "totalElements": 1,
-            }
-        )
-
-    _, stderr = run_script(monkeypatch, "list_services.py", [], fake_get=fake_get, scripts_dir=DATASOURCE_SCRIPTS_DIR)
-    payload = extract_meta(stderr, "CATALOG_META")
-    params = payload["catalogs"][0]["params"]
-
-    assert params[0]["defaultValue"] is None
-    assert params[0]["runtimeDefaultOnly"] is True
-    assert params[1]["defaultValue"] is None
-    assert params[1]["runtimeDefaultOnly"] is True
-    assert params[2]["defaultValue"] == "network-78"
-    assert "runtimeDefaultOnly" not in params[2]
-
-
-def test_list_services_keeps_plain_defaults_when_runtime_only_flag_is_absent(monkeypatch):
-    instructions = {
-        "parameters": [
-            {
-                "key": "templateId",
-                "label": "Template",
-                "required": False,
-                "source": None,
-                "defaultValue": "vm-531",
-            }
-        ]
-    }
-
-    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
-        assert url == "https://cmp.example.com/platform-api/catalogs/published"
-        return FakeResponse(
-            {
-                "content": [
-                    {
-                        "id": "catalog-1",
-                        "nameZh": "Linux VM",
-                        "sourceKey": "resource.iaas.machine.instance.abstract",
-                        "serviceCategory": "VM",
-                        "instructions": json.dumps(instructions, ensure_ascii=False),
-                    }
-                ],
-                "totalElements": 1,
-            }
-        )
-
-    _, stderr = run_script(monkeypatch, "list_services.py", [], fake_get=fake_get, scripts_dir=DATASOURCE_SCRIPTS_DIR)
-    payload = extract_meta(stderr, "CATALOG_META")
-    params = payload["catalogs"][0]["params"]
-
-    assert params == [
-        {
-            "key": "templateId",
-            "label": "Template",
-            "required": False,
-            "source": None,
-            "defaultValue": "vm-531",
-        }
+    assert catalog["node"] == "alicloud_slb"
+    assert catalog["type"] == "resource.iaas.network.load_balancer.alicloud_slb"
+    assert catalog["componentType"] == "resource.iaas.network.load_balancer.alicloud_slb"
+    assert "params" not in catalog
+    assert catalog["instructions"]["topLevelRequired"] == ["catalogId", "businessGroupId", "name"]
+    assert catalog["instructions"]["requestInstructions"] == "Build from the request parameter section only."
+    assert catalog["instructions"]["topLevelFields"]["name"]["ask"] is True
+    assert catalog["instructions"]["params"]["workComments"]["defaultValue"] == "222333"
+    assert catalog["instructions"]["params"]["workComments"]["location"] == "rootParams"
+    assert catalog["instructions"]["params"]["requestType"]["options"] == [
+        {"id": "normal", "label": "Normal"},
+        {"id": "urgent", "label": "Urgent"},
     ]
+    assert spec["node"] == "alicloud_slb"
+    assert spec["type"] == "resource.iaas.network.load_balancer.alicloud_slb"
+    assert "componentType" not in spec
+    assert spec["resourceBundleId"]["defaultValue"] == "rb-1"
+    assert spec["resourceBundleParams"]["available_zone_id"]["defaultValue"] == "cn-shanghai-a"
+    assert spec["resourceBundleParams"]["resource_group_id"]["required"] is False
+    assert spec["resourceBundleTags"]["defaultValue"] == ["env:prod"]
+    assert "fields" not in spec
+    assert spec["credentialUser"]["location"] == "resourceSpecFields"
+    assert spec["credentialUser"]["ask"] is True
+    assert spec["systemDisk"]["defaultValue"] == {"size": 50}
+    assert spec["networkId"]["defaultValue"] == "vsw-1"
+    assert spec["securityGroupIds"]["defaultValue"] == ["sg-1"]
+    assert spec["params"]["InstanceChargeType"]["defaultValue"] == "PayByCLCU"
+    assert spec["params"]["AddressType"]["defaultValue"] == "intranet"
+    assert spec["params"]["AddressType"]["options"] == [
+        {"id": "internet", "label": "公网"},
+        {"id": "intranet", "label": "私网"},
+    ]
+    assert spec["params"]["VpcId"]["when"] == "AddressType == intranet"
 
 
-def test_list_services_derives_resource_type_from_blueprint_when_instructions_are_empty(monkeypatch):
+def test_list_services_ignores_old_json_instruction_payloads(monkeypatch):
+    instructions = json.dumps(
+        {
+            "parameters": [
+                {"key": "cpu", "required": True, "defaultValue": 2},
+            ]
+        },
+        ensure_ascii=False,
+    )
+
+    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        assert url == "https://cmp.example.com/platform-api/catalogs/published"
+        return FakeResponse(
+            {
+                "content": [
+                    {
+                        "id": "catalog-old-json",
+                        "nameZh": "Old JSON Catalog",
+                        "sourceKey": "resource.iaas.machine.instance.abstract",
+                        "serviceCategory": "CLOUD_COMPONENT_SERVICE",
+                        "instructions": instructions,
+                    }
+                ],
+                "totalElements": 1,
+            }
+        )
+
+    _, stderr = run_script(
+        monkeypatch,
+        "list_services.py",
+        [],
+        fake_get=fake_get,
+        scripts_dir=DATASOURCE_SCRIPTS_DIR,
+    )
+    payload = extract_meta(stderr, "CATALOG_META")
+    catalog = payload["catalogs"][0]
+
+    assert "instructions" not in catalog
+    assert "params" not in catalog
+
+
+def test_list_services_keeps_boolean_and_numeric_markdown_defaults(monkeypatch):
+    instructions = """
+# Request Parameter Instructions
+
+resource_specs:
+- node: "EIP"
+  type: "resource.iaas.network.floating_ip.eip.aliyun"
+  params:
+    AllocateEIP:
+      type: "boolean"
+      required: false
+      default_value: false
+    Bandwidth:
+      type: "number"
+      required: true
+      default_value: 5
+      when: "AllocateEIP == true"
+""".strip()
+
+    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        assert url == "https://cmp.example.com/platform-api/catalogs/published"
+        return FakeResponse(
+            {
+                "content": [
+                    {
+                        "id": "catalog-eip",
+                        "nameZh": "EIP",
+                        "sourceKey": "resource.iaas.network.floating_ip.eip.aliyun",
+                        "serviceCategory": "CLOUD_COMPONENT_SERVICE",
+                        "instructions": instructions,
+                    }
+                ],
+                "totalElements": 1,
+            }
+        )
+
+    _, stderr = run_script(
+        monkeypatch,
+        "list_services.py",
+        [],
+        fake_get=fake_get,
+        scripts_dir=DATASOURCE_SCRIPTS_DIR,
+    )
+    payload = extract_meta(stderr, "CATALOG_META")
+    params = payload["catalogs"][0]["instructions"]["resourceSpecs"][0]["params"]
+
+    assert params["AllocateEIP"]["defaultValue"] is False
+    assert params["Bandwidth"]["defaultValue"] == 5
+    assert params["Bandwidth"]["when"] == "AllocateEIP == true"
+
+
+def test_list_services_does_not_parse_legacy_front_matter_instructions(monkeypatch):
+    instructions = """
+---
+resource_specs:
+- node: "EIP"
+  type: "resource.iaas.network.floating_ip.eip.aliyun"
+---
+""".strip()
+
+    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        assert url == "https://cmp.example.com/platform-api/catalogs/published"
+        return FakeResponse(
+            {
+                "content": [
+                    {
+                        "id": "catalog-legacy",
+                        "nameZh": "Legacy",
+                        "sourceKey": "resource.iaas.network.floating_ip.eip.aliyun",
+                        "serviceCategory": "CLOUD_COMPONENT_SERVICE",
+                        "instructions": instructions,
+                    }
+                ],
+                "totalElements": 1,
+            }
+        )
+
+    _, stderr = run_script(
+        monkeypatch,
+        "list_services.py",
+        [],
+        fake_get=fake_get,
+        scripts_dir=DATASOURCE_SCRIPTS_DIR,
+    )
+    payload = extract_meta(stderr, "CATALOG_META")
+
+    assert "instructions" not in payload["catalogs"][0]
+
+
+def test_list_services_derives_resource_type_from_blueprint_when_markdown_is_empty(monkeypatch):
     main_yaml = """
 tosca_definitions_version: cloudify_dsl_1_3
 node_templates:
@@ -293,12 +461,19 @@ node_templates:
     catalog = payload["catalogs"][0]
 
     assert catalog["catalogType"] == "APPLICATION"
+    assert "instructions" not in catalog
     assert catalog["node"] == "Compute"
     assert catalog["type"] == "cloudchef.nodes.Compute"
 
 
 def test_list_services_prefers_instruction_type_over_blueprint_resource_type(monkeypatch):
-    instructions = {"node": "Database", "type": "cloudchef.nodes.Database", "parameters": []}
+    instructions = """
+# Request Parameter Instructions
+
+resource_specs:
+- node: "Database"
+  type: "cloudchef.nodes.Database"
+""".strip()
     main_yaml = """
 node_templates:
   Compute:
@@ -316,7 +491,7 @@ node_templates:
                         "sourceKey": "resource.paas.database",
                         "serviceCategory": "CLOUD_COMPONENT_SERVICE",
                         "type": "APPLICATION",
-                        "instructions": json.dumps(instructions, ensure_ascii=False),
+                        "instructions": instructions,
                         "blueprint": {"mainYaml": main_yaml},
                     }
                 ],
@@ -339,6 +514,123 @@ node_templates:
     assert catalog["type"] == "cloudchef.nodes.Database"
 
 
+def test_list_resource_bundles_uses_request_flow_filters(monkeypatch):
+    captured = {}
+
+    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        captured["url"] = url
+        captured["params"] = params
+        return FakeResponse(
+            {
+                "content": [
+                    {
+                        "id": "rb-1",
+                        "name": "aliyun资源池",
+                        "businessGroupId": "bg-1",
+                        "cloudEntryTypeId": "yacmp:cloudentry:type:aliyun",
+                        "cloudEntryId": "ce-1",
+                        "regionId": "cn-shanghai",
+                        "privateCloudEntry": False,
+                        "facets": ["FACET_ENV:dev"],
+                    }
+                ]
+            }
+        )
+
+    exit_code, stdout, _ = run_main_script(
+        monkeypatch,
+        REQUEST_SCRIPTS_DIR / "list_resource_bundles.py",
+        [
+            "bg-1",
+            "resource.iaas.machine.instance.abstract",
+            "cloudchef.nodes.Compute",
+            "--cloud-entry-type-id",
+            "yacmp:cloudentry:type:aliyun",
+        ],
+        fake_get=fake_get,
+    )
+    payload = extract_meta(stdout, "RESOURCE_BUNDLE_META")
+
+    assert exit_code == 0
+    assert captured["url"] == "https://cmp.example.com/platform-api/resource-bundles"
+    assert captured["params"] == {
+        "businessGroupId": "bg-1",
+        "cloudEntryTypeId": "yacmp:cloudentry:type:aliyun",
+        "componentType": "resource.iaas.machine.instance.abstract",
+        "enabled": "true",
+        "nodeType": "cloudchef.nodes.Compute",
+        "readOnly": "false",
+        "strategy": "RB_POLICY_STATIC",
+    }
+    assert "Found 1 resource pool(s)" in stdout
+    assert payload[0]["id"] == "rb-1"
+    assert payload[0]["facets"] == ["FACET_ENV:dev"]
+
+
+def test_list_facets_outputs_only_compact_request_metadata(monkeypatch):
+    captured = {}
+
+    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        captured["url"] = url
+        captured["params"] = params
+        return FakeResponse(
+            {
+                "content": [
+                    {
+                        "id": "raw-facet-id",
+                        "key": "FACET_ENV",
+                        "nameZh": "资源环境",
+                        "aspects": ["RESOURCE_BUNDLE", "NETWORK"],
+                        "createdBy": "ROLE_SOLUTION_USER",
+                        "lockVersion": 7,
+                        "options": [
+                            {
+                                "id": "dev",
+                                "nameZh": "开发",
+                                "createdBy": "ROLE_SOLUTION_USER",
+                            },
+                            {
+                                "key": "test",
+                                "name": {"zh": "测试", "en": "Test"},
+                                "deleted": False,
+                            },
+                        ],
+                    }
+                ]
+            }
+        )
+
+    exit_code, stdout, _ = run_main_script(
+        monkeypatch,
+        REQUEST_SCRIPTS_DIR / "list_facets.py",
+        ["bg-1", "--node-type", "resource.iaas.network.load_balancer.alicloud_slb"],
+        fake_get=fake_get,
+    )
+    payload = extract_meta(stdout, "FACET_META")
+
+    assert exit_code == 0
+    assert captured["url"] == "https://cmp.example.com/platform-api/resource-bundles/available-facets"
+    assert captured["params"] == {
+        "businessGroupId": "bg-1",
+        "cloudEntryId": "",
+        "nodeType": "resource.iaas.network.load_balancer.alicloud_slb",
+    }
+    assert payload == [
+        {
+            "key": "FACET_ENV",
+            "label": "资源环境",
+            "options": [
+                {"key": "dev", "label": "开发"},
+                {"key": "test", "label": "测试"},
+            ],
+        }
+    ]
+    assert "raw-facet-id" not in stdout
+    assert "createdBy" not in stdout
+    assert "aspects" not in stdout
+    assert "lockVersion" not in stdout
+
+
 def test_list_applications_emits_meta_and_selection_prompt(monkeypatch):
     def fake_get(url, headers=None, params=None, verify=None, timeout=None):
         assert url == "https://cmp.example.com/platform-api/groups"
@@ -357,7 +649,6 @@ def test_list_applications_emits_meta_and_selection_prompt(monkeypatch):
     payload = extract_meta(stderr, "APPLICATION_META")
 
     assert "Found 2 application(s):" in stdout
-    assert "请选择应用（输入编号）：" in stdout
     assert "Project A" in stdout
     assert payload[0]["id"] == "app-1"
     assert payload[0]["description"] == "A team app"

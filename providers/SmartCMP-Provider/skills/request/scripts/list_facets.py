@@ -20,9 +20,9 @@ Environment:
 API Reference:
   GET /resource-bundles/available-facets?businessGroupId=xxx&cloudEntryId=&nodeType=cloudchef.nodes.Compute
 """
-import sys
 import json
 import argparse
+import sys
 
 import requests
 
@@ -80,24 +80,92 @@ def fetch_facets(*, base_url, headers, business_group_id, node_type="cloudchef.n
     return []
 
 
+def _text(value):
+    """Return the best display text from string or i18n dictionary values."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        for key in ("zh", "zh_CN", "nameZh", "label", "en", "name"):
+            text = value.get(key)
+            if isinstance(text, str) and text:
+                return text
+        for text in value.values():
+            if isinstance(text, str) and text:
+                return text
+    return ""
+
+
+def _display_name(item):
+    """Resolve a user-facing display name from common SmartCMP shapes."""
+    if not isinstance(item, dict):
+        return _text(item)
+    for key in ("nameZh", "labelZh", "displayName", "label", "name", "title", "i18nTitle"):
+        text = _text(item.get(key))
+        if text:
+            return text
+    return ""
+
+
+def _option_key(option):
+    """Resolve the stable option key used in resourceBundleTags."""
+    if not isinstance(option, dict):
+        return str(option) if option is not None else ""
+    for key in ("key", "id", "value", "code"):
+        value = option.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def _option_items(facet):
+    """Return selectable options from common API field names."""
+    if not isinstance(facet, dict):
+        return []
+    for key in ("options", "values", "items", "children", "source", "selectDatas"):
+        value = facet.get(key)
+        if isinstance(value, list):
+            return value
+    return []
+
+
+def compact_facets(facets):
+    """Keep only facet fields that the request skill needs."""
+    compacted = []
+    for facet in facets:
+        if not isinstance(facet, dict):
+            continue
+
+        facet_key = facet.get("key") or facet.get("id") or facet.get("code") or ""
+        if not facet_key:
+            continue
+
+        options = []
+        for option in _option_items(facet):
+            option_key = _option_key(option)
+            if not option_key:
+                continue
+            options.append({
+                "key": option_key,
+                "label": _display_name(option) or option_key,
+            })
+
+        compacted.append({
+            "key": facet_key,
+            "label": _display_name(facet) or facet_key,
+            "options": options,
+        })
+    return compacted
+
+
 def format_facet_summary(facet):
-    """Format a single facet for display output."""
-    key = facet.get("key", "")
-    name = facet.get("name", "")
-    name_zh = facet.get("nameZh", "")
-    option_mode = facet.get("optionMode", "")
-    options = facet.get("options", [])
+    """Format a compact facet for display output."""
+    lines = [f"  Facet: {facet['label']} (key={facet['key']})"]
+    if not facet["options"]:
+        lines.append("    No selectable options returned.")
+        return "\n".join(lines)
 
-    display_name = name_zh or name or key
-    lines = [f"  Facet: {display_name} (key={key}, mode={option_mode})"]
-
-    for i, opt in enumerate(options, start=1):
-        opt_key = opt.get("key", "")
-        opt_name = opt.get("name", "")
-        opt_name_zh = opt.get("nameZh", "")
-        opt_display = opt_name_zh or opt_name or opt_key
-        lines.append(f"    {i}) {opt_display} (key={opt_key})")
-
+    for i, option in enumerate(facet["options"], start=1):
+        lines.append(f"    {i}) {option['label']} (key={option['key']})")
     return "\n".join(lines)
 
 
@@ -113,18 +181,19 @@ def main(argv=None) -> int:
         print(f"[ERROR] {exc}")
         return 1
 
-    if not facets:
+    compacted_facets = compact_facets(facets)
+    if not compacted_facets:
         print("No facets found.")
         return 0
 
-    print(f"Found {len(facets)} facet(s):\n")
-    for facet in facets:
+    print(f"Found {len(compacted_facets)} facet(s):\n")
+    for facet in compacted_facets:
         print(format_facet_summary(facet))
         print()
 
     # Output machine-readable metadata for agent consumption
     print("##FACET_META_START##")
-    print(json.dumps(facets, ensure_ascii=False))
+    print(json.dumps(compacted_facets, ensure_ascii=False))
     print("##FACET_META_END##")
 
     return 0
