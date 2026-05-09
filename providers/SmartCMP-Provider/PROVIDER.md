@@ -62,7 +62,7 @@ use_when:
   - User describes infrastructure needs in natural language and wants them translated into request drafts
   - User wants to review cost optimization recommendations, savings opportunities, or remediation progress
   - User wants to execute a native day2 fix for a cost finding
-  - User wants to analyze one or more existing resources by ID for compliance or security risk
+  - User wants to analyze one or more existing resources by exact name or visible list index for compliance or security risk
 
 avoid_when:
   - User wants generic issue tracking outside cloud service requests (use Jira provider)
@@ -304,7 +304,7 @@ CMP_URL=https://cmp.example.com
 | `preapproval-agent` | Agent | Autonomous approval pre-review | Webhook-triggered, policy-based decisions |
 | `request-decomposition-agent` | Agent | Transform natural-language requirements into request drafts | NL parsing, multi-skill orchestration |
 | `cost-optimization` | Optimization | Analyze savings opportunities and execute platform-native fixes | `list_recommendations`, `analyze_recommendation`, `execute_optimization`, `track_execution` |
-| `resource-compliance` | Analysis | Fetch resources by ID, normalize `type + properties`, and run componentType-driven cloud/software/OS compliance analysis | `list_resource`, `analyze_resource` |
+| `resource-compliance` | Analysis | Resolve resources by exact name or visible list index, normalize `type + properties`, and run componentType-driven cloud/software/OS compliance analysis | `list_resource`, `analyze_resource` |
 
 ### Core Skills
 
@@ -420,17 +420,22 @@ and only uses the native day2 fix endpoint.
 
 #### resource-compliance
 
-Inspect one or more existing resources by ID and analyze lifecycle, patch,
-security, and configuration posture with componentType-driven analyzers.
+Inspect one or more existing resources by exact resource name or visible list
+selection and analyze lifecycle, patch, security, and configuration posture
+with componentType-driven analyzers.
 
 `list_resource.py` returns both the raw resource payloads and a shared
 normalized `type + properties` view that can be reused beyond compliance.
 
 ```bash
-python skills/datasource/scripts/list_resource.py <resource_id>         # Fetch resource details + normalized view
-python skills/resource-compliance/scripts/analyze_resource.py <resource_id>                    # Analyze direct input
+python skills/resource/scripts/list_all_resource.py --scope virtual_machines                  # Show visible names and indexes
+python skills/resource-compliance/scripts/analyze_resource.py --resource-name e2e-newrole-linux3-0501
+python skills/resource-compliance/scripts/analyze_resource.py --resource-index 2 --resource-directory-json '[{"index":2,"id":"internal-id","name":"e2e-newrole-linux3-0501"}]'
 python skills/resource-compliance/scripts/analyze_resource.py --payload-json '{"resourceIds":["id-1"],"triggerSource":"webhook"}'
 ```
+
+Interactive resource-compliance workflows must not ask users for SmartCMP
+UUIDs. Resource IDs are internal API and webhook compatibility values only.
 
 Representative output fields:
 
