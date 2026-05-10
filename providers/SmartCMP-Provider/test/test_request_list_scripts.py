@@ -284,6 +284,87 @@ This section is not for request building.
     assert spec["params"]["VpcId"]["when"] == "AddressType == intranet"
 
 
+def test_list_services_preserves_generated_markdown_generic_request(monkeypatch):
+    instructions = """
+# Request Parameter Instructions
+
+catalog:
+  id: "catalog-ticket"
+  source_key: ""
+  service_category: "GENERIC_SERVICE"
+top_level_required:
+- "catalogId"
+- "businessGroupId"
+- "name"
+top_level_fields:
+  name:
+    type: "string"
+    required: true
+    ask: true
+generic_request:
+  description:
+    type: "string"
+    required: true
+    ask: true
+  processForm:
+    approvalReason:
+      type: "string"
+      required: true
+      default_value: "need temporary access"
+
+# Request Instructions
+
+Build a ticket request.
+""".strip()
+
+    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        assert url == "https://cmp.example.com/platform-api/catalogs/published"
+        return FakeResponse(
+            {
+                "content": [
+                    {
+                        "id": "catalog-ticket",
+                        "nameZh": "Ticket",
+                        "sourceKey": "",
+                        "serviceCategory": "GENERIC_SERVICE",
+                        "instructions": instructions,
+                        "blueprint": {
+                            "mainYaml": """
+topology_template:
+  node_templates:
+    Compute:
+      type: cloudchef.nodes.Compute
+""",
+                        },
+                    }
+                ],
+                "totalElements": 1,
+            }
+        )
+
+    stdout, stderr = run_script(
+        monkeypatch,
+        "list_services.py",
+        [],
+        fake_get=fake_get,
+        scripts_dir=DATASOURCE_SCRIPTS_DIR,
+    )
+    payload = extract_meta(stderr, "CATALOG_META")
+    catalog = payload["catalogs"][0]
+    generic_request = catalog["instructions"]["genericRequest"]
+
+    assert "Found 1 published catalog(s)." in stdout
+    assert catalog["serviceCategory"] == "GENERIC_SERVICE"
+    assert "node" not in catalog
+    assert "type" not in catalog
+    assert "resourceSpecs" not in catalog["instructions"]
+    assert generic_request["description"]["location"] == "genericRequest"
+    assert generic_request["description"]["ask"] is True
+    assert generic_request["processForm"]["approvalReason"]["location"] == "genericRequest.processForm"
+    assert generic_request["processForm"]["approvalReason"]["defaultValue"] == "need temporary access"
+    assert catalog["instructions"]["requestInstructions"] == "Build a ticket request."
+
+
 def test_list_services_ignores_old_json_instruction_payloads(monkeypatch):
     instructions = json.dumps(
         {

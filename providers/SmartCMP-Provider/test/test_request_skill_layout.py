@@ -94,6 +94,10 @@ def test_request_skill_defines_markdown_request_assembly() -> None:
     assert "root request fields declared in `instructions.params.<key>`" in skill_text
     assert "top-level JSON object `params.<key>`" in skill_text
     assert "Do not put root `instructions.params` fields into" in skill_text
+    assert "`instructions.genericRequest.description`" in skill_text
+    assert "`genericRequest.description`" in skill_text
+    assert "`instructions.genericRequest.processForm.<key>`" in skill_text
+    assert "`genericRequest.processForm.<key>`" in skill_text
     assert "field schemas declared directly on `instructions.resourceSpecs[]`" in skill_text
     assert "directly on the same `resourceSpecs[]` item" in skill_text
     assert "Do not create or consume a literal `fields` object" in skill_text
@@ -127,6 +131,9 @@ def test_request_skill_defines_markdown_request_assembly() -> None:
     assert "Never serialize metadata keys" in skill_text
     assert "`options`" in skill_text
     assert '"<directResourceSpecKey>": "<active value>"' in skill_text
+    assert "Ticket/work-order generated Markdown request shape" in skill_text
+    assert '"genericRequest": {' in skill_text
+    assert '"processForm": {' in skill_text
 
 
 def test_request_skill_uses_resource_pool_chinese_term() -> None:
@@ -186,6 +193,7 @@ def test_request_skill_defines_missing_markdown_behavior() -> None:
     assert "Call `smartcmp_list_flavors` when the user supplied a spec such as `2c4g`" in skill_text
     assert '"computeProfileId": "<flavor id>"' in skill_text
     assert 'serviceCategory: "GENERIC_SERVICE"' in skill_text
+    assert "generated `instructions.genericRequest` Markdown" in skill_text
     assert '"genericRequest"' in skill_text
     assert "description" in skill_text
 

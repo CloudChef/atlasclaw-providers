@@ -97,7 +97,7 @@ tool_submit_parameters: |
     "properties": {
       "json_body": {
         "type": "string",
-        "description": "REQUIRED. The complete request JSON as a string. For cloud/resource requests: include catalogId, catalogName, businessGroupId, name, resourceSpecs built from generated Markdown instructions.resourceSpecs, and optional top-level params built from instructions.params. Put resourceBundleId at resourceSpecs[].resourceBundleId, resourceBundleTags at resourceSpecs[].resourceBundleTags, resourceBundleParams under resourceSpecs[].resourceBundleParams, resource-spec params under resourceSpecs[].params, resource-spec fields under resourceSpecs[] directly, and catalog form params under top-level params. If resourceBundleTags is used, omit resourceBundleId for the same resource spec. For tickets without Markdown: include catalogId, catalogName, businessGroupId, name, and genericRequest {description}. Do NOT include userLoginId (auto-injected by script). FORBIDDEN fields: never add priority, category, requestor, parameters, impactScope, urgency, contactName, or any field not listed above. DO NOT omit this parameter."
+        "description": "REQUIRED. The complete request JSON as a string. For cloud/resource requests: include catalogId, catalogName, businessGroupId, name, resourceSpecs built from generated Markdown instructions.resourceSpecs, and optional top-level params built from instructions.params. Put resourceBundleId at resourceSpecs[].resourceBundleId, resourceBundleTags at resourceSpecs[].resourceBundleTags, resourceBundleParams under resourceSpecs[].resourceBundleParams, resource-spec params under resourceSpecs[].params, resource-spec fields under resourceSpecs[] directly, and catalog form params under top-level params. If resourceBundleTags is used, omit resourceBundleId for the same resource spec. For tickets: build genericRequest.description and optional genericRequest.processForm from generated Markdown instructions.genericRequest; for tickets without Markdown, include catalogId, catalogName, businessGroupId, name, and genericRequest {description}. Do NOT include userLoginId (auto-injected by script). FORBIDDEN fields: never add priority, category, requestor, parameters, impactScope, urgency, contactName, or any field not listed above. DO NOT omit this parameter."
       }
     },
     "required": ["json_body"]
@@ -271,13 +271,16 @@ Status semantics:
    business group is returned, use it. If multiple are returned, ask a concise
    numbered question using display names only and wait for the user's
    selection. Do not show business group IDs to the user.
-3. Before asking for resource fields, check the selected catalog metadata. If a
-   cloud/resource catalog has no `instructions.resourceSpecs` but its selected
-   catalog metadata has `type: "cloudchef.nodes.Compute"`, use the Compute
-   fallback below. If it has no Markdown and is not Compute, stop and explain
-   that the catalog is missing generated Markdown instructions.
+3. Before asking for request fields, check the selected catalog metadata. If a
+   ticket/work-order catalog (`serviceCategory: "GENERIC_SERVICE"`) has
+   `instructions.genericRequest`, build from that metadata. If a cloud/resource
+   catalog has no `instructions.resourceSpecs` but its selected catalog metadata
+   has `type: "cloudchef.nodes.Compute"`, use the Compute fallback below. If it
+   has no Markdown and is not Compute, stop and explain that the catalog is
+   missing generated Markdown instructions.
 4. Build the request from the selected catalog's generated Markdown metadata:
-   `instructions.resourceSpecs` and `instructions.topLevelFields`.
+   `instructions.resourceSpecs`, `instructions.genericRequest`, and
+   `instructions.topLevelFields`.
 5. Ask only for active required fields with no default, plus fields explicitly
    marked `ask: true`. Defaults are used silently.
 6. Show a JSON preview and ask for confirmation.
@@ -341,6 +344,7 @@ YAML as selected catalog metadata:
 - `instructions.topLevelFields`
 - `instructions.topLevelRequired`
 - `instructions.params`
+- `instructions.genericRequest`
 - `instructions.resourceSpecs`
 - `instructions.requestInstructions` from exactly `# Request Instructions`,
   when that section exists
@@ -401,6 +405,14 @@ scope.
 - Do not put root `instructions.params` fields into
   `resourceSpecs[].params`. Do not put `resourceSpecs[].params` fields into the
   top-level `params` object.
+- For ticket/work-order catalogs (`serviceCategory: "GENERIC_SERVICE"`) with
+  `instructions.genericRequest`, build a `genericRequest` object instead of
+  `resourceSpecs`. Put `instructions.genericRequest.description` at
+  `genericRequest.description`. Put fields declared under
+  `instructions.genericRequest.processForm.<key>` at
+  `genericRequest.processForm.<key>`. Follow the same active-field rules:
+  evaluate `when`, use defaults silently, ask only for active required/no-default
+  or `ask: true` fields, and omit inactive or empty optional fields.
 - For each `instructions.resourceSpecs[]`, create one `resourceSpecs[]` item
   and copy `node` and `type` exactly when present.
 - Treat field schemas declared directly on `instructions.resourceSpecs[]`,
@@ -519,6 +531,25 @@ field schema as `resourceSpecs[].<key>`.
 For Compute, `securityGroupIds` must be an array, for example
 `"securityGroupIds": ["sg-xxxxxxxx"]`.
 
+Ticket/work-order generated Markdown request shape:
+
+```json
+{
+  "catalogId": "<selected catalog UUID>",
+  "catalogName": "<selected catalog name>",
+  "businessGroupId": "<selected business group id>",
+  "name": "<user-provided request name>",
+  "genericRequest": {
+    "description": "<active value from instructions.genericRequest.description>",
+    "processForm": {
+      "<key>": "<active value from instructions.genericRequest.processForm>"
+    }
+  }
+}
+```
+
+Omit `genericRequest.processForm` when no form fields are declared or active.
+
 ## Business-Group Resolution
 
 - Use `smartcmp_list_available_bgs` as the authoritative source.
@@ -635,8 +666,8 @@ Compute fallback JSON shape:
 ```
 
 For ticket/work-order catalogs (`serviceCategory: "GENERIC_SERVICE"`) without
-Markdown, submit only this minimal shape after collecting `name` and
-description:
+generated `instructions.genericRequest` Markdown, submit only this minimal shape
+after collecting `name` and description:
 
 ```json
 {

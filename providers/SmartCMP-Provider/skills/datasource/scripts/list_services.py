@@ -16,7 +16,7 @@ Output:
       Parse silently — do NOT display to user.
 
       IMPORTANT: Check 'serviceCategory' to determine service type:
-        - "GENERIC_SERVICE" → Ticket/Work Order (use manualRequest structure)
+        - "GENERIC_SERVICE" → Ticket/Work Order (use genericRequest structure)
         - Others → Cloud Resource (use resourceSpecs structure, plus optional root params)
 
 Environment:
@@ -206,6 +206,38 @@ def _normalize_resource_specs(raw_specs: object) -> list[dict]:
     return normalized_specs
 
 
+def _normalize_generic_request(raw_generic_request: object) -> dict:
+    """Normalize generated Markdown generic_request into ticket request metadata."""
+    if not isinstance(raw_generic_request, dict):
+        return {}
+
+    normalized: dict = {}
+    for field_key, raw_field in raw_generic_request.items():
+        field_name = str(field_key)
+        if field_name in {"processForm", "process_form"}:
+            if not isinstance(raw_field, dict):
+                continue
+            process_form: dict = {}
+            for param_key, raw_param in raw_field.items():
+                process_form[str(param_key)] = _field_param(
+                    str(param_key),
+                    raw_param,
+                    location="genericRequest.processForm",
+                )
+            if process_form:
+                normalized["processForm"] = process_form
+            continue
+
+        if isinstance(raw_field, dict):
+            normalized[field_name] = _field_param(
+                field_name,
+                raw_field,
+                location="genericRequest",
+            )
+
+    return normalized
+
+
 def _normalize_instructions(raw_instructions: dict) -> dict:
     """Preserve generated Markdown instruction metadata for the request skill."""
     normalized: dict = {}
@@ -237,6 +269,11 @@ def _normalize_instructions(raw_instructions: dict) -> dict:
             )
         if normalized_root_params:
             normalized["params"] = normalized_root_params
+
+    generic_request = raw_instructions.get("generic_request") or raw_instructions.get("genericRequest")
+    normalized_generic_request = _normalize_generic_request(generic_request)
+    if normalized_generic_request:
+        normalized["genericRequest"] = normalized_generic_request
 
     resource_specs = _normalize_resource_specs(
         raw_instructions.get("resource_specs") or raw_instructions.get("resourceSpecs")
@@ -418,7 +455,8 @@ for i, c in enumerate(items):
     if catalog_type:
         entry["catalogType"] = catalog_type
 
-    derived_resource_type = _derive_blueprint_resource_type(c)
+    is_generic_service = str(entry.get("serviceCategory") or "").upper() == "GENERIC_SERVICE"
+    derived_resource_type = {} if is_generic_service else _derive_blueprint_resource_type(c)
     # Extract normalized generated Markdown instructions from catalog instructions.
     raw_instructions = (c.get("instructions") or "").strip()
     if raw_instructions:
