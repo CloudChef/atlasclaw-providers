@@ -13,16 +13,15 @@ triggers:
   - reject request
   - approval
   - reject
-  - 待审批
-  - 查看待审批
-  - 查看审批详情
-  - 审批通过
-  - 审批拒绝
-  - 同意
-  - 同意审批
-  - 批准
-  - 批准审批
-  - 通过审批
+  - items awaiting approval
+  - view pending approvals
+  - view approval detail
+  - approve decision
+  - reject decision
+  - agree
+  - pass approval
+  - approve
+  - approval pass
 
 use_when:
   - User wants to view pending approval items
@@ -30,7 +29,7 @@ use_when:
   - User needs to approve or reject service requests
   - User asks about their approval queue or approval workflow tasks
   - User asks for the detail of a pending approval task by ticket/workflow/request/task/process identifier
-  - User asks for SmartCMP 待审批、工单详情、审批详情
+  - User asks for SmartCMP pending approvals, ticket details, or approval details
 
 avoid_when:
   - User wants to provision new resources (use request skill)
@@ -41,14 +40,14 @@ avoid_when:
 examples:
   - "Show me pending approvals"
   - "Show me the detail of TIC20260316000001"
-  - "查看TIC20260316000001的详情"
-  - "看下这个工单的审批详情"
+  - "Show the detail of TIC20260316000001"
+  - "Check the approval detail of this ticket"
   - "Approve request #12345"
   - "Approve CHG20260413000011"
   - "Agree RES20260505000010"
   - "Pass TIC20260502000003"
-  - "同意 1"
-  - "批准 1"
+  - "agree 1"
+  - "approve 1"
   - "Reject the VM request with reason budget exceeded"
   - "Reject CHG20260413000011"
   - "Deny TIC20260502000003"
@@ -67,14 +66,14 @@ tool_list_capability_class: "provider:smartcmp"
 tool_list_priority: 100
 tool_list_result_mode: "tool_only_ok"
 tool_detail_name: "smartcmp_get_request_detail"
-tool_detail_description: "Get detail of a SmartCMP pending approval task. ONLY use when user explicitly asks to view/show/inspect/check details by Request ID / 编号, e.g. 'show detail of CHG20260413000011' or '查看 CHG20260413000011 的详情'. Do NOT use this tool for action commands such as approve, agree, pass, reject, deny, refuse, 批准, 同意, 通过, 拒绝, or 驳回. For submitted request status or '是否审批通过/是否被批准', use smartcmp_get_request_status."
+tool_detail_description: "Get detail of a SmartCMP pending approval task. ONLY use when the user explicitly asks to view/show/inspect/check details by Request ID or display number, e.g. 'show detail of CHG20260413000011' or 'view the detail of request 1'. Do NOT use this tool for action commands such as approve, agree, pass, reject, deny, refuse, or return. For submitted request status or approval-result questions, use smartcmp_get_request_status."
 tool_detail_entrypoint: "scripts/get_request_detail.py"
 tool_detail_aliases:
   - "approval detail"
   - "request detail"
   - "show request detail"
-  - "审批详情"
-  - "工单详情"
+  - "workflow detail"
+  - "ticket detail"
 tool_detail_keywords:
   - "detail"
   - "details"
@@ -86,18 +85,17 @@ tool_detail_keywords:
   - "approval detail"
   - "ticket detail"
   - "request detail"
-  - "查看"
-  - "看下"
-  - "详情"
+  - "check"
+  - "look up"
+  - "detail"
 tool_detail_use_when:
-  - "User asks to view/show/inspect/check pending approval task detail by Request ID / 编号"
-  - "User provides a specific Request ID / 编号 like RES20260505000010, TIC20260502000003, or CHG20260413000011 and explicitly asks for detail/详情"
-  - "Use this for 'show detail of <Request ID>', 'view <Request ID> details', '查看 <Request ID> 详情', or '看下 <Request ID> 的详情'"
+  - "User asks to view/show/inspect/check pending approval task detail by Request ID or display number"
+  - "User provides a specific Request ID or display number like RES20260505000010, TIC20260502000003, CHG20260413000011, or 1 and explicitly asks for detail"
+  - "Use this for 'show detail of <Request ID>', 'view <Request ID> details', or 'show request 1 detail'"
 tool_detail_avoid_when:
   - "User asks to approve, agree, pass, or approve request, including 'approve <Request ID>', 'agree <Request ID>', 'pass <Request ID>', 'approve 1', or 'approve request 1' (use smartcmp_approve)"
-  - "User asks to 批准, 同意, 通过, or 审批通过, including '批准 <Request ID>', '同意 <Request ID>', '通过 <Request ID>', '批准 1', or '同意 1' (use smartcmp_approve)"
   - "User asks to reject, deny, refuse, or reject request, including 'reject <Request ID>', 'deny <Request ID>', 'refuse <Request ID>', or 'reject 1' (use smartcmp_reject)"
-  - "User asks to 拒绝 or 驳回, including '拒绝 <Request ID>', '驳回 <Request ID>', or '拒绝 1' (use smartcmp_reject)"
+  - "User asks to return or send back a request, including 'return <Request ID>' or 'return 1' (use smartcmp_reject)"
   - "User asks for their own submitted request status or whether it has been approved (use smartcmp_get_request_status)"
   - "User is in the middle of submitting a NEW resource request (use smartcmp_submit_request instead)"
   - "User is providing parameters (name, password, specs) for a new request"
@@ -126,31 +124,27 @@ tool_detail_parameters: |
     "required": ["identifier"]
   }
 tool_approve_name: "smartcmp_approve"
-tool_approve_description: "Approve requests in SmartCMP. `ids` must be SmartCMP user-facing Request ID(s), e.g. RES20260505000010, TIC20260502000003, or CHG20260413000011. For user selections like 'approve 1', '同意 1', or '批准 1', resolve the row index to APPROVAL_META.requestId before calling. Never pass row numbers, UUID-shaped internal IDs, or placeholder/dummy values; the script resolves Request IDs internally."
+tool_approve_description: "Approve requests in SmartCMP. `ids` must be SmartCMP user-facing Request ID(s), e.g. RES20260505000010, TIC20260502000003, or CHG20260413000011. For user selections like 'approve 1', 'agree 1', or 'pass 1', resolve the row index to APPROVAL_META.requestId before calling. Never pass row numbers, UUID-shaped internal IDs, or placeholder/dummy values; the script resolves Request IDs internally."
 tool_approve_entrypoint: "scripts/approve.py"
 tool_approve_aliases:
   - "approve request"
   - "agree request"
   - "pass request"
-  - "同意"
-  - "批准"
-  - "通过"
-  - "审批通过"
+  - "approve"
+  - "agree"
+  - "pass"
+  - "approval pass"
 tool_approve_keywords:
   - "approve"
   - "approved"
   - "agree"
   - "pass"
   - "approve request"
-  - "批准"
-  - "同意"
-  - "通过"
-  - "审批通过"
+  - "approval pass"
 tool_approve_use_when:
   - "User asks to approve/agree/pass a Request ID, e.g. 'approve CHG20260413000011', 'agree RES20260505000010', or 'pass TIC20260502000003'"
   - "User asks to approve/agree/pass a row from the latest pending approval list, e.g. 'approve 1', 'agree 1', or 'pass request 1'"
-  - "User asks to 批准/同意/通过/审批通过 a Request ID, e.g. '批准 CHG20260413000011', '同意 RES20260505000010', or '通过 TIC20260502000003'"
-  - "User asks to 批准/同意/通过 a row from the latest pending approval list, e.g. '批准 1', '同意 1', or '通过第1个'"
+  - "User asks to approve/agree/pass an explicitly selected row from the latest pending approval list, e.g. 'approve row 1' or 'pass the first one'"
 tool_approve_avoid_when:
   - "User only asks to view/show/inspect/check request detail without an approval action verb (use smartcmp_get_request_detail)"
   - "User asks whether their own submitted request has already been approved (use smartcmp_get_request_status)"
@@ -179,14 +173,14 @@ tool_approve_parameters: |
     "required": ["ids"]
   }
 tool_reject_name: "smartcmp_reject"
-tool_reject_description: "Reject requests in SmartCMP. `ids` must be SmartCMP user-facing Request ID(s), e.g. RES20260505000010, TIC20260502000003, or CHG20260413000011. For user selections like 'reject 1' or '拒绝 1', resolve the row index to APPROVAL_META.requestId before calling. Never pass row numbers, UUID-shaped internal IDs, or placeholder/dummy values; the script resolves Request IDs internally."
+tool_reject_description: "Reject requests in SmartCMP. `ids` must be SmartCMP user-facing Request ID(s), e.g. RES20260505000010, TIC20260502000003, or CHG20260413000011. For user selections like 'reject 1' or 'deny 1', resolve the row index to APPROVAL_META.requestId before calling. Never pass row numbers, UUID-shaped internal IDs, or placeholder/dummy values; the script resolves Request IDs internally."
 tool_reject_entrypoint: "scripts/reject.py"
 tool_reject_aliases:
   - "reject request"
   - "deny request"
   - "refuse request"
-  - "拒绝"
-  - "驳回"
+  - "reject"
+  - "return"
 tool_reject_keywords:
   - "reject"
   - "rejected"
@@ -194,12 +188,11 @@ tool_reject_keywords:
   - "denied"
   - "refuse"
   - "reject request"
-  - "拒绝"
-  - "驳回"
+  - "return"
 tool_reject_use_when:
   - "User asks to reject/deny/refuse a Request ID, e.g. 'reject CHG20260413000011', 'deny RES20260505000010', or 'refuse TIC20260502000003'"
   - "User asks to reject/deny/refuse a row from the latest pending approval list, e.g. 'reject 1' or 'deny request 1'"
-  - "User asks to 拒绝/驳回 a Request ID or row, e.g. '拒绝 CHG20260413000011', '驳回 RES20260505000010', or '拒绝 1'"
+  - "User asks to return a Request ID or row, e.g. 'return CHG20260413000011' or 'return 1'"
 tool_reject_avoid_when:
   - "User only asks to view/show/inspect/check request detail without a rejection action verb (use smartcmp_get_request_detail)"
   - "User asks whether their own submitted request was rejected (use smartcmp_get_request_status)"
@@ -250,8 +243,8 @@ Use this skill when user intent is any of:
 | Intent | Keywords |
 |--------|----------|
 | View pending | "show pending approvals", "list approvals", "what needs approval" |
-| Approve | "approve request", "agree request", "pass request", "approve #1", "agree 1", "同意 1", "批准 1", "通过 1", "approve all", "batch approve" |
-| Reject | "reject request", "deny request", "refuse request", "reject #1", "deny 1", "拒绝 1", "驳回 1", "batch reject" |
+| Approve | "approve request", "agree request", "pass request", "approve #1", "agree 1", "pass 1", "approve all", "batch approve" |
+| Reject | "reject request", "deny request", "refuse request", "reject #1", "deny 1", "return 1", "batch reject" |
 
 ## Intent Priority
 
@@ -260,20 +253,20 @@ Action commands always win over detail lookup.
 | User intent | Required tool |
 |-------------|---------------|
 | approve/agree/pass + Request ID or row number | `smartcmp_approve` |
-| 批准/同意/通过/审批通过 + Request ID or row number | `smartcmp_approve` |
+| approve/agree/pass/approval pass + Request ID or row number | `smartcmp_approve` |
 | reject/deny/refuse + Request ID or row number | `smartcmp_reject` |
-| 拒绝/驳回 + Request ID or row number | `smartcmp_reject` |
+| return + Request ID or row number | `smartcmp_reject` |
 | view/show/inspect/check detail + Request ID | `smartcmp_get_request_detail` |
-| 查看/看下/详情 + Request ID | `smartcmp_get_request_detail` |
+| check/look up/detail + Request ID | `smartcmp_get_request_detail` |
 
 Examples:
 - `approve CHG20260413000011` MUST call `smartcmp_approve`.
 - `agree RES20260505000010` MUST call `smartcmp_approve`.
 - `pass TIC20260502000003` MUST call `smartcmp_approve`.
-- `批准 CHG20260413000011` MUST call `smartcmp_approve`.
+- `approve row 1` MUST call `smartcmp_approve`.
 - `reject CHG20260413000011` MUST call `smartcmp_reject`.
 - `deny RES20260505000010` MUST call `smartcmp_reject`.
-- `查看 CHG20260413000011 的详情` MUST call `smartcmp_get_request_detail`.
+- `show detail of request 1` MUST call `smartcmp_get_request_detail`.
 - `show detail of CHG20260413000011` MUST call `smartcmp_get_request_detail`.
 
 ## Scripts
@@ -357,7 +350,7 @@ python scripts/list_pending.py [--days N]
 
 **Mapping user selection to correct ID:**
 ```
-User says "1", "approve 1", "同意 1", or "批准 1"
+User says "1", "approve 1", "agree 1", or "pass 1"
   |
   v
 Find item with index=1 in APPROVAL_META
