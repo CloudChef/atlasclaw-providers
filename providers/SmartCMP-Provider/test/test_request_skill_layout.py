@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 # Copyright 2026  Qianyun, Inc., www.cloudchef.io, All rights reserved.
 
 from pathlib import Path
@@ -7,6 +7,14 @@ from pathlib import Path
 PROVIDER_ROOT = Path(__file__).resolve().parents[1]
 REQUEST_SKILL = PROVIDER_ROOT / "skills" / "request" / "SKILL.md"
 APPROVAL_SKILL = PROVIDER_ROOT / "skills" / "approval" / "SKILL.md"
+DECOMPOSITION_SKILL = PROVIDER_ROOT / "skills" / "request-decomposition-agent" / "SKILL.md"
+DECOMPOSITION_GUIDELINES = (
+    PROVIDER_ROOT
+    / "skills"
+    / "request-decomposition-agent"
+    / "references"
+    / "decomposition-guidelines.md"
+)
 
 
 def test_request_skill_requires_datasource_business_group_resolution():
@@ -73,7 +81,7 @@ def test_request_skill_follows_current_user_message_language():
     assert "English requests must get English follow-ups" in skill_text
     assert "Short summary of the request in the user's language" in skill_text
     assert "Short Chinese summary" not in skill_text
-    assert "Ask `请确认以上信息是否正确？（是/否）`" not in skill_text
+    assert "Please confirm whether the information above is correct. (yes/no)" in skill_text
 
 
 def test_request_skill_contracts_ticket_and_linux_vm_flow_expectations():
@@ -115,14 +123,58 @@ def test_request_skill_declares_status_query_tool() -> None:
     assert "REQ20260501000095" in skill_text
     assert "CHG20260413000011" in skill_text
     assert "Do not pass internal UUIDs" in skill_text
-    assert "申请状态" in skill_text
-    assert "是否审批通过" in skill_text
-    assert "我刚才提交的申请是否已经被批准了" in skill_text
+    assert "request status" in skill_text
+    assert "approval status" in skill_text
+    assert "Has the request I just submitted been approved?" in skill_text
     assert "reuse the most recent `smartcmp_submit_request` Request ID" in skill_text
     assert "Treat the tool output as" in skill_text
     assert "current user's message language" in skill_text
     assert "`APPROVAL_PENDING`: not approved yet" in skill_text
     assert "do not claim approval or rejection" in skill_text
+
+
+def test_request_skill_defers_multi_vm_requests_to_decomposition_agent() -> None:
+    skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
+
+    assert "Multi-resource routing boundary" in skill_text
+    assert "one CMP request flow at a time" in skill_text
+    assert "multiple resource types in one ask" in skill_text
+    assert 'per-instance differences such as "first ..., second ..., third ..."' in skill_text
+    assert "different specs per instance" in skill_text
+    assert "do not continue with the single-catalog parameter" in skill_text
+
+
+def test_request_decomposition_skill_covers_multi_vm_chat_phrases() -> None:
+    skill_text = DECOMPOSITION_SKILL.read_text(encoding="utf-8")
+
+    assert "mixed resource request" in skill_text
+    assert "per-instance configuration differences" in skill_text
+    assert "ordinal instance differences" in skill_text
+    assert "distinct per-item configuration" in skill_text
+    assert "For ordinary chat/runtime routing" in skill_text
+    assert "first / second / third" in skill_text
+    assert "differently configured component" in skill_text
+
+
+def test_request_skill_explicitly_allows_same_type_quantity_requests() -> None:
+    skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
+
+    assert "multiple instances of the same resource type under one service request" in skill_text
+    assert "Request multiple Linux virtual machines with the same specification" in skill_text
+    assert "one service catalog / one resource type / one shared parameter set" in skill_text
+    assert "Quantity by itself is **not** a decomposition signal." in skill_text
+
+
+def test_request_decomposition_skill_excludes_same_type_quantity_only_requests() -> None:
+    skill_text = DECOMPOSITION_SKILL.read_text(encoding="utf-8")
+    guidelines_text = DECOMPOSITION_GUIDELINES.read_text(encoding="utf-8")
+
+    assert "multiple resource types that should become separate CMP requests" in skill_text
+    assert "same parameters in one request flow (use request skill)" in skill_text
+    assert "Do **not** route" in skill_text
+    assert "quantity N of the same resource type" in skill_text
+    assert "Not A Decomposition Signal By Itself" in guidelines_text
+    assert "Quantity alone for one resource type is not enough." in guidelines_text
 
 
 def test_approval_skill_does_not_claim_submitted_request_status_queries() -> None:
@@ -148,7 +200,7 @@ def test_approval_skill_separates_action_commands_from_detail_lookup() -> None:
     assert "agree RES20260505000010" in skill_text
     assert "pass TIC20260502000003" in skill_text
     assert "deny RES20260505000010" in skill_text
-    assert "批准 CHG20260413000011" in skill_text
+    assert "User asks to approve/agree/pass a Request ID" in skill_text
     assert "tool_approve_aliases:" in skill_text
     assert tool_metadata_contains(skill_text, "tool_approve_keywords:", "approve")
     assert tool_metadata_contains(skill_text, "tool_approve_keywords:", "agree")
@@ -157,7 +209,7 @@ def test_approval_skill_separates_action_commands_from_detail_lookup() -> None:
     assert tool_metadata_contains(skill_text, "tool_reject_keywords:", "refuse")
     assert "use smartcmp_approve" in detail_avoid_when
     assert "use smartcmp_reject" in detail_avoid_when
-    assert '  - "审批"' not in detail_keywords
+    assert '  - "approve"' not in detail_keywords
     assert '  - "TIC"' not in detail_keywords
 
 
@@ -272,3 +324,24 @@ def tool_metadata_contains(skill_text: str, section: str, value: str) -> bool:
     """Return whether a frontmatter list section contains a literal string item."""
     body = skill_text.split(section, 1)[1].split("\n", 20)[1:]
     return any(line.strip() == f'- "{value}"' for line in body if line.startswith("  - "))
+
+
+def test_request_decomposition_skill_requires_clarification_for_conflicting_vm_ordinals() -> None:
+    skill_text = DECOMPOSITION_SKILL.read_text(encoding="utf-8")
+
+    assert 'ordinal-style references such as "first", "second"' in skill_text
+    assert "If the stated instance quantity conflicts with the referenced ordinal positions" in skill_text
+    assert '"request 4 instances, second ..., fifth ..., sixth ..."' in skill_text
+    assert "do not guess the missing instance count" in skill_text
+    assert "Ask for clarification before decomposition" in skill_text
+
+
+def test_request_decomposition_guidelines_require_ordinal_quantity_validation() -> None:
+    guidelines_text = DECOMPOSITION_GUIDELINES.read_text(encoding="utf-8")
+
+    assert "Ordinal And Quantity Validation" in guidelines_text
+    assert "If the user gives a total instance count and also gives ordinal per-item details" in guidelines_text
+    assert "If the numbering is non-consecutive or out of range" in guidelines_text
+    assert "Do not silently renumber the user's intent." in guidelines_text
+    assert "Do not invent missing instances just to make the numbering contiguous." in guidelines_text
+    assert "Instance quantity conflicts with the user's ordinal references." in guidelines_text

@@ -11,22 +11,30 @@ triggers:
   - decompose requirements
   - agent orchestrator
   - service request drafting
+  - mixed resource request
+  - per-instance configuration differences
+  - ordinal instance differences
 
 use_when:
   - User describes infrastructure or application needs in natural language
   - Requirements need to be decomposed into multiple service requests
   - User wants reviewable draft requests rather than direct submission
   - agent_identity is agent-request-orchestrator
+  - User asks for multiple resource types that should become separate CMP requests
+  - User asks for multiple resources with distinct per-item configuration
+  - User enumerates differences across instances or components using ordinal references such as first / second / third
 
 avoid_when:
   - User has specific parameters ready for a single request (use request skill)
+  - User wants multiple instances of the same resource type with the same parameters in one request flow (use request skill)
   - User only wants to browse resources (use datasource skill)
   - User wants to approve/reject requests (use approval skill)
 
 examples:
-  - "I need a web application environment with 3 VMs and a load balancer"
+  - "I need a web application environment with application servers, a database, and a load balancer"
   - "Set up a development environment for our new project"
   - "Provision infrastructure for a microservices deployment"
+  - "Create several instances where the first needs a small profile and the second needs a larger profile."
 
 related:
   - request
@@ -53,6 +61,12 @@ This skill activates when:
 - Input is descriptive text (not a clean catalog request)
 - `agent_identity` is `agent-request-orchestrator`
 - `request_text` is provided
+
+For ordinary chat/runtime routing, this skill should be preferred whenever the
+user asks for different resource types in one request, or when the user asks
+for multiple resources with distinct per-item configuration. Do **not** route
+here just because the user asks for quantity N of the same resource type with
+the same parameters.
 
 ## Robot Admin Execution
 
@@ -140,6 +154,35 @@ This agent accesses SmartCMP only through the provider tools selected by AtlasCl
 | Network | Connectivity dependencies |
 | Monitoring | Operational components |
 
+### Distinct-configuration decomposition rule
+
+When the user asks for multiple resources with distinct configurations, treat
+each differently configured component as its own draft sub-request instead of
+collapsing everything into one request body.
+
+If the user wants multiple instances of the same resource type with the same
+configuration under one service request, keep that request in the plain
+`request` skill instead of decomposing it.
+
+- Preserve the user-stated quantity.
+- Preserve per-item differences such as CPU, memory, disk, OS, environment, and
+  naming hints.
+- If the user says "first", "second", or "third", keep those distinctions as
+  separate sub-requests.
+- If shared fields are mentioned once for all instances, copy them into each child
+  draft as shared assumptions.
+- If a field is missing for one instance, leave that field unresolved for that instance only.
+- Treat any ordinal-style references such as "first", "second", "third",
+  "fifth", or "sixth" as evidence of per-item differences that must stay in
+  decomposition mode rather than collapsing into one shared-parameter request.
+- If the stated instance quantity conflicts with the referenced ordinal positions,
+  stop and ask a focused clarification question before building sub-requests.
+- Examples of conflicts that require clarification:
+  - "request 4 instances, second ..., fifth ..., sixth ..."
+  - "request 3 instances, first ... and fourth ..."
+- For those conflicts, do not guess the missing instance count, do not renumber the
+  user's intent silently, and do not submit anything.
+
 ### Handling Unsupported Components
 
 - If no suitable CMP catalog service → Mark as **unresolved** for manual handling
@@ -184,6 +227,7 @@ This agent accesses SmartCMP only through the provider tools selected by AtlasCl
 | Schema retrieval fails for one | Keep other valid sub-requests |
 | Mode unsafe for execution | Return draft payloads only |
 | Key fields guessed | Do NOT submit final requests |
+| Instance quantity conflicts with ordinal references | Ask for clarification before decomposition |
 
 ## Example Decomposition
 
