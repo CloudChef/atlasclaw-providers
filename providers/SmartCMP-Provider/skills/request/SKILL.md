@@ -1,4 +1,4 @@
-﻿---
+---
 name: "request"
 description: "Self-service request skill. Request cloud resources, application environments, ticket/work order services, or check submitted request status by Request ID. Keywords: request, provision, deploy, create VM, apply resources, submit ticket, request status, 申请资源, 创建虚拟机, 提交工单, 申请状态."
 provider_type: "smartcmp"
@@ -36,6 +36,7 @@ use_when:
   - User wants to submit a self-service request through the service catalog
   - User wants to create a ticket or work order
   - User already knows the service they want and is ready to provide request parameters
+  - User wants multiple instances of the same resource type under one service request with the same parameters
   - User wants to check the status of a submitted SmartCMP request by Request ID
   - User asks whether their submitted request has been approved
 
@@ -43,10 +44,13 @@ avoid_when:
   - User only wants to browse available resources (use datasource skill)
   - User wants to approve or reject requests (use approval skill)
   - User describes requirements in natural language without specific parameters (use request-decomposition-agent)
+  - User asks for different resource types that should become separate CMP requests (use request-decomposition-agent)
+  - User gives per-instance differences such as first/second/third configurations or different specs per instance (use request-decomposition-agent)
   - User wants to list approval tasks waiting for them or perform approval actions (use approval skill)
 
 examples:
   - "Create a new VM with 2c4g"
+  - "Request multiple Linux virtual machines with the same specification"
   - "Provision cloud resources for my project"
   - "Deploy a Linux VM in production environment"
   - "Submit a request for 3 virtual machines"
@@ -80,7 +84,7 @@ tool_list_services_parameters: |
     }
   }
 tool_submit_name: "smartcmp_submit_request"
-tool_submit_description: "Submit resource request to SmartCMP. RULES: (1) NEVER claim submitted without calling this tool. (2) Show JSON preview and wait for user confirmation BEFORE calling. (3) json_body is REQUIRED. (4) catalogId MUST be UUID from catalog metadata id field. See Field Placement table in skill body for exact structure rules."
+tool_submit_description: "Submit resource request to SmartCMP. RULES: (1) NEVER claim submitted without calling this tool. (2) Show JSON preview and wait for user confirmation BEFORE calling. (3) json_body is REQUIRED. (4) catalogId MUST be UUID from catalog metadata id field. (5) Same-type multi-instance requests must use one top-level count field plus one shared resourceSpecs item; per-instance differences belong in request-decomposition-agent. See Field Placement table in skill body for exact structure rules."
 tool_submit_entrypoint: "scripts/submit.py"
 tool_submit_groups:
   - cmp
@@ -97,7 +101,7 @@ tool_submit_parameters: |
     "properties": {
       "json_body": {
         "type": "string",
-        "description": "REQUIRED. The complete request JSON as a string. For cloud/resource requests: include catalogId, catalogName, businessGroupId, name, resourceSpecs built from generated Markdown instructions.resourceSpecs, and optional top-level params built from instructions.params. Put resourceBundleId at resourceSpecs[].resourceBundleId, resourceBundleTags at resourceSpecs[].resourceBundleTags, resourceBundleParams under resourceSpecs[].resourceBundleParams, resource-spec params under resourceSpecs[].params, resource-spec fields under resourceSpecs[] directly, and catalog form params under top-level params. If resourceBundleTags is used, omit resourceBundleId for the same resource spec. For tickets: build genericRequest.description and optional genericRequest.processForm from generated Markdown instructions.genericRequest; for tickets without Markdown, include catalogId, catalogName, businessGroupId, name, and genericRequest {description}. Do NOT include userLoginId (auto-injected by script). FORBIDDEN fields: never add priority, category, requestor, parameters, impactScope, urgency, contactName, or any field not listed above. DO NOT omit this parameter."
+        "description": "REQUIRED. The complete request JSON as a string. For cloud/resource requests: include catalogId, catalogName, businessGroupId, name, resourceSpecs built from generated Markdown instructions.resourceSpecs, and optional top-level params built from instructions.params. Put resourceBundleId at resourceSpecs[].resourceBundleId, resourceBundleTags at resourceSpecs[].resourceBundleTags, resourceBundleParams under resourceSpecs[].resourceBundleParams, resource-spec params under resourceSpecs[].params, resource-spec fields under resourceSpecs[] directly, and catalog form params under top-level params. For same-type multi-instance requests, keep one shared resourceSpecs item and add one top-level count field instead of duplicating resourceSpecs. If resourceBundleTags is used, omit resourceBundleId for the same resource spec. For tickets: build genericRequest.description and optional genericRequest.processForm from generated Markdown instructions.genericRequest; for tickets without Markdown, include catalogId, catalogName, businessGroupId, name, and genericRequest {description}. Do NOT include userLoginId (auto-injected by script). FORBIDDEN fields: never add priority, category, requestor, parameters, impactScope, urgency, contactName, or any field not listed above. DO NOT omit this parameter."
       }
     },
     "required": ["json_body"]
@@ -241,6 +245,66 @@ Submit cloud resource, application environment, or ticket/work order requests th
 
 Seven tools exist: `smartcmp_list_services`, `smartcmp_list_available_bgs`, `smartcmp_list_flavors`, `smartcmp_list_facets`, `smartcmp_list_resource_bundles`, `smartcmp_submit_request`, and `smartcmp_get_request_status`.
 
+### Multi-resource routing boundary
+
+This skill is for one CMP request flow at a time. That single flow may still
+represent one service catalog / one resource type / one shared parameter set
+with quantity N.
+
+Keep the request in this skill when the user wants multiple instances of the
+same resource type with the same configuration, for example:
+
+- "several identical Linux VMs for one project"
+- "multiple instances of the same database service with shared parameters"
+- "quantity N of one resource type with one shared parameter set"
+
+Route to `request-decomposition-agent` only when the request needs to be split
+into distinct sub-requests, especially when the user gives:
+
+- multiple resource types in one ask
+- per-instance differences such as "first ..., second ..., third ..."
+- different specs per instance
+- mixed roles/components that should become separate CMP requests
+
+Quantity by itself is **not** a decomposition signal. The request workflow and
+submit tool should interpret same-type quantity from the user's original
+language without requiring AtlasClaw core to pre-structure `resource_count`.
+
+When this boundary is hit, do not continue with the single-catalog parameter
+collection flow in this skill.
+
+### Single-instance vs shared-quantity contract
+
+This skill supports two request shapes, and they are not interchangeable:
+
+- **Single-instance request**: one resource type, one instance, one
+  `resourceSpecs` item, and no top-level count field unless the selected
+  catalog explicitly requires one.
+- **Same-type multi-instance request**: one resource type, one shared
+  parameter set, one shared `resourceSpecs` item, plus one top-level count
+  field.
+
+For same-type multi-instance requests:
+
+- Prefer the exact top-level count key declared by the selected catalog when it
+  exists, for example `quantity`, `count`, `instanceCount`, or `serverCount`.
+- If the selected catalog does not declare a top-level count key, use
+  top-level `quantity`.
+- Keep exactly one shared `resourceSpecs` item. This skill's submit contract
+  accepts one request-level parameter set per request body.
+- Do **not** duplicate identical `resourceSpecs` entries just to represent
+  quantity N.
+- Do **not** invent per-instance names, hostnames, IPs, disk sizes, or other
+  per-instance overrides when the user asked for shared parameters.
+- If the user supplies per-instance differences, separate names for each
+  instance, or mixed component roles, stop using this skill and route to
+  `request-decomposition-agent`.
+
+For any non-ticket request that uses `resourceSpecs`, this skill expects
+exactly one `resourceSpecs` item per request body. The only supported way to
+represent multiple same-type instances in this skill is a single shared
+`resourceSpecs` item plus one top-level count field.
+
 ### Submitted request status flow
 
 Use `smartcmp_get_request_status` only for submitted request status or
@@ -382,6 +446,10 @@ scope.
 
 - Top-level JSON always includes `catalogId`, `catalogName`,
   `businessGroupId`, and `name`.
+- For same-type multi-instance requests with shared parameters, add one
+  top-level count field such as `quantity`, `count`, `instanceCount`, or
+  `serverCount`, and keep exactly one shared `resourceSpecs[]` item.
+- Quantity alone does not require decomposition; per-instance differences do.
 - Generated field attributes belong in `# Request Parameter Instructions`, not
   in the `# Request Instructions` prose. Keep field metadata such as `type`,
   `required`, `defaultValue`, `default_value`, `when`, `ask`, `label`,
@@ -500,6 +568,7 @@ scope.
   "catalogName": "<selected catalog name>",
   "businessGroupId": "<selected business group id>",
   "name": "<user-provided request name>",
+  "quantity": 3,
   "resourceSpecs": [
     {
       "node": "<from instructions.resourceSpecs[].node>",
@@ -527,7 +596,9 @@ fields inside any `params`, and do not put network fields inside
 `resourceBundleParams`. Never include `resourceBundleId` or
 `resourceBundleParams` when `resourceBundleTags` is used in the same spec. Do
 not serialize a `fields` wrapper. Serialize each active direct resource-spec
-field schema as `resourceSpecs[].<key>`.
+field schema as `resourceSpecs[].<key>`. Same-type multi-instance requests must
+keep one shared `resourceSpecs[]` item plus one top-level count field; never
+duplicate identical `resourceSpecs[]` entries just to represent quantity.
 For Compute, `securityGroupIds` must be an array, for example
 `"securityGroupIds": ["sg-xxxxxxxx"]`.
 
