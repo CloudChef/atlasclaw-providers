@@ -158,6 +158,27 @@ def test_request_decomposition_skill_covers_multi_vm_chat_phrases() -> None:
     assert "treat each VM as its own draft sub-request" in skill_text
 
 
+def test_request_skill_explicitly_allows_same_type_quantity_requests() -> None:
+    skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
+
+    assert "multiple instances of the same resource type under one service request" in skill_text
+    assert "Request 3 Linux virtual machines with the same 2c4g specification" in skill_text
+    assert "one service catalog / one resource type / one shared parameter set" in skill_text
+    assert "Quantity by itself is **not** a decomposition signal." in skill_text
+
+
+def test_request_decomposition_skill_excludes_same_type_quantity_only_requests() -> None:
+    skill_text = DECOMPOSITION_SKILL.read_text(encoding="utf-8")
+    guidelines_text = DECOMPOSITION_GUIDELINES.read_text(encoding="utf-8")
+
+    assert "multiple resource types that should become separate CMP requests" in skill_text
+    assert "same parameters in one request flow (use request skill)" in skill_text
+    assert "Do **not** route" in skill_text
+    assert "quantity N of the same resource type" in skill_text
+    assert "Not A Decomposition Signal By Itself" in guidelines_text
+    assert "Quantity alone for one resource type is not enough." in guidelines_text
+
+
 def test_approval_skill_does_not_claim_submitted_request_status_queries() -> None:
     skill_text = APPROVAL_SKILL.read_text(encoding="utf-8")
 

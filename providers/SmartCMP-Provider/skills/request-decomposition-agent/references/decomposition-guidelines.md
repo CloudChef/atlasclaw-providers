@@ -9,6 +9,11 @@ Use this file when a descriptive requirement needs to be turned into multiple CM
 - The requirement includes environment, expected workload, or resilience hints that can guide service selection.
 - The user gives per-item VM differences using ordinal references such as first, second, third, fifth, or sixth.
 
+## Not A Decomposition Signal By Itself
+
+- Quantity alone for one resource type is not enough.
+- If the user wants multiple instances of the same resource type with the same parameters, keep it in the plain `request` workflow.
+
 ## Ordinal And Quantity Validation
 
 - If the user gives a total VM count and also gives ordinal per-VM details, validate that the ordinal references fit within that count.

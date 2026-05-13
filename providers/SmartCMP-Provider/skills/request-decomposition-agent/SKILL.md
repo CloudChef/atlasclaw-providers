@@ -22,11 +22,13 @@ use_when:
   - Requirements need to be decomposed into multiple service requests
   - User wants reviewable draft requests rather than direct submission
   - agent_identity is agent-request-orchestrator
+  - User asks for multiple resource types that should become separate CMP requests
   - User asks for multiple virtual machines or multiple CMP resources with distinct per-item configuration
   - User enumerates differences like first VM / second VM / third VM, or 第一台 / 第二台 / 第三台
 
 avoid_when:
   - User has specific parameters ready for a single request (use request skill)
+  - User wants multiple instances of the same resource type with the same parameters in one request flow (use request skill)
   - User only wants to browse resources (use datasource skill)
   - User wants to approve/reject requests (use approval skill)
 
@@ -63,10 +65,11 @@ This skill activates when:
 - `agent_identity` is `agent-request-orchestrator`
 - `request_text` is provided
 
-For ordinary chat/runtime routing, this skill should also be preferred whenever
-the user asks for multiple virtual machines or multiple resource requests with
-distinct per-item configuration, even if the request already names VM-related
-parameters.
+For ordinary chat/runtime routing, this skill should be preferred whenever the
+user asks for different resource types in one request, or when the user asks
+for multiple resources with distinct per-item configuration. Do **not** route
+here just because the user asks for quantity N of the same resource type with
+the same parameters.
 
 ## Robot Admin Execution
 
@@ -154,11 +157,15 @@ This agent accesses SmartCMP only through the provider tools selected by AtlasCl
 | Network | Connectivity dependencies |
 | Monitoring | Operational components |
 
-### Multi-VM decomposition rule
+### Distinct-configuration multi-VM decomposition rule
 
 When the user asks for multiple virtual machines with distinct configurations,
 treat each VM as its own draft sub-request instead of collapsing everything into
 one request body.
+
+If the user wants multiple virtual machines with the same configuration under
+one service request, keep that request in the plain `request` skill instead of
+decomposing it.
 
 - Preserve the user-stated quantity.
 - Preserve per-item differences such as CPU, memory, disk, OS, environment, and
@@ -169,8 +176,8 @@ one request body.
   draft as shared assumptions.
 - If a field is missing for one VM, leave that field unresolved for that VM only.
 - Treat any ordinal-style per-VM references such as "first", "second",
-  "third", "fifth", or "sixth" as evidence that the request must stay in
-  decomposition mode rather than collapsing into one VM request.
+  "third", "fifth", or "sixth" as evidence of per-item differences that must
+  stay in decomposition mode rather than collapsing into one VM request.
 - If the stated VM quantity conflicts with the referenced ordinal positions,
   stop and ask a focused clarification question before building sub-requests.
 - Examples of conflicts that require clarification:

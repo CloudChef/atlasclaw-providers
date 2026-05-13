@@ -36,6 +36,7 @@ use_when:
   - User wants to submit a self-service request through the service catalog
   - User wants to create a ticket or work order
   - User already knows the service they want and is ready to provide request parameters
+  - User wants multiple instances of the same resource type under one service request with the same parameters
   - User wants to check the status of a submitted SmartCMP request by Request ID
   - User asks whether their submitted request has been approved
 
@@ -43,11 +44,13 @@ avoid_when:
   - User only wants to browse available resources (use datasource skill)
   - User wants to approve or reject requests (use approval skill)
   - User describes requirements in natural language without specific parameters (use request-decomposition-agent)
-  - User asks for multiple virtual machines or multiple resource requests with per-item differences such as quantity, first/second/third configurations, or different specs per instance (use request-decomposition-agent)
+  - User asks for different resource types that should become separate CMP requests (use request-decomposition-agent)
+  - User gives per-instance differences such as first/second/third configurations or different specs per instance (use request-decomposition-agent)
   - User wants to list approval tasks waiting for them or perform approval actions (use approval skill)
 
 examples:
   - "Create a new VM with 2c4g"
+  - "Request 3 Linux virtual machines with the same 2c4g specification"
   - "Provision cloud resources for my project"
   - "Deploy a Linux VM in production environment"
   - "提交一个问题工单"
@@ -207,17 +210,30 @@ Six tools exist: `smartcmp_list_services`, `smartcmp_list_available_bgs`, `smart
 
 ### Multi-resource routing boundary
 
-This skill is for one CMP request flow at a time. If the user asks for multiple
-virtual machines or multiple resource requests with distinct per-item
-configuration, do not force that input into a single-resource workflow.
+This skill is for one CMP request flow at a time. That single flow may still
+represent one service catalog / one resource type / one shared parameter set
+with quantity N.
 
-Route those requests to `request-decomposition-agent` instead, especially when
-the user gives quantity or enumerated differences such as:
+Keep the request in this skill when the user wants multiple instances of the
+same resource type with the same configuration, for example:
 
-- "3 virtual machines"
+- "3 virtual machines with the same 2c4g Linux specification"
+- "3 identical Linux VMs for one project"
+- "申请三台相同配置的虚拟机"
+
+Route to `request-decomposition-agent` only when the request needs to be split
+into distinct sub-requests, especially when the user gives:
+
+- multiple virtual machines with different specs per instance
+- multiple resource types in one ask
 - "first VM ..., second VM ..., third VM ..."
-- "申请三台虚拟机"
+- "申请三台虚拟机，但每台配置不同"
 - "第一台 ..., 第二台 ..., 第三台 ..."
+- different specs per instance
+
+Quantity by itself is **not** a decomposition signal. The request workflow and
+submit tool should interpret same-type quantity from the user's original
+language without requiring AtlasClaw core to pre-structure `resource_count`.
 
 When this boundary is hit, do not continue with the single-catalog parameter
 collection flow in this skill.
