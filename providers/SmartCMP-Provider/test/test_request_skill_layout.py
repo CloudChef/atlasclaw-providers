@@ -163,6 +163,10 @@ def test_request_skill_explicitly_allows_same_type_quantity_requests() -> None:
     assert "Request multiple Linux virtual machines with the same specification" in skill_text
     assert "one service catalog / one resource type / one shared parameter set" in skill_text
     assert "Quantity by itself is **not** a decomposition signal." in skill_text
+    assert "Single-instance vs shared-quantity contract" in skill_text
+    assert "one shared `resourceSpecs` item, plus one top-level count" in skill_text
+    assert "Do **not** duplicate identical" in skill_text
+    assert "exactly one `resourceSpecs` item per request body" in skill_text
 
 
 def test_request_decomposition_skill_excludes_same_type_quantity_only_requests() -> None:
@@ -326,11 +330,12 @@ def tool_metadata_contains(skill_text: str, section: str, value: str) -> bool:
     return any(line.strip() == f'- "{value}"' for line in body if line.startswith("  - "))
 
 
-def test_request_decomposition_skill_requires_clarification_for_conflicting_vm_ordinals() -> None:
+def test_request_decomposition_skill_requires_clarification_for_conflicting_ordinals() -> None:
     skill_text = DECOMPOSITION_SKILL.read_text(encoding="utf-8")
 
-    assert 'ordinal-style references such as "first", "second"' in skill_text
-    assert "If the stated instance quantity conflicts with the referenced ordinal positions" in skill_text
+    assert 'Treat ordinal references such as "first", "second", "third", "fifth", or' in skill_text
+    assert "If the stated instance quantity conflicts with the referenced ordinal" in skill_text
+    assert "positions, stop and ask a focused clarification question" in skill_text
     assert '"request 4 instances, second ..., fifth ..., sixth ..."' in skill_text
     assert "do not guess the missing instance count" in skill_text
     assert "Ask for clarification before decomposition" in skill_text

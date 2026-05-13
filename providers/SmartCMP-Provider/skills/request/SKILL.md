@@ -83,7 +83,7 @@ tool_list_services_parameters: |
     }
   }
 tool_submit_name: "smartcmp_submit_request"
-tool_submit_description: "Submit resource request to SmartCMP. RULES: (1) NEVER claim submitted without calling this tool. (2) Show JSON preview and wait for user confirmation BEFORE calling. (3) json_body is REQUIRED. (4) catalogId MUST be UUID from catalog metadata id field. See Field Placement table in skill body for exact structure rules."
+tool_submit_description: "Submit resource request to SmartCMP. RULES: (1) NEVER claim submitted without calling this tool. (2) Show JSON preview and wait for user confirmation BEFORE calling. (3) json_body is REQUIRED. (4) catalogId MUST be UUID from catalog metadata id field. (5) Same-type multi-instance requests must use one top-level count field plus one shared resourceSpecs item; per-instance differences belong in request-decomposition-agent. See Field Placement table in skill body for exact structure rules."
 tool_submit_entrypoint: "scripts/submit.py"
 tool_submit_groups:
   - cmp
@@ -100,7 +100,7 @@ tool_submit_parameters: |
     "properties": {
       "json_body": {
         "type": "string",
-        "description": "REQUIRED. The complete request JSON as a string. For cloud/resource requests: include catalogId, catalogName, businessGroupId, name, top-level description, resourceBundleName or resourceBundleTags (in resourceSpecs), and resourceSpecs array using exact parameter keys or the type-specific Empty Instruction Metadata Fallback fields. For tickets: include catalogId, catalogName, businessGroupId, name, and genericRequest {description}. Do NOT include userLoginId (auto-injected by script). FORBIDDEN fields: never add priority, category, requestor, parameters, impactScope, urgency, contactName, or any field not listed above. DO NOT omit this parameter."
+        "description": "REQUIRED. The complete request JSON as a string. For cloud/resource requests: include catalogId, catalogName, businessGroupId, name, top-level description, resourceBundleName or resourceBundleTags (in resourceSpecs), and resourceSpecs array using exact parameter keys or the type-specific Empty Instruction Metadata Fallback fields. For same-type multi-instance requests, use one top-level count field and one shared resourceSpecs item instead of duplicating resourceSpecs. For tickets: include catalogId, catalogName, businessGroupId, name, and genericRequest {description}. Do NOT include userLoginId (auto-injected by script). FORBIDDEN fields: never add priority, category, requestor, parameters, impactScope, urgency, contactName, or any field not listed above. DO NOT omit this parameter."
       }
     },
     "required": ["json_body"]
@@ -235,6 +235,38 @@ language without requiring AtlasClaw core to pre-structure `resource_count`.
 
 When this boundary is hit, do not continue with the single-catalog parameter
 collection flow in this skill.
+
+### Single-instance vs shared-quantity contract
+
+This skill supports two request shapes, and they are not interchangeable:
+
+- **Single-instance request**: one resource type, one instance, one
+  `resourceSpecs` item, and no top-level count field unless the selected
+  catalog explicitly requires one.
+- **Same-type multi-instance request**: one resource type, one shared
+  parameter set, one shared `resourceSpecs` item, plus one top-level count
+  field.
+
+For same-type multi-instance requests:
+
+- Prefer the exact top-level count key declared by the selected catalog when it
+  exists, for example `quantity`, `count`, `instanceCount`, or `serverCount`.
+- If the selected catalog does not declare a top-level count key, use
+  top-level `quantity`.
+- Keep exactly one shared `resourceSpecs` item. This skill's submit contract
+  accepts one request-level parameter set per request body.
+- Do **not** duplicate identical `resourceSpecs` entries just to represent
+  quantity N.
+- Do **not** invent per-instance names, hostnames, IPs, disk sizes, or other
+  per-instance overrides when the user asked for shared parameters.
+- If the user supplies per-instance differences, separate names for each
+  instance, or mixed component roles, stop using this skill and route to
+  `request-decomposition-agent`.
+
+For any non-ticket request that uses `resourceSpecs`, this skill expects
+exactly one `resourceSpecs` item per request body. The only supported way to
+represent multiple same-type instances in this skill is a single shared
+`resourceSpecs` item plus one top-level count field.
 
 ### Submitted request status flow
 
@@ -585,6 +617,7 @@ Use the **EXACT parameter keys** from `instructions.parameters`. Do NOT rename, 
 | `userLoginId` | **top-level** | **OMIT from request body** — the submit script auto-fills it from the current session. Do NOT include this field in the JSON. |
 | `name` | **top-level** | user input or auto-generate `vm-<timestamp>` |
 | `description` | **top-level for non-ticket requests** | user input. For ticket/work-order catalogs, use `genericRequest.description` instead |
+| instance count field | **top-level** | For same-type multi-instance requests only. Prefer the exact selected-catalog top-level count key when declared, for example `quantity`, `count`, `instanceCount`, or `serverCount`. Otherwise use top-level `quantity`. Value must be a positive integer. Omit for single-instance requests. |
 | resource bundle field | **top-level** | `resourceBundleName` from params `defaultValue` (omit when using `resourceBundleTags`) |
 | `node` | resourceSpecs | `instructions.node` (e.g. `"Compute"`) |
 | `type` | resourceSpecs | `instructions.type` (e.g. `"cloudchef.nodes.Compute"`) |
@@ -609,6 +642,7 @@ Fallback requests. Ticket/work-order descriptions must use
 > - `name` goes ONLY at top-level. NEVER put `name` inside resourceSpecs.
 > - `resourceBundleTags` goes ONLY inside resourceSpecs. NEVER put it at top-level.
 > - `computeProfileName` or `computeProfileId` MUST appear inside resourceSpecs when a compute profile was matched. NEVER omit it after a successful flavor match. Missing compute profile will cause HTTP 400.
+> - Same-type multi-instance requests use ONE top-level count field plus ONE shared `resourceSpecs` item. Never duplicate identical `resourceSpecs` items to represent quantity.
 
 ### Parameter Key Rule (CRITICAL)
 

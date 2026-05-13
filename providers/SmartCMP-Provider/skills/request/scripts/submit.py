@@ -49,6 +49,7 @@ _VERIFY_INTERVAL_SECONDS = max(
     float(os.environ.get("CMP_SUBMIT_VERIFY_INTERVAL_SECONDS", "1") or "1"),
 )
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Z]{3}\d{14}$", re.IGNORECASE)
+_COUNT_FIELD_KEYS = ("quantity", "count", "instanceCount", "serverCount")
 _UUID_PATTERN = re.compile(
     r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
     re.IGNORECASE,
@@ -563,6 +564,76 @@ def _enrich_request_body(body: object) -> object:
 
     return enriched
 
+
+def _coerce_positive_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, float):
+        if not value.is_integer():
+            return None
+        integer_value = int(value)
+        return integer_value if integer_value > 0 else None
+    if isinstance(value, str):
+        candidate = value.strip()
+        if not candidate or not re.fullmatch(r"\d+", candidate):
+            return None
+        integer_value = int(candidate)
+        return integer_value if integer_value > 0 else None
+    return None
+
+
+def _normalize_request_contract(body: object) -> object:
+    if not isinstance(body, dict):
+        return body
+
+    normalized = dict(body)
+    present_count_fields: list[tuple[str, int]] = []
+    for key in _COUNT_FIELD_KEYS:
+        if key not in normalized:
+            continue
+        raw_value = normalized.get(key)
+        if raw_value in (None, "", [], {}):
+            normalized.pop(key, None)
+            continue
+        parsed_value = _coerce_positive_int(raw_value)
+        if parsed_value is None:
+            raise ValueError(
+                f"Invalid `{key}` value. Same-type multi-instance requests require one positive integer count."
+            )
+        normalized[key] = parsed_value
+        present_count_fields.append((key, parsed_value))
+
+    if len(present_count_fields) > 1:
+        field_names = ", ".join(key for key, _ in present_count_fields)
+        raise ValueError(
+            "Use exactly one top-level instance-count field for same-type multi-instance requests. "
+            f"Found: {field_names}."
+        )
+
+    specs = normalized.get("resourceSpecs")
+    if isinstance(specs, dict):
+        normalized["resourceSpecs"] = [specs]
+        specs = normalized["resourceSpecs"]
+
+    if "resourceSpecs" in normalized and not isinstance(specs, list):
+        raise ValueError("`resourceSpecs` must be an object or an array.")
+
+    if isinstance(specs, list) and len(specs) != 1:
+        if present_count_fields:
+            raise ValueError(
+                "Same-type multi-instance requests must use one shared top-level count field and exactly one "
+                "shared resourceSpecs item. Use request-decomposition-agent for per-instance differences."
+            )
+        raise ValueError(
+            "This request skill accepts exactly one shared resourceSpecs item per request body. "
+            "Use one top-level count field for same-type quantity, or use request-decomposition-agent "
+            "for per-instance differences."
+        )
+
+    return normalized
+
 # -- Parse arguments -----------------------------------------------------------
 parser = argparse.ArgumentParser(description='Submit request to SmartCMP')
 group = parser.add_mutually_exclusive_group(required=False)
@@ -605,14 +676,11 @@ except FileNotFoundError:
     sys.exit(1)
 
 body = _enrich_request_body(body)
-
-# -- Normalize resourceSpecs to array -----------------------------------------
-# SmartCMP backend expects resourceSpecs as an array (ArrayList<ResourceSpec>).
-# LLMs sometimes send it as a single object; wrap it defensively.
-if isinstance(body, dict) and "resourceSpecs" in body:
-    specs = body["resourceSpecs"]
-    if isinstance(specs, dict):
-        body["resourceSpecs"] = [specs]
+try:
+    body = _normalize_request_contract(body)
+except ValueError as e:
+    print(f"[ERROR] {e}")
+    sys.exit(1)
 
 # -- Submit request ------------------------------------------------------------
 url = f"{BASE_URL}/generic-request/submit"

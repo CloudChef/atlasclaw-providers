@@ -331,3 +331,158 @@ def test_submit_robot_token_uses_current_user_instead_of_webhook_runtime_user(mo
     assert submitted["body"]["userLoginId"] != "webhook-approval-1"
     assert "[SUCCESS] Request submitted" in stdout
     assert ROBOT_INTERNAL_REQUEST_UUID not in stdout
+
+
+def test_submit_request_preserves_same_type_quantity_fields(monkeypatch):
+    submitted = {}
+
+    def fake_post(url, headers=None, json=None, verify=None, timeout=None):
+        assert url == "https://cmp.example.com/platform-api/generic-request/submit"
+        submitted["body"] = dict(json or {})
+        return FakeResponse(
+            [{"id": INTERNAL_REQUEST_UUID, "workflowId": "TIC20260422000006", "state": "INITIALING"}]
+        )
+
+    def fake_get(url, headers=None, verify=None, timeout=None):
+        assert url == f"https://cmp.example.com/platform-api/generic-request/{INTERNAL_REQUEST_UUID}"
+        return FakeResponse(
+            {
+                "id": INTERNAL_REQUEST_UUID,
+                "workflowId": "TIC20260422000006",
+                "state": "INITIALING",
+                "processInstanceId": "proc-quantity",
+            }
+        )
+
+    exit_code, stdout, _ = run_script(
+        monkeypatch,
+        [
+            "--json",
+            (
+                '{"catalogName":"Linux OS","name":"vm-batch","quantity":3,'
+                '"resourceSpecs":{"node":"Compute","type":"cloudchef.nodes.Compute",'
+                '"computeProfileName":"2c4g"}}'
+            ),
+        ],
+        fake_post=fake_post,
+        fake_get=fake_get,
+    )
+
+    assert exit_code == 0
+    assert submitted["body"]["quantity"] == 3
+    assert isinstance(submitted["body"]["resourceSpecs"], list)
+    assert submitted["body"]["resourceSpecs"][0]["computeProfileName"] == "2c4g"
+    assert "[SUCCESS] Request submitted" in stdout
+
+
+def test_submit_request_normalizes_string_quantity_to_integer(monkeypatch):
+    submitted = {}
+
+    def fake_post(url, headers=None, json=None, verify=None, timeout=None):
+        assert url == "https://cmp.example.com/platform-api/generic-request/submit"
+        submitted["body"] = dict(json or {})
+        return FakeResponse(
+            [{"id": INTERNAL_REQUEST_UUID, "workflowId": "TIC20260422000007", "state": "INITIALING"}]
+        )
+
+    def fake_get(url, headers=None, verify=None, timeout=None):
+        assert url == f"https://cmp.example.com/platform-api/generic-request/{INTERNAL_REQUEST_UUID}"
+        return FakeResponse(
+            {
+                "id": INTERNAL_REQUEST_UUID,
+                "workflowId": "TIC20260422000007",
+                "state": "INITIALING",
+                "processInstanceId": "proc-quantity-string",
+            }
+        )
+
+    exit_code, stdout, _ = run_script(
+        monkeypatch,
+        [
+            "--json",
+            (
+                '{"catalogName":"Linux OS","name":"vm-batch","quantity":"3",'
+                '"resourceSpecs":{"node":"Compute","type":"cloudchef.nodes.Compute",'
+                '"computeProfileName":"2c4g"}}'
+            ),
+        ],
+        fake_post=fake_post,
+        fake_get=fake_get,
+    )
+
+    assert exit_code == 0
+    assert submitted["body"]["quantity"] == 3
+    assert "[SUCCESS] Request submitted" in stdout
+
+
+def test_submit_request_rejects_quantity_with_multiple_resource_specs(monkeypatch):
+    exit_code, stdout, _ = run_script(
+        monkeypatch,
+        [
+            "--json",
+            (
+                '{"catalogName":"Linux OS","name":"vm-batch","quantity":3,"resourceSpecs":['
+                '{"node":"Compute","type":"cloudchef.nodes.Compute","computeProfileName":"2c4g"},'
+                '{"node":"Compute","type":"cloudchef.nodes.Compute","computeProfileName":"2c4g"}]}'
+            ),
+        ],
+    )
+
+    assert exit_code == 1
+    assert "Same-type multi-instance requests must use one shared top-level count field" in stdout
+    assert "request-decomposition-agent" in stdout
+
+
+def test_submit_request_rejects_multiple_count_fields(monkeypatch):
+    exit_code, stdout, _ = run_script(
+        monkeypatch,
+        [
+            "--json",
+            (
+                '{"catalogName":"Linux OS","name":"vm-batch","quantity":3,"count":3,'
+                '"resourceSpecs":{"node":"Compute","type":"cloudchef.nodes.Compute",'
+                '"computeProfileName":"2c4g"}}'
+            ),
+        ],
+    )
+
+    assert exit_code == 1
+    assert "Use exactly one top-level instance-count field" in stdout
+    assert "quantity, count" in stdout
+
+
+def test_submit_request_rejects_multiple_resource_specs_without_count(monkeypatch):
+    exit_code, stdout, _ = run_script(
+        monkeypatch,
+        [
+            "--json",
+            (
+                '{"catalogName":"Linux OS","name":"vm-batch","resourceSpecs":['
+                '{"node":"Compute","type":"cloudchef.nodes.Compute","computeProfileName":"2c4g"},'
+                '{"node":"Compute","type":"cloudchef.nodes.Compute","computeProfileName":"2c4g"}]}'
+            ),
+        ],
+    )
+
+    assert exit_code == 1
+    assert "exactly one shared resourceSpecs item per request body" in stdout
+    assert "same-type quantity" in stdout
+    assert "request-decomposition-agent" in stdout
+
+
+def test_submit_request_rejects_non_positive_quantity(monkeypatch):
+    exit_code, stdout, _ = run_script(
+        monkeypatch,
+        [
+            "--json",
+            (
+                '{"catalogName":"Linux OS","name":"vm-batch","quantity":0,'
+                '"resourceSpecs":{"node":"Compute","type":"cloudchef.nodes.Compute",'
+                '"computeProfileName":"2c4g"}}'
+            ),
+        ],
+    )
+
+    assert exit_code == 1
+    assert "Invalid `quantity` value" in stdout
+    assert "positive integer count" in stdout
