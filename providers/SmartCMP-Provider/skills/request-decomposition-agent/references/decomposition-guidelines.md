@@ -7,6 +7,14 @@ Use this file when a descriptive requirement needs to be turned into multiple CM
 - The request clearly implies more than one resource type.
 - There are explicit dependencies such as app plus database, app plus storage, or app plus network exposure.
 - The requirement includes environment, expected workload, or resilience hints that can guide service selection.
+- The user gives per-item VM differences using ordinal references such as first, second, third, fifth, or sixth.
+
+## Ordinal And Quantity Validation
+
+- If the user gives a total VM count and also gives ordinal per-VM details, validate that the ordinal references fit within that count.
+- If the numbering is non-consecutive or out of range, ask a clarification question before creating draft sub-requests.
+- Do not silently renumber the user's intent.
+- Do not invent missing VMs just to make the numbering contiguous.
 
 ## Stop And Leave For Manual Review When
 
@@ -14,6 +22,7 @@ Use this file when a descriptive requirement needs to be turned into multiple CM
 - No matching CMP catalog item can be found.
 - Required identifiers such as business group or application are unavailable.
 - High-cost or production-sensitive components depend on guessed values.
+- VM quantity conflicts with the user's ordinal references.
 
 ## Preferred Output Shape
 

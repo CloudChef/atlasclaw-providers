@@ -43,13 +43,13 @@ avoid_when:
   - User only wants to browse available resources (use datasource skill)
   - User wants to approve or reject requests (use approval skill)
   - User describes requirements in natural language without specific parameters (use request-decomposition-agent)
+  - User asks for multiple virtual machines or multiple resource requests with per-item differences such as quantity, first/second/third configurations, or different specs per instance (use request-decomposition-agent)
   - User wants to list approval tasks waiting for them or perform approval actions (use approval skill)
 
 examples:
   - "Create a new VM with 2c4g"
   - "Provision cloud resources for my project"
   - "Deploy a Linux VM in production environment"
-  - "Submit a request for 3 virtual machines"
   - "提交一个问题工单"
   - "申请一个机房资源"
   - "申请2c4g的linux云主机"
@@ -204,6 +204,23 @@ Submit cloud resource, application environment, or ticket/work order requests th
 ## Flow
 
 Six tools exist: `smartcmp_list_services`, `smartcmp_list_available_bgs`, `smartcmp_list_flavors`, `smartcmp_list_facets`, `smartcmp_submit_request`, and `smartcmp_get_request_status`.
+
+### Multi-resource routing boundary
+
+This skill is for one CMP request flow at a time. If the user asks for multiple
+virtual machines or multiple resource requests with distinct per-item
+configuration, do not force that input into a single-resource workflow.
+
+Route those requests to `request-decomposition-agent` instead, especially when
+the user gives quantity or enumerated differences such as:
+
+- "3 virtual machines"
+- "first VM ..., second VM ..., third VM ..."
+- "申请三台虚拟机"
+- "第一台 ..., 第二台 ..., 第三台 ..."
+
+When this boundary is hit, do not continue with the single-catalog parameter
+collection flow in this skill.
 
 ### Submitted request status flow
 

@@ -7,6 +7,14 @@ from pathlib import Path
 PROVIDER_ROOT = Path(__file__).resolve().parents[1]
 REQUEST_SKILL = PROVIDER_ROOT / "skills" / "request" / "SKILL.md"
 APPROVAL_SKILL = PROVIDER_ROOT / "skills" / "approval" / "SKILL.md"
+DECOMPOSITION_SKILL = PROVIDER_ROOT / "skills" / "request-decomposition-agent" / "SKILL.md"
+DECOMPOSITION_GUIDELINES = (
+    PROVIDER_ROOT
+    / "skills"
+    / "request-decomposition-agent"
+    / "references"
+    / "decomposition-guidelines.md"
+)
 
 
 def test_request_skill_requires_datasource_business_group_resolution():
@@ -123,6 +131,31 @@ def test_request_skill_declares_status_query_tool() -> None:
     assert "current user's message language" in skill_text
     assert "`APPROVAL_PENDING`: not approved yet" in skill_text
     assert "do not claim approval or rejection" in skill_text
+
+
+def test_request_skill_defers_multi_vm_requests_to_decomposition_agent() -> None:
+    skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
+
+    assert "Multi-resource routing boundary" in skill_text
+    assert "one CMP request flow at a time" in skill_text
+    assert "multiple virtual machines" in skill_text
+    assert "first VM ..., second VM ..., third VM ..." in skill_text
+    assert "申请三台虚拟机" in skill_text
+    assert "第一台 ..., 第二台 ..., 第三台 ..." in skill_text
+    assert "do not continue with the single-catalog parameter" in skill_text
+
+
+def test_request_decomposition_skill_covers_multi_vm_chat_phrases() -> None:
+    skill_text = DECOMPOSITION_SKILL.read_text(encoding="utf-8")
+
+    assert "multiple virtual machines" in skill_text
+    assert "申请多台虚拟机" in skill_text
+    assert "第一台第二台第三台" in skill_text
+    assert "distinct per-item configuration" in skill_text
+    assert "For ordinary chat/runtime routing" in skill_text
+    assert "first VM / second VM / third VM" in skill_text
+    assert "我想申请三台虚拟机" in skill_text
+    assert "treat each VM as its own draft sub-request" in skill_text
 
 
 def test_approval_skill_does_not_claim_submitted_request_status_queries() -> None:
@@ -272,3 +305,24 @@ def tool_metadata_contains(skill_text: str, section: str, value: str) -> bool:
     """Return whether a frontmatter list section contains a literal string item."""
     body = skill_text.split(section, 1)[1].split("\n", 20)[1:]
     return any(line.strip() == f'- "{value}"' for line in body if line.startswith("  - "))
+
+
+def test_request_decomposition_skill_requires_clarification_for_conflicting_vm_ordinals() -> None:
+    skill_text = DECOMPOSITION_SKILL.read_text(encoding="utf-8")
+
+    assert 'ordinal-style per-VM references such as "first", "second"' in skill_text
+    assert "If the stated VM quantity conflicts with the referenced ordinal positions" in skill_text
+    assert '"request 4 virtual machines, second ..., fifth ..., sixth ..."' in skill_text
+    assert "do not guess the missing VM count" in skill_text
+    assert "Ask for clarification before decomposition" in skill_text
+
+
+def test_request_decomposition_guidelines_require_ordinal_quantity_validation() -> None:
+    guidelines_text = DECOMPOSITION_GUIDELINES.read_text(encoding="utf-8")
+
+    assert "Ordinal And Quantity Validation" in guidelines_text
+    assert "If the user gives a total VM count and also gives ordinal per-VM details" in guidelines_text
+    assert "If the numbering is non-consecutive or out of range" in guidelines_text
+    assert "Do not silently renumber the user's intent." in guidelines_text
+    assert "Do not invent missing VMs just to make the numbering contiguous." in guidelines_text
+    assert "VM quantity conflicts with the user's ordinal references." in guidelines_text

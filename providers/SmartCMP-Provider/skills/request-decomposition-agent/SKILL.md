@@ -11,12 +11,19 @@ triggers:
   - decompose requirements
   - agent orchestrator
   - service request drafting
+  - multiple virtual machines
+  - first second third vm
+  - 申请多台虚拟机
+  - 第一台第二台第三台
+  - 多个资源申请
 
 use_when:
   - User describes infrastructure or application needs in natural language
   - Requirements need to be decomposed into multiple service requests
   - User wants reviewable draft requests rather than direct submission
   - agent_identity is agent-request-orchestrator
+  - User asks for multiple virtual machines or multiple CMP resources with distinct per-item configuration
+  - User enumerates differences like first VM / second VM / third VM, or 第一台 / 第二台 / 第三台
 
 avoid_when:
   - User has specific parameters ready for a single request (use request skill)
@@ -27,6 +34,8 @@ examples:
   - "I need a web application environment with 3 VMs and a load balancer"
   - "Set up a development environment for our new project"
   - "Provision infrastructure for a microservices deployment"
+  - "I want to request 3 virtual machines. The first is 2c4g, the second is 4c8g, the third is 8c16g."
+  - "我想申请三台虚拟机，第一台 2c4g，第二台 4c8g，第三台 8c16g。"
 
 related:
   - request
@@ -53,6 +62,11 @@ This skill activates when:
 - Input is descriptive text (not a clean catalog request)
 - `agent_identity` is `agent-request-orchestrator`
 - `request_text` is provided
+
+For ordinary chat/runtime routing, this skill should also be preferred whenever
+the user asks for multiple virtual machines or multiple resource requests with
+distinct per-item configuration, even if the request already names VM-related
+parameters.
 
 ## Robot Admin Execution
 
@@ -140,6 +154,31 @@ This agent accesses SmartCMP only through the provider tools selected by AtlasCl
 | Network | Connectivity dependencies |
 | Monitoring | Operational components |
 
+### Multi-VM decomposition rule
+
+When the user asks for multiple virtual machines with distinct configurations,
+treat each VM as its own draft sub-request instead of collapsing everything into
+one request body.
+
+- Preserve the user-stated quantity.
+- Preserve per-item differences such as CPU, memory, disk, OS, environment, and
+  naming hints.
+- If the user says "first", "second", "third" or "第一台", "第二台", "第三台",
+  keep those distinctions as separate sub-requests.
+- If shared fields are mentioned once for all VMs, copy them into each child
+  draft as shared assumptions.
+- If a field is missing for one VM, leave that field unresolved for that VM only.
+- Treat any ordinal-style per-VM references such as "first", "second",
+  "third", "fifth", or "sixth" as evidence that the request must stay in
+  decomposition mode rather than collapsing into one VM request.
+- If the stated VM quantity conflicts with the referenced ordinal positions,
+  stop and ask a focused clarification question before building sub-requests.
+- Examples of conflicts that require clarification:
+  - "request 4 virtual machines, second ..., fifth ..., sixth ..."
+  - "request 3 virtual machines, first ... and fourth ..."
+- For those conflicts, do not guess the missing VM count, do not renumber the
+  user's intent silently, and do not submit anything.
+
 ### Handling Unsupported Components
 
 - If no suitable CMP catalog service → Mark as **unresolved** for manual handling
@@ -184,6 +223,7 @@ This agent accesses SmartCMP only through the provider tools selected by AtlasCl
 | Schema retrieval fails for one | Keep other valid sub-requests |
 | Mode unsafe for execution | Return draft payloads only |
 | Key fields guessed | Do NOT submit final requests |
+| VM quantity conflicts with ordinal references | Ask for clarification before decomposition |
 
 ## Example Decomposition
 
