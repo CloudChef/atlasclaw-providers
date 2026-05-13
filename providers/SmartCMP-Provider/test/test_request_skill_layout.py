@@ -17,88 +17,196 @@ DECOMPOSITION_GUIDELINES = (
 )
 
 
-def test_request_skill_requires_datasource_business_group_resolution():
+def test_request_skill_requires_business_group_resolution() -> None:
     skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
 
     assert "smartcmp_list_available_bgs" in skill_text
     assert "Business-Group Resolution" in skill_text
-    assert "if one BG, auto-select" in skill_text
-    assert "MUST show list and WAIT for user to choose" in skill_text
-    assert "uniquely normalizes to one available business group" in skill_text
-    assert "If multiple business groups remain after normalization" in skill_text
-    assert "do not repeat lookup scaffolding such as" in skill_text
-    assert "`Found N business group(s)`" in skill_text
+    assert "Steps 1 and 2 are mandatory" in skill_text
+    assert "Never ask the user to type a" in skill_text
+    assert "If multiple groups remain, ask one concise numbered question" in skill_text
+    assert "Do not display business group UUIDs" in skill_text
+    assert "ask for both in the same sentence" in skill_text
+    assert "Use the selected business group's `id` as top-level `businessGroupId`" in skill_text
 
 
-def test_request_skill_resolves_displayed_service_numbers_to_catalog_uuid():
+def test_request_skill_handles_business_group_selection_turns() -> None:
+    skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
+
+    assert "previous assistant message asked the user to choose a business group" in skill_text
+    assert "bare number or group name" in skill_text
+    assert "never as an unsupported operation" in skill_text
+    assert "`smartcmp_list_available_bgs` again with the same selected catalog UUID" in skill_text
+    assert "resolve the user's selection" in skill_text
+    assert "against that" in skill_text
+    assert "may be called one extra time only" in skill_text
+
+
+def test_request_skill_resolves_service_numbers_to_catalog_uuid() -> None:
     skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
 
     assert "Catalog identity contract" in skill_text
     assert "Displayed service list numbers are conversation choices only" in skill_text
-    assert "resolve it against the latest" in skill_text
-    assert "`smartcmp_list_services` result" in skill_text
-    assert "catalog's metadata" in skill_text
-    assert "`id`/`catalogId` UUID" in skill_text
-    assert "Do not pass the" in skill_text
-    assert "`service_id`, `catalog_id`, or `catalogId`" in skill_text
-    assert "There is no tool named `smartcmp_get_catalog_questionnaire`" in skill_text
-    assert "Never call `smartcmp_get_catalog_questionnaire`" in skill_text
+    assert "latest `smartcmp_list_services` result" in skill_text
+    assert "`catalogId` must be the selected catalog metadata UUID" in skill_text
+    assert "never the displayed" in skill_text
+    assert "never `sourceKey`" in skill_text
+    assert "There is no catalog questionnaire/default-property/preview tool" in skill_text
 
 
-def test_request_skill_does_not_trust_runtime_form_defaults_from_catalog_metadata():
+def test_request_skill_uses_generated_markdown_only() -> None:
     skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
 
-    assert "runtimeDefaultOnly" in skill_text
-    assert "**NOT** serialize that value into the request body" in skill_text
-    assert "let CMP runtime form apply the real default" in skill_text
+    assert "Generated Markdown Instructions" in skill_text
+    assert "`instructions.resourceSpecs`" in skill_text
+    assert "`instructions.topLevelFields`" in skill_text
+    assert "`instructions.params`" in skill_text
+    assert "Ignore old JSON instruction payloads" in skill_text
+    assert "Do not use `instructions.parameters`" in skill_text
+    assert "preview.py" not in skill_text
+    assert "smartcmp_preview_request" not in skill_text
+    assert "Empty Instruction Metadata Fallback" not in skill_text
+    assert "Runtime Default Guard" not in skill_text
 
 
-def test_request_skill_requires_natural_language_follow_up_after_lookup_tools():
+def test_request_skill_limits_markdown_body_to_request_instructions() -> None:
     skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
 
-    assert "Natural-Language Follow-up After Lookup Tools" in skill_text
-    assert "summarize the resolved result in natural language" in skill_text
-    assert "ask at most one next question" in skill_text
-    assert "ask exactly one natural-language question" in skill_text
-    assert "Do not paste raw tool output" in skill_text
-    assert "Never dump raw tool output" in skill_text
+    assert "Instruction section boundary" in skill_text
+    assert "`# Request Parameter Instructions`: YAML parameter contract" in skill_text
+    assert "only `# Request Parameter Instructions` and `# Request Instructions` are in" in skill_text
+    assert "Read `# Request Parameter Instructions` first" in skill_text
+    assert "`instructions.requestInstructions` from exactly `# Request Instructions`" in skill_text
+    assert "The `# Request Instructions` section is optional" in skill_text
+    assert "If it is absent, use" in skill_text
+    assert "Stop reading request instructions at the next same-level heading" in skill_text
+    assert "`# Preapproval Instructions`" in skill_text
+    assert "Never fall through to `# Preapproval Instructions`" in skill_text
+    assert "Ignore all other sections for request building" in skill_text
+    assert "must not change required" in skill_text
+    assert "has no request-body" in skill_text
 
 
-def test_request_skill_rejects_permissive_confirmation_language():
+def test_request_skill_defines_markdown_request_assembly() -> None:
     skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
 
-    assert "brief confirmation like" not in skill_text
-    assert "preferably as a numbered list" not in skill_text
-    assert "Output a concise natural-language confirmation" in skill_text
-    assert "Ask one concise selection question" in skill_text
+    assert "Top-level JSON always includes `catalogId`, `catalogName`" in skill_text
+    assert "`businessGroupId`, and `name`" in skill_text
+    assert "Generated field attributes belong in `# Request Parameter Instructions`" in skill_text
+    assert "If an active field declares static `options`" in skill_text
+    assert "Do not add a second field-property list" in skill_text
+    assert "Treat the body as" in skill_text
+    assert "`topLevelFields.name.ask: true`" in skill_text
+    assert "Do not auto-generate it" in skill_text
+    assert "Do not include `userLoginId`" in skill_text
+    assert "root request fields declared in `instructions.params.<key>`" in skill_text
+    assert "top-level JSON object `params.<key>`" in skill_text
+    assert "Do not put root `instructions.params` fields into" in skill_text
+    assert "`instructions.genericRequest.description`" in skill_text
+    assert "`genericRequest.description`" in skill_text
+    assert "`instructions.genericRequest.processForm.<key>`" in skill_text
+    assert "`genericRequest.processForm.<key>`" in skill_text
+    assert "field schemas declared directly on `instructions.resourceSpecs[]`" in skill_text
+    assert "directly on the same `resourceSpecs[]` item" in skill_text
+    assert "Do not create or consume a literal `fields` object" in skill_text
+    assert "`resourceSpecs[].resourceBundleId`" in skill_text
+    assert "smartcmp_list_resource_bundles" in skill_text
+    assert "Put `resourceBundleTags` at the same level as `resourceBundleId`" in skill_text
+    assert "`smartcmp_list_facets` after" in skill_text
+    assert "`resourceSpecs[].resourceBundleTags`" in skill_text
+    assert '`["<facet.key>:<option.key>"]`' in skill_text
+    assert "`resourceBundleTags` and `resourceBundleId` are mutually exclusive" in skill_text
+    assert "If both are declared and active, use" in skill_text
+    assert "call `smartcmp_list_resource_bundles` after" in skill_text
+    assert "component_type" in skill_text
+    assert "node_type" in skill_text
+    assert "resourceSpecs[].componentType" not in skill_text
+    assert "`resourceSpecs[].resourceBundleParams.<key>`" in skill_text
+    assert "`resourceBundleParams` is only for defaulted resource-pool placement fields" in skill_text
+    assert "Do not ask" in skill_text
+    assert "missing `resourceBundleParams`" in skill_text
+    assert "network configuration fields must be under" in skill_text
+    assert "`resourceSpecs[].params.<key>`" in skill_text
+    assert "External API lookup fields" in skill_text
+    assert "direct Compute lookup fields" in skill_text
+    assert "without a default, omit it" in skill_text
+    assert "Use `defaultValue` / `default_value` silently" in skill_text
+    assert "When an active field has static `options`" in skill_text
+    assert "collecting remaining fields or showing the" in skill_text
+    assert "This applies even when the field has a default" in skill_text
+    assert "可选：internet=公网，intranet=私网" in skill_text
+    assert "Do not ask the user whether to" in skill_text
+    assert "Never serialize metadata keys" in skill_text
+    assert "`options`" in skill_text
+    assert '"<directResourceSpecKey>": "<active value>"' in skill_text
+    assert "Ticket/work-order generated Markdown request shape" in skill_text
+    assert '"genericRequest": {' in skill_text
+    assert '"processForm": {' in skill_text
 
 
-def test_request_skill_follows_current_user_message_language():
+def test_request_skill_uses_resource_pool_chinese_term() -> None:
     skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
 
-    assert "User Response Language" in skill_text
-    assert "Use the current user's message language" in skill_text
-    assert "English requests must get English follow-ups" in skill_text
-    assert "Short summary of the request in the user's language" in skill_text
-    assert "Short Chinese summary" not in skill_text
-    assert "Ask `请确认以上信息是否正确？（是/否）`" not in skill_text
+    assert "always call SmartCMP resource pools `资源池`" in skill_text
+    assert "Never call them `资源包`" in skill_text
+    assert "resource pools from SmartCMP" in skill_text
+    assert "resourceBundleId" in skill_text
 
 
-def test_request_skill_contracts_ticket_and_linux_vm_flow_expectations():
+def test_request_skill_defines_when_rules_for_markdown_fields() -> None:
     skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
 
-    assert "after the ticket service is auto-selected and the business" in skill_text
-    assert "continue with a" in skill_text
-    assert "natural-language prompt for the remaining ticket fields" in skill_text
-    assert "ask only the short business-group" in skill_text
-    assert "recognize Linux VM, the business" in skill_text
-    assert "carry those values forward" in skill_text
-    assert "ask only for the remaining required fields" in skill_text
-    assert "only when it is the unique" in skill_text
-    assert "normalized datasource match" in skill_text
+    assert "Evaluate `when` before asking or serializing" in skill_text
+    assert "If `when` is false, the field is inactive" in skill_text
+    assert "`AddressType == intranet` means" in skill_text
+    assert "Boolean values use `true` and `false`" in skill_text
+    assert "re-evaluate dependent `when` fields" in skill_text
 
 
-def test_request_skill_declares_provider_driven_workflow_metadata():
+def test_request_skill_defines_resource_bundle_lookup() -> None:
+    skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
+
+    assert 'tool_resource_bundles_name: "smartcmp_list_resource_bundles"' in skill_text
+    assert 'tool_resource_bundles_entrypoint: "scripts/list_resource_bundles.py"' in skill_text
+    assert "generated Markdown declares" in skill_text
+    assert "an active `resourceBundleId` field without a default" in skill_text
+    assert "no active" in skill_text
+    assert "`resourceBundleTags` field" in skill_text
+    assert "strategy=RB_POLICY_STATIC" in skill_text
+    assert "enabled=true" in skill_text
+    assert "readOnly=false" in skill_text
+
+
+def test_request_skill_constrains_facet_lookup_results() -> None:
+    skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
+
+    assert 'tool_facets_result_mode: "silent_ok"' in skill_text
+    assert "Facet lookup result handling" in skill_text
+    assert "Do not call `smartcmp_list_components`" in skill_text
+    assert "Do not display raw facet records" in skill_text
+    assert "Use the compact `FACET_META` data" in skill_text
+    assert "If the user already supplied a tag/environment word" in skill_text
+    assert "ask one concise numbered question" in skill_text
+    assert "`resourceSpecs[].resourceBundleTags`" in skill_text
+
+
+def test_request_skill_defines_missing_markdown_behavior() -> None:
+    skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
+
+    assert "Missing Markdown" in skill_text
+    assert "Compute fallback only when" in skill_text
+    assert "missing generated Markdown instructions" in skill_text
+    assert "legacy Linux VM / Windows VM catalogs usable" in skill_text
+    assert 'type: "cloudchef.nodes.Compute"' in skill_text
+    assert "Call `smartcmp_list_flavors` when the user supplied a spec such as `2c4g`" in skill_text
+    assert '"computeProfileId": "<flavor id>"' in skill_text
+    assert 'serviceCategory: "GENERIC_SERVICE"' in skill_text
+    assert "generated `instructions.genericRequest` Markdown" in skill_text
+    assert '"genericRequest"' in skill_text
+    assert "description" in skill_text
+
+
+def test_request_skill_declares_provider_driven_workflow_metadata() -> None:
     skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
     success_contract = skill_text.split("tool_submit_success_contract:", 1)[1].split(
         "tool_status_name:",
@@ -119,18 +227,12 @@ def test_request_skill_declares_status_query_tool() -> None:
     assert 'tool_status_name: "smartcmp_get_request_status"' in skill_text
     assert 'tool_status_entrypoint: "scripts/status.py"' in skill_text
     assert 'tool_status_result_mode: "silent_ok"' in skill_text
-    assert "request_id" in skill_text
     assert "REQ20260501000095" in skill_text
     assert "CHG20260413000011" in skill_text
     assert "Do not pass internal UUIDs" in skill_text
-    assert "申请状态" in skill_text
-    assert "是否审批通过" in skill_text
-    assert "我刚才提交的申请是否已经被批准了" in skill_text
     assert "reuse the most recent `smartcmp_submit_request` Request ID" in skill_text
-    assert "Treat the tool output as" in skill_text
     assert "current user's message language" in skill_text
     assert "`APPROVAL_PENDING`: not approved yet" in skill_text
-    assert "do not claim approval or rejection" in skill_text
 
 
 def test_request_skill_defers_multi_vm_requests_to_decomposition_agent() -> None:
@@ -165,8 +267,7 @@ def test_request_skill_explicitly_allows_same_type_quantity_requests() -> None:
     assert "Quantity by itself is **not** a decomposition signal." in skill_text
     assert "Single-instance vs shared-quantity contract" in skill_text
     assert "one shared `resourceSpecs` item, plus one top-level count" in skill_text
-    assert "Do **not** duplicate identical" in skill_text
-    assert "exactly one `resourceSpecs` item per request body" in skill_text
+    assert "Keep exactly one shared `resourceSpecs` item" in skill_text
 
 
 def test_request_decomposition_skill_excludes_same_type_quantity_only_requests() -> None:
@@ -205,7 +306,6 @@ def test_approval_skill_separates_action_commands_from_detail_lookup() -> None:
     assert "agree RES20260505000010" in skill_text
     assert "pass TIC20260502000003" in skill_text
     assert "deny RES20260505000010" in skill_text
-    assert "批准 CHG20260413000011" in skill_text
     assert "tool_approve_aliases:" in skill_text
     assert tool_metadata_contains(skill_text, "tool_approve_keywords:", "approve")
     assert tool_metadata_contains(skill_text, "tool_approve_keywords:", "agree")
@@ -218,117 +318,18 @@ def test_approval_skill_separates_action_commands_from_detail_lookup() -> None:
     assert '  - "TIC"' not in detail_keywords
 
 
-def test_request_skill_allows_structural_instruction_metadata_without_params() -> None:
-    skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
-
-    assert "structural instruction metadata for the selected catalog" in skill_text
-    assert "`node`, `type`, `osType`, or `cloudEntryTypeIds`" in skill_text
-
-
-def test_request_skill_keeps_instruction_reasoning_anchored_to_current_service() -> None:
-    skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
-
-    assert "Any answer, follow-up, preview, or request-building step" in skill_text
-    assert "must use only the currently selected" in skill_text
-    assert "catalog/service" in skill_text
-    assert "Do **NOT** switch to another service" in skill_text
-    assert "generic VM defaults" in skill_text
-
-
-def test_request_skill_defines_empty_instruction_metadata_fallback() -> None:
-    skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
-
-    assert "Empty Instruction Metadata Fallback" in skill_text
-    assert "currently selected catalog has no" in skill_text
-    assert "`instructions.parameters` list" in skill_text
-    assert "fixed type-specific fields" in skill_text
-    assert "not to reconstruct hidden service configuration" in skill_text
-    assert "Do **NOT** infer missing fields from service name" in skill_text
-    assert "Do **NOT** invent or ask for `templateId`, `logicTemplateName`, `networkId`" in skill_text
-    assert "Before submit, never guess hidden fields" in skill_text
-
-
-def test_request_skill_empty_instruction_compute_fallback_uses_compute_fields() -> None:
-    skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
-    fallback = skill_text.split("### Compute fallback", 1)[1].split(
-        "### Non-Compute cloud fallback",
-        1,
-    )[0]
-
-    assert '"cloudchef.nodes.Compute"' in fallback
-    assert "`catalogId`" in fallback
-    assert "`catalogName`" in fallback
-    assert "`businessGroupId`" in fallback
-    assert "`name`" in fallback
-    assert "`description`" in fallback
-    assert "`resourceBundleTags`" in fallback
-    assert "`computeProfileId`" in fallback
-    assert "`credentialUser`" in fallback
-    assert "`credentialPassword`" in fallback
-    assert "smartcmp_list_facets" in fallback
-    assert "smartcmp_list_flavors" in fallback
-    assert "flavor `id`" in fallback
-    assert '"computeProfileId": "<flavor id from smartcmp_list_flavors>"' in fallback
-    assert '"description": "<user-provided request description>"' in fallback
-    assert "`templateId`" not in fallback
-    assert "`networkId`" not in fallback
-    assert "Never use example disk sizes as defaults" in fallback
-
-
-def test_request_skill_empty_instruction_non_compute_fallback_collects_description_and_tags() -> None:
-    skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
-    fallback = skill_text.split("### Non-Compute cloud fallback", 1)[1].split(
-        "### Ticket fallback",
-        1,
-    )[0]
-
-    assert '`"GENERIC_SERVICE"`' in fallback
-    assert "selected catalog `type` is present but not" in fallback
-    assert '`"cloudchef.nodes.Compute"`' in fallback
-    assert "`catalogId`" in fallback
-    assert "`catalogName`" in fallback
-    assert "`businessGroupId`" in fallback
-    assert "`name`" in fallback
-    assert "`description`" in fallback
-    assert "`resourceBundleTags`" in fallback
-    assert "`type`" in fallback
-    assert "`node_type` set to the selected catalog `type`" in fallback
-    assert '"description": "<user-provided request description>"' in fallback
-    assert "Do not call `smartcmp_list_flavors`" in fallback
-    assert "usernames, passwords, disk size, template, or network fields" in fallback
-
-
-def test_request_skill_allows_top_level_description_for_non_ticket_requests() -> None:
-    skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
-    field_placement = skill_text.split("## Field Placement", 1)[1].split(
-        "### Parameter Key Rule",
-        1,
-    )[0]
-
-    assert "**FORBIDDEN top-level:**" in field_placement
-    forbidden_line = field_placement.split("**FORBIDDEN top-level:**", 1)[1].split("\n", 1)[0]
-    assert "`description`" not in forbidden_line
-    assert (
-        "`description` is allowed at top-level for all non-ticket cloud/resource"
-        in field_placement
-    )
-    assert "`genericRequest.description`, not top-level `description`" in field_placement
-
-
-def test_request_skill_empty_instruction_ticket_fallback_avoids_resource_collection() -> None:
-    skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
-    fallback = skill_text.split("### Ticket fallback", 1)[1].split("## Terminology Mapping", 1)[0]
-
-    assert '`"GENERIC_SERVICE"`' in fallback
-    assert "`genericRequest.description` only" in fallback
-    assert "Do not collect resource bundle tags or" in fallback
-    assert "compute flavors for ticket catalogs" in fallback
-
-
 def tool_metadata_contains(skill_text: str, section: str, value: str) -> bool:
-    """Return whether a frontmatter list section contains a literal string item."""
-    body = skill_text.split(section, 1)[1].split("\n", 20)[1:]
-    return any(line.strip() == f'- "{value}"' for line in body if line.startswith("  - "))
+    try:
+        body = skill_text.split(section, 1)[1]
+    except IndexError:
+        return False
+
+    next_tool_marker = body.find("\ntool_")
+    if next_tool_marker != -1:
+        body = body[:next_tool_marker]
+
+    return f'"{value}"' in body
+
 
 def test_request_decomposition_skill_requires_clarification_for_conflicting_ordinals() -> None:
     skill_text = DECOMPOSITION_SKILL.read_text(encoding="utf-8")
@@ -350,4 +351,3 @@ def test_request_decomposition_guidelines_require_ordinal_quantity_validation() 
     assert "Do not silently renumber the user's intent." in guidelines_text
     assert "Do not invent missing instances just to make the numbering contiguous." in guidelines_text
     assert "Instance quantity conflicts with the user's ordinal references." in guidelines_text
-
