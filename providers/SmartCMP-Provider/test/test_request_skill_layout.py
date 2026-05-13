@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 # Copyright 2026  Qianyun, Inc., www.cloudchef.io, All rights reserved.
 
 from pathlib import Path
@@ -81,7 +81,7 @@ def test_request_skill_follows_current_user_message_language():
     assert "English requests must get English follow-ups" in skill_text
     assert "Short summary of the request in the user's language" in skill_text
     assert "Short Chinese summary" not in skill_text
-    assert "Please confirm whether the information above is correct. (yes/no)" in skill_text
+    assert "Ask `请确认以上信息是否正确？（是/否）`" not in skill_text
 
 
 def test_request_skill_contracts_ticket_and_linux_vm_flow_expectations():
@@ -123,9 +123,9 @@ def test_request_skill_declares_status_query_tool() -> None:
     assert "REQ20260501000095" in skill_text
     assert "CHG20260413000011" in skill_text
     assert "Do not pass internal UUIDs" in skill_text
-    assert "request status" in skill_text
-    assert "approval status" in skill_text
-    assert "Has the request I just submitted been approved?" in skill_text
+    assert "申请状态" in skill_text
+    assert "是否审批通过" in skill_text
+    assert "我刚才提交的申请是否已经被批准了" in skill_text
     assert "reuse the most recent `smartcmp_submit_request` Request ID" in skill_text
     assert "Treat the tool output as" in skill_text
     assert "current user's message language" in skill_text
@@ -181,6 +181,7 @@ def test_request_decomposition_skill_excludes_same_type_quantity_only_requests()
     assert "Quantity alone for one resource type is not enough." in guidelines_text
 
 
+
 def test_approval_skill_does_not_claim_submitted_request_status_queries() -> None:
     skill_text = APPROVAL_SKILL.read_text(encoding="utf-8")
 
@@ -204,7 +205,7 @@ def test_approval_skill_separates_action_commands_from_detail_lookup() -> None:
     assert "agree RES20260505000010" in skill_text
     assert "pass TIC20260502000003" in skill_text
     assert "deny RES20260505000010" in skill_text
-    assert "User asks to approve/agree/pass a Request ID" in skill_text
+    assert "批准 CHG20260413000011" in skill_text
     assert "tool_approve_aliases:" in skill_text
     assert tool_metadata_contains(skill_text, "tool_approve_keywords:", "approve")
     assert tool_metadata_contains(skill_text, "tool_approve_keywords:", "agree")
@@ -213,7 +214,7 @@ def test_approval_skill_separates_action_commands_from_detail_lookup() -> None:
     assert tool_metadata_contains(skill_text, "tool_reject_keywords:", "refuse")
     assert "use smartcmp_approve" in detail_avoid_when
     assert "use smartcmp_reject" in detail_avoid_when
-    assert '  - "approve"' not in detail_keywords
+    assert '  - "审批"' not in detail_keywords
     assert '  - "TIC"' not in detail_keywords
 
 
@@ -329,7 +330,6 @@ def tool_metadata_contains(skill_text: str, section: str, value: str) -> bool:
     body = skill_text.split(section, 1)[1].split("\n", 20)[1:]
     return any(line.strip() == f'- "{value}"' for line in body if line.startswith("  - "))
 
-
 def test_request_decomposition_skill_requires_clarification_for_conflicting_ordinals() -> None:
     skill_text = DECOMPOSITION_SKILL.read_text(encoding="utf-8")
 
@@ -350,3 +350,4 @@ def test_request_decomposition_guidelines_require_ordinal_quantity_validation() 
     assert "Do not silently renumber the user's intent." in guidelines_text
     assert "Do not invent missing instances just to make the numbering contiguous." in guidelines_text
     assert "Instance quantity conflicts with the user's ordinal references." in guidelines_text
+
