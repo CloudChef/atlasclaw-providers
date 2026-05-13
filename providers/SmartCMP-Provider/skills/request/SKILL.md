@@ -1,6 +1,6 @@
 ﻿---
 name: "request"
-description: "Self-service request skill. Request cloud resources, application environments, ticket/work order services, or check submitted request status by Request ID. Keywords: request, provision, deploy, create VM, apply resources, submit ticket, request status, 申请资源, 创建虚拟机, 提交工单, 申请状态."
+description: "Self-service request skill. Request cloud resources, application environments, ticket/work order services, or check submitted request status by Request ID. Keywords: request, provision, deploy, create VM, apply resources, submit ticket, request status, request infrastructure, create server, open work order, approval status."
 provider_type: "smartcmp"
 instance_required: "true"
 workflow_role: "request_parent"
@@ -12,23 +12,23 @@ triggers:
   - deploy application
   - request cloud
   - new virtual machine
-  - 申请资源
-  - 创建虚拟机
-  - 提交工单
-  - 申请工单
-  - 申请机房
-  - 申请服务
-  - 提工单
-  - 报工单
-  - 问题工单
-  - 事件工单
-  - 申请云主机
-  - 申请linux
-  - 申请windows
-  - 申请状态
-  - 查询申请状态
-  - 是否审批通过
-  - 是否被批准
+  - request infrastructure
+  - create server
+  - submit work order
+  - request work order
+  - request datacenter
+  - request service
+  - open support ticket
+  - report issue ticket
+  - incident ticket
+  - event ticket
+  - request cloud host
+  - request linux
+  - request windows
+  - request status
+  - check request status
+  - approval status
+  - check approval result
   - request status
 
 use_when:
@@ -497,8 +497,8 @@ compute flavors for ticket catalogs.
 ## Terminology Mapping
 
 SmartCMP uses `business group` as the platform field name, but users may
-describe the same request scope as `tenant`, `租户`, `部门`, `BU`,
-`Department`, `项目`, or `Project`.
+describe the same request scope as `tenant`, `department`, `BU`, or
+`project`.
 
 - When the user uses one of these terms for request scope, resolve it to
   the business group field from `instructions.parameters`.
@@ -516,7 +516,7 @@ concise and natural:
   business groups for the selected catalog.
 - If the API returns exactly one business group, use it silently. Do not ask
   the user to fill it again.
-- If the user already specified a tenant / 租户 / 部门 / BU / 项目 and it
+- If the user already specified a tenant / department / BU / project and it
   uniquely normalizes to one available business group, carry that resolved
   match forward instead of asking again.
 - If multiple business groups remain after normalization, ask one concise
@@ -528,13 +528,13 @@ concise and natural:
 
 1. Call `smartcmp_list_services` (ONCE only, never again after getting catalogId).
 2. **Auto-select when intent is clear:**
-   - "linux" / "Linux VM" / "云主机" → select catalog named "Linux VM"
+   - "linux" / "Linux VM" / "cloud host" → select catalog named "Linux VM"
    - "windows" / "Windows VM" → select "Windows VM"
-   - "工单" / "ticket" / "问题" → select `serviceCategory: "GENERIC_SERVICE"`
-   - "k8s" / "容器" → select "App on Kubernetes"
-   - "机房" → select "机房"
+   - "work order" / "ticket" / "issue" → select `serviceCategory: "GENERIC_SERVICE"`
+   - "k8s" / "container" → select "App on Kubernetes"
+   - "datacenter" → select "Datacenter"
    - Ambiguous → show numbered list and ask
-3. **When auto-selecting:** Output a concise natural-language confirmation in the user's language, such as "Selected Linux VM." or "已为您自动选择 Linux VM". If required fields remain, ask exactly one natural-language question for the next missing field set. Do not echo raw tool output.
+3. **When auto-selecting:** Output a concise natural-language confirmation in the user's language, such as "Selected Linux VM." If required fields remain, ask exactly one natural-language question for the next missing field set. Do not echo raw tool output.
 4. **When the user selects by displayed number:** Treat the number only as an
    index into the latest service list. Resolve it to the catalog metadata UUID,
    then call `smartcmp_list_available_bgs` with that UUID before collecting
@@ -547,11 +547,11 @@ When the user mentions a compute spec in any form, the Agent must **call `smartc
 ### Workflow
 
 1. **Call `smartcmp_list_flavors`** to get available compute profiles.
-2. **LLM semantic matching** — the API returns flavors with `name` (e.g. "微型计算", "通用规格", "2c2g", "小型计算") and optional `description`. The Agent should:
+2. **LLM semantic matching** — the API returns flavors with `name` (e.g. "micro", "general", "2c2g", "small") and optional `description`. The Agent should:
    - Compare the user's wording against all returned flavor `name` and `description` fields
-   - Use LLM reasoning to infer the best match (e.g. user says "小一点的" → "微型计算" or "小型计算")
+   - Use LLM reasoning to infer the best match (e.g. user says "smaller one" → "micro" or "small")
    - If user says "2c4g" → match flavor named "2c4g" directly
-   - If user says "微型" → match "微型计算"
+   - If user says "micro" → match flavor named "micro"
 3. **If exactly one flavor matches with high confidence** → auto-select and inform user
 4. **If no match or ambiguous** → show numbered list of all available flavors and ask user to choose
 5. **If user did not mention any spec:**
@@ -561,8 +561,8 @@ When the user mentions a compute spec in any form, the Agent must **call `smartc
 ### Key Rules
 
 - **Always call `smartcmp_list_flavors`** to get the real list before matching
-- **Do NOT hardcode or guess flavor names.** Flavor names are deployment-specific (could be "2c4g", "微型计算", "通用规格", etc.)
-- Use LLM semantic inference, not rigid string parsing. The user may say "帮我申请微型计算" or "小的就行" or "2核4G" — all should be matched against the API-returned list
+- **Do NOT hardcode or guess flavor names.** Flavor names are deployment-specific (could be "2c4g", "micro", "general", etc.)
+- Use LLM semantic inference, not rigid string parsing. The user may say "request a micro profile" or "the small one" or "2c4g" — all should be matched against the API-returned list
 - Use the matched flavor's `name` for `computeProfileName` or `id` for `computeProfileId`, depending on which key exists in `instructions.parameters`. If both keys exist, prefer `computeProfileId`
 - **Do NOT create separate `cpu` or `memory` fields.** The spec goes into the compute profile field only
 
@@ -691,7 +691,7 @@ When `instructions.parameters` includes `resourceBundleTags` as **required** (`r
 1. **Call `smartcmp_list_facets`** with `business_group_id` (the selected BG's id) to retrieve available facet definitions and options.
 2. **Present options to user** using `name` for English replies or `nameZh` for Chinese replies when available. Example:
    - English: "Choose a resource environment: 1) Dev  2) Test  3) Prod"
-   - Chinese: "请选择资源环境：1) 开发  2) 测试  3) 生产"
+   - Alternative wording: "Choose the resource environment: 1) Development  2) Test  3) Production"
 3. **User selects** → build the tag string using the facet `key` and option `key` from API response.
 4. Place the result in `resourceBundleTags` array inside resourceSpecs.
 
@@ -744,11 +744,11 @@ Format: `["<facet.key>:<option.key>"]` — both parts come **directly from the r
 
 ### Auto-matching from User Input
 
-If the user mentions an environment keyword in their request (e.g. "测试", "生产", "开发"), the Agent should:
+If the user mentions an environment keyword in their request (e.g. "test", "production", "development"), the Agent should:
 
 1. Call `smartcmp_list_facets` to get available options. **This requires `business_group_id`**, so business group must be resolved first.
 2. Match user's keyword against option `nameZh` / `name` fields.
-3. If exactly one option matches → auto-select and inform user in the user's language, such as "Matched resource environment: Test." or "已自动匹配资源环境: 测试".
+3. If exactly one option matches → auto-select and inform user in the user's language, such as "Matched resource environment: Test."
 4. If no match or ambiguous → show the full option list and ask user to choose.
 
 ### Correct Example (Tag-based, no resourceBundleName)
@@ -778,11 +778,11 @@ If the user mentions an environment keyword in their request (e.g. "测试", "�
 
 ### WRONG — Tag Mistakes (DO NOT follow)
 
-**Wrong 1: Using display name instead of API key**
+**Wrong 1: Using display label instead of API key**
 ```json
-{ "resourceBundleTags": ["资源环境:测试"] }
+{ "resourceBundleTags": ["environment:test"] }
 ```
-Display names (`nameZh`) are for showing to user only. Must use `facet.key` and `option.key` from API response.
+Display labels (`nameZh` / `name`) are for showing to user only. Must use `facet.key` and `option.key` from API response.
 
 **Wrong 2: Using parameter field name as tag key**
 ```json
@@ -885,7 +885,7 @@ Resolve parameters using API tools and `instructions.parameters`:
 | # | Condition | Action |
 |---|-----------|--------|
 | 1 | Business group field exists in params | Call `smartcmp_list_available_bgs` → user selects → use `businessGroupId` with the selected BG's `id` |
-| 2 | User provides spec (e.g. "2c4g", "微型计算", "小一点的") | Call `smartcmp_list_flavors` → LLM semantic match against returned flavor `name` list → set compute profile field |
+| 2 | User provides spec (e.g. "2c4g", "micro", "smaller one") | Call `smartcmp_list_flavors` → LLM semantic match against returned flavor `name` list → set compute profile field |
 | 3 | User does not provide spec, no `defaultValue` for compute profile | Call `smartcmp_list_flavors` → show list → ask user to choose |
 | 4 | `resourceBundleTags` required AND `resourceBundleName` absent | Call `smartcmp_list_facets` (with `business_group_id`) → match/select → set `resourceBundleTags` in resourceSpecs using API keys; omit `resourceBundleName` |
 | 5 | Parameter has non-empty `defaultValue` (except business group) and is **not** marked `runtimeDefaultOnly` | Use default silently |
@@ -901,7 +901,7 @@ Resolve parameters using API tools and `instructions.parameters`:
 
 ## Concrete Flow Expectations
 
-- "我要申请工单": after the ticket service is auto-selected and the business
+- "I want to open a work order": after the ticket service is auto-selected and the business
   group is resolved or chosen, keep the resolved context and continue with a
   natural-language prompt for the remaining ticket fields instead of stopping
   at raw tool output.
@@ -909,11 +909,11 @@ Resolve parameters using API tools and `instructions.parameters`:
   datasource returns multiple choices, ask only the short business-group
   selection question using the available names. Do not echo the lookup
   preamble or dump the full tool output.
-- "我要申请测试部门的 2C4G 的 Linux VM": recognize Linux VM, the business
-  group `测试部门`, and `cpu=2` plus `memory=4`; carry those values forward and
+- "I want to request a 2C4G Linux VM for the test department": recognize Linux VM, the business
+  group `test department`, and `cpu=2` plus `memory=4`; carry those values forward and
   ask only for the remaining required fields, minimizing follow-up rounds.
-- In that Linux VM flow, if business-group lookup returns `测试`, treat it as
-  the resolved match for user wording `测试部门` only when it is the unique
+- In that Linux VM flow, if business-group lookup returns `test`, treat it as
+  the resolved match for user wording `test department` only when it is the unique
   normalized datasource match; otherwise ask the user to choose. When it is a
   unique match, continue directly to the remaining VM fields. Do not show the
   business-group list or the lookup preamble to the user.
@@ -933,9 +933,9 @@ When `serviceCategory` is `"GENERIC_SERVICE"`:
 ### Step 1: Show preview
 
 1. Short summary of the request in the user's language
-2. `JSON Preview` or `JSON 预览` heading, matching the reply language, with fenced json block
+2. `JSON Preview` heading, matching the reply language, with fenced json block
 3. Mask `credentialPassword` as `"******"`
-4. Ask for confirmation in the user's language, such as `Please confirm whether the information above is correct. (yes/no)` or `请确认以上信息是否正确？（是/否）`
+4. Ask for confirmation in the user's language, such as `Please confirm whether the information above is correct. (yes/no)`
 5. **STOP — do NOT call submit yet**
 
 ### Step 2: After confirmation
@@ -945,7 +945,7 @@ When `serviceCategory` is `"GENERIC_SERVICE"`:
 - A bare number such as `1`, `2`, or `5` is a selection for the latest displayed
   list, not a submit confirmation. Do not call `smartcmp_submit_request` after a
   numeric reply unless the immediately previous assistant message displayed a
-  `JSON Preview` / `JSON 预览` and explicitly asked for confirmation.
+  `JSON Preview` and explicitly asked for confirmation.
 
 ## Interaction Rules
 
