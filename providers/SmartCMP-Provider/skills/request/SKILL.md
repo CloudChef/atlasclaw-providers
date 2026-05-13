@@ -50,15 +50,15 @@ avoid_when:
 
 examples:
   - "Create a new VM with 2c4g"
-  - "Request 3 Linux virtual machines with the same 2c4g specification"
+  - "Request multiple Linux virtual machines with the same specification"
   - "Provision cloud resources for my project"
   - "Deploy a Linux VM in production environment"
-  - "提交一个问题工单"
-  - "申请一个机房资源"
-  - "申请2c4g的linux云主机"
-  - "帮我查一下我的申请 RES20260501000095 的状态"
-  - "帮我查一下我的申请 RES20260501000095 是否已经审批通过"
-  - "我刚才提交的申请是否已经被批准了"
+  - "Submit an incident ticket"
+  - "Request a datacenter resource"
+  - "Request a 2c4g Linux cloud host"
+  - "Check the status of my request RES20260501000095"
+  - "Has my request RES20260501000095 been approved?"
+  - "Has the request I just submitted been approved?"
 
 related:
   - datasource
@@ -217,19 +217,17 @@ with quantity N.
 Keep the request in this skill when the user wants multiple instances of the
 same resource type with the same configuration, for example:
 
-- "3 virtual machines with the same 2c4g Linux specification"
-- "3 identical Linux VMs for one project"
-- "申请三台相同配置的虚拟机"
+- "several identical Linux VMs for one project"
+- "multiple instances of the same database service with shared parameters"
+- "quantity N of one resource type with one shared parameter set"
 
 Route to `request-decomposition-agent` only when the request needs to be split
 into distinct sub-requests, especially when the user gives:
 
-- multiple virtual machines with different specs per instance
 - multiple resource types in one ask
-- "first VM ..., second VM ..., third VM ..."
-- "申请三台虚拟机，但每台配置不同"
-- "第一台 ..., 第二台 ..., 第三台 ..."
+- per-instance differences such as "first ..., second ..., third ..."
 - different specs per instance
+- mixed roles/components that should become separate CMP requests
 
 Quantity by itself is **not** a decomposition signal. The request workflow and
 submit tool should interpret same-type quantity from the user's original
@@ -241,8 +239,8 @@ collection flow in this skill.
 ### Submitted request status flow
 
 Use `smartcmp_get_request_status` only for submitted request status or
-approval-result checks. Pass an explicit Request ID when present. For "刚才提交的
-申请", reuse the most recent `smartcmp_submit_request` Request ID in this
+approval-result checks. Pass an explicit Request ID when present. For "the
+request I just submitted", reuse the most recent `smartcmp_submit_request` Request ID in this
 conversation; if none exists, ask for the Request ID. Request IDs are
 user-facing values such as `REQ20260501000095`, `RES20260501000095`,
 `TIC20260316000001`, or `CHG20260413000011`. Never pass UUID-shaped internal

@@ -125,7 +125,7 @@ def test_request_skill_declares_status_query_tool() -> None:
     assert "Do not pass internal UUIDs" in skill_text
     assert "申请状态" in skill_text
     assert "是否审批通过" in skill_text
-    assert "我刚才提交的申请是否已经被批准了" in skill_text
+    assert "Has the request I just submitted been approved?" in skill_text
     assert "reuse the most recent `smartcmp_submit_request` Request ID" in skill_text
     assert "Treat the tool output as" in skill_text
     assert "current user's message language" in skill_text
@@ -138,31 +138,29 @@ def test_request_skill_defers_multi_vm_requests_to_decomposition_agent() -> None
 
     assert "Multi-resource routing boundary" in skill_text
     assert "one CMP request flow at a time" in skill_text
-    assert "multiple virtual machines" in skill_text
-    assert "first VM ..., second VM ..., third VM ..." in skill_text
-    assert "申请三台虚拟机" in skill_text
-    assert "第一台 ..., 第二台 ..., 第三台 ..." in skill_text
+    assert "multiple resource types in one ask" in skill_text
+    assert 'per-instance differences such as "first ..., second ..., third ..."' in skill_text
+    assert "different specs per instance" in skill_text
     assert "do not continue with the single-catalog parameter" in skill_text
 
 
 def test_request_decomposition_skill_covers_multi_vm_chat_phrases() -> None:
     skill_text = DECOMPOSITION_SKILL.read_text(encoding="utf-8")
 
-    assert "multiple virtual machines" in skill_text
-    assert "申请多台虚拟机" in skill_text
-    assert "第一台第二台第三台" in skill_text
+    assert "mixed resource request" in skill_text
+    assert "per-instance configuration differences" in skill_text
+    assert "ordinal instance differences" in skill_text
     assert "distinct per-item configuration" in skill_text
     assert "For ordinary chat/runtime routing" in skill_text
-    assert "first VM / second VM / third VM" in skill_text
-    assert "我想申请三台虚拟机" in skill_text
-    assert "treat each VM as its own draft sub-request" in skill_text
+    assert "first / second / third" in skill_text
+    assert "differently configured component" in skill_text
 
 
 def test_request_skill_explicitly_allows_same_type_quantity_requests() -> None:
     skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
 
     assert "multiple instances of the same resource type under one service request" in skill_text
-    assert "Request 3 Linux virtual machines with the same 2c4g specification" in skill_text
+    assert "Request multiple Linux virtual machines with the same specification" in skill_text
     assert "one service catalog / one resource type / one shared parameter set" in skill_text
     assert "Quantity by itself is **not** a decomposition signal." in skill_text
 
@@ -331,10 +329,10 @@ def tool_metadata_contains(skill_text: str, section: str, value: str) -> bool:
 def test_request_decomposition_skill_requires_clarification_for_conflicting_vm_ordinals() -> None:
     skill_text = DECOMPOSITION_SKILL.read_text(encoding="utf-8")
 
-    assert 'ordinal-style per-VM references such as "first", "second"' in skill_text
-    assert "If the stated VM quantity conflicts with the referenced ordinal positions" in skill_text
-    assert '"request 4 virtual machines, second ..., fifth ..., sixth ..."' in skill_text
-    assert "do not guess the missing VM count" in skill_text
+    assert 'ordinal-style references such as "first", "second"' in skill_text
+    assert "If the stated instance quantity conflicts with the referenced ordinal positions" in skill_text
+    assert '"request 4 instances, second ..., fifth ..., sixth ..."' in skill_text
+    assert "do not guess the missing instance count" in skill_text
     assert "Ask for clarification before decomposition" in skill_text
 
 
@@ -342,8 +340,8 @@ def test_request_decomposition_guidelines_require_ordinal_quantity_validation() 
     guidelines_text = DECOMPOSITION_GUIDELINES.read_text(encoding="utf-8")
 
     assert "Ordinal And Quantity Validation" in guidelines_text
-    assert "If the user gives a total VM count and also gives ordinal per-VM details" in guidelines_text
+    assert "If the user gives a total instance count and also gives ordinal per-item details" in guidelines_text
     assert "If the numbering is non-consecutive or out of range" in guidelines_text
     assert "Do not silently renumber the user's intent." in guidelines_text
-    assert "Do not invent missing VMs just to make the numbering contiguous." in guidelines_text
-    assert "VM quantity conflicts with the user's ordinal references." in guidelines_text
+    assert "Do not invent missing instances just to make the numbering contiguous." in guidelines_text
+    assert "Instance quantity conflicts with the user's ordinal references." in guidelines_text
