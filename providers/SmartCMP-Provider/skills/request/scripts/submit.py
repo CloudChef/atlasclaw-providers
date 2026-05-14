@@ -49,6 +49,7 @@ _VERIFY_INTERVAL_SECONDS = max(
     float(os.environ.get("CMP_SUBMIT_VERIFY_INTERVAL_SECONDS", "1") or "1"),
 )
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Z]{3}\d{14}$", re.IGNORECASE)
+_FALLBACK_QUANTITY_FIELD = "quantity"
 _UUID_PATTERN = re.compile(
     r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
     re.IGNORECASE,
@@ -563,6 +564,51 @@ def _enrich_request_body(body: object) -> object:
 
     return enriched
 
+
+def _coerce_positive_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, float):
+        if not value.is_integer():
+            return None
+        integer_value = int(value)
+        return integer_value if integer_value > 0 else None
+    if isinstance(value, str):
+        candidate = value.strip()
+        if not candidate or not re.fullmatch(r"\d+", candidate):
+            return None
+        integer_value = int(candidate)
+        return integer_value if integer_value > 0 else None
+    return None
+
+
+def _normalize_request_contract(body: object) -> object:
+    if not isinstance(body, dict):
+        return body
+
+    normalized = dict(body)
+    if _FALLBACK_QUANTITY_FIELD in normalized:
+        raw_value = normalized.get(_FALLBACK_QUANTITY_FIELD)
+        if raw_value in (None, "", [], {}):
+            normalized.pop(_FALLBACK_QUANTITY_FIELD, None)
+        else:
+            parsed_value = _coerce_positive_int(raw_value)
+            if parsed_value is None:
+                raise ValueError("Invalid `quantity` value. Fallback quantity requires one positive integer.")
+            normalized[_FALLBACK_QUANTITY_FIELD] = parsed_value
+
+    specs = normalized.get("resourceSpecs")
+    if isinstance(specs, dict):
+        normalized["resourceSpecs"] = [specs]
+        specs = normalized["resourceSpecs"]
+
+    if "resourceSpecs" in normalized and not isinstance(specs, list):
+        raise ValueError("`resourceSpecs` must be an object or an array.")
+
+    return normalized
+
 # -- Parse arguments -----------------------------------------------------------
 parser = argparse.ArgumentParser(description='Submit request to SmartCMP')
 group = parser.add_mutually_exclusive_group(required=False)
@@ -605,14 +651,11 @@ except FileNotFoundError:
     sys.exit(1)
 
 body = _enrich_request_body(body)
-
-# -- Normalize resourceSpecs to array -----------------------------------------
-# SmartCMP backend expects resourceSpecs as an array (ArrayList<ResourceSpec>).
-# LLMs sometimes send it as a single object; wrap it defensively.
-if isinstance(body, dict) and "resourceSpecs" in body:
-    specs = body["resourceSpecs"]
-    if isinstance(specs, dict):
-        body["resourceSpecs"] = [specs]
+try:
+    body = _normalize_request_contract(body)
+except ValueError as e:
+    print(f"[ERROR] {e}")
+    sys.exit(1)
 
 # -- Submit request ------------------------------------------------------------
 url = f"{BASE_URL}/generic-request/submit"

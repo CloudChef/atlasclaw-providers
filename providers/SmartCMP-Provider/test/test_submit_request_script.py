@@ -331,3 +331,229 @@ def test_submit_robot_token_uses_current_user_instead_of_webhook_runtime_user(mo
     assert submitted["body"]["userLoginId"] != "webhook-approval-1"
     assert "[SUCCESS] Request submitted" in stdout
     assert ROBOT_INTERNAL_REQUEST_UUID not in stdout
+
+
+def test_submit_request_preserves_same_type_quantity_fields(monkeypatch):
+    submitted = {}
+
+    def fake_post(url, headers=None, json=None, verify=None, timeout=None):
+        assert url == "https://cmp.example.com/platform-api/generic-request/submit"
+        submitted["body"] = dict(json or {})
+        return FakeResponse(
+            [{"id": INTERNAL_REQUEST_UUID, "workflowId": "TIC20260422000006", "state": "INITIALING"}]
+        )
+
+    def fake_get(url, headers=None, verify=None, timeout=None):
+        assert url == f"https://cmp.example.com/platform-api/generic-request/{INTERNAL_REQUEST_UUID}"
+        return FakeResponse(
+            {
+                "id": INTERNAL_REQUEST_UUID,
+                "workflowId": "TIC20260422000006",
+                "state": "INITIALING",
+                "processInstanceId": "proc-quantity",
+            }
+        )
+
+    exit_code, stdout, _ = run_script(
+        monkeypatch,
+        [
+            "--json",
+            (
+                '{"catalogName":"Linux OS","name":"vm-batch","quantity":3,'
+                '"resourceSpecs":{"node":"Compute","type":"cloudchef.nodes.Compute",'
+                '"computeProfileName":"2c4g"}}'
+            ),
+        ],
+        fake_post=fake_post,
+        fake_get=fake_get,
+    )
+
+    assert exit_code == 0
+    assert submitted["body"]["quantity"] == 3
+    assert isinstance(submitted["body"]["resourceSpecs"], list)
+    assert submitted["body"]["resourceSpecs"][0]["computeProfileName"] == "2c4g"
+    assert "[SUCCESS] Request submitted" in stdout
+
+
+def test_submit_request_normalizes_string_quantity_to_integer(monkeypatch):
+    submitted = {}
+
+    def fake_post(url, headers=None, json=None, verify=None, timeout=None):
+        assert url == "https://cmp.example.com/platform-api/generic-request/submit"
+        submitted["body"] = dict(json or {})
+        return FakeResponse(
+            [{"id": INTERNAL_REQUEST_UUID, "workflowId": "TIC20260422000007", "state": "INITIALING"}]
+        )
+
+    def fake_get(url, headers=None, verify=None, timeout=None):
+        assert url == f"https://cmp.example.com/platform-api/generic-request/{INTERNAL_REQUEST_UUID}"
+        return FakeResponse(
+            {
+                "id": INTERNAL_REQUEST_UUID,
+                "workflowId": "TIC20260422000007",
+                "state": "INITIALING",
+                "processInstanceId": "proc-quantity-string",
+            }
+        )
+
+    exit_code, stdout, _ = run_script(
+        monkeypatch,
+        [
+            "--json",
+            (
+                '{"catalogName":"Linux OS","name":"vm-batch","quantity":"3",'
+                '"resourceSpecs":{"node":"Compute","type":"cloudchef.nodes.Compute",'
+                '"computeProfileName":"2c4g"}}'
+            ),
+        ],
+        fake_post=fake_post,
+        fake_get=fake_get,
+    )
+
+    assert exit_code == 0
+    assert submitted["body"]["quantity"] == 3
+    assert "[SUCCESS] Request submitted" in stdout
+
+
+def test_submit_request_allows_quantity_with_catalog_multi_resource_specs(monkeypatch):
+    submitted = {}
+
+    def fake_post(url, headers=None, json=None, verify=None, timeout=None):
+        assert url == "https://cmp.example.com/platform-api/generic-request/submit"
+        submitted["body"] = dict(json or {})
+        return FakeResponse(
+            [{"id": INTERNAL_REQUEST_UUID, "workflowId": "TIC20260422000008", "state": "INITIALING"}]
+        )
+
+    def fake_get(url, headers=None, verify=None, timeout=None):
+        assert url == f"https://cmp.example.com/platform-api/generic-request/{INTERNAL_REQUEST_UUID}"
+        return FakeResponse(
+            {
+                "id": INTERNAL_REQUEST_UUID,
+                "workflowId": "TIC20260422000008",
+                "state": "INITIALING",
+                "processInstanceId": "proc-catalog-multi-spec",
+            }
+        )
+
+    exit_code, stdout, _ = run_script(
+        monkeypatch,
+        [
+            "--json",
+            (
+                '{"catalogName":"Linux OS","name":"vm-batch","quantity":3,"resourceSpecs":['
+                '{"node":"Compute","type":"cloudchef.nodes.Compute","computeProfileName":"2c4g"},'
+                '{"node":"Network","type":"cloudchef.nodes.Network","params":{"networkId":"net-1"}}]}'
+            ),
+        ],
+        fake_post=fake_post,
+        fake_get=fake_get,
+    )
+
+    assert exit_code == 0
+    assert submitted["body"]["quantity"] == 3
+    assert len(submitted["body"]["resourceSpecs"]) == 2
+    assert submitted["body"]["resourceSpecs"][1]["node"] == "Network"
+    assert "[SUCCESS] Request submitted" in stdout
+
+
+def test_submit_request_preserves_catalog_specific_count_fields(monkeypatch):
+    submitted = {}
+
+    def fake_post(url, headers=None, json=None, verify=None, timeout=None):
+        assert url == "https://cmp.example.com/platform-api/generic-request/submit"
+        submitted["body"] = dict(json or {})
+        return FakeResponse(
+            [{"id": INTERNAL_REQUEST_UUID, "workflowId": "TIC20260422000009", "state": "INITIALING"}]
+        )
+
+    def fake_get(url, headers=None, verify=None, timeout=None):
+        assert url == f"https://cmp.example.com/platform-api/generic-request/{INTERNAL_REQUEST_UUID}"
+        return FakeResponse(
+            {
+                "id": INTERNAL_REQUEST_UUID,
+                "workflowId": "TIC20260422000009",
+                "state": "INITIALING",
+                "processInstanceId": "proc-catalog-count-field",
+            }
+        )
+
+    exit_code, stdout, _ = run_script(
+        monkeypatch,
+        [
+            "--json",
+            (
+                '{"catalogName":"Linux OS","name":"vm-batch","vmCount":"3",'
+                '"params":{"instance_number":"3"},'
+                '"resourceSpecs":{"node":"Compute","type":"cloudchef.nodes.Compute",'
+                '"computeProfileName":"2c4g"}}'
+            ),
+        ],
+        fake_post=fake_post,
+        fake_get=fake_get,
+    )
+
+    assert exit_code == 0
+    assert submitted["body"]["vmCount"] == "3"
+    assert submitted["body"]["params"]["instance_number"] == "3"
+    assert "[SUCCESS] Request submitted" in stdout
+
+
+def test_submit_request_allows_multiple_resource_specs_without_quantity(monkeypatch):
+    submitted = {}
+
+    def fake_post(url, headers=None, json=None, verify=None, timeout=None):
+        assert url == "https://cmp.example.com/platform-api/generic-request/submit"
+        submitted["body"] = dict(json or {})
+        return FakeResponse(
+            [{"id": INTERNAL_REQUEST_UUID, "workflowId": "TIC20260422000010", "state": "INITIALING"}]
+        )
+
+    def fake_get(url, headers=None, verify=None, timeout=None):
+        assert url == f"https://cmp.example.com/platform-api/generic-request/{INTERNAL_REQUEST_UUID}"
+        return FakeResponse(
+            {
+                "id": INTERNAL_REQUEST_UUID,
+                "workflowId": "TIC20260422000010",
+                "state": "INITIALING",
+                "processInstanceId": "proc-multi-spec",
+            }
+        )
+
+    exit_code, stdout, _ = run_script(
+        monkeypatch,
+        [
+            "--json",
+            (
+                '{"catalogName":"Linux OS","name":"catalog-declared-stack","resourceSpecs":['
+                '{"node":"Compute","type":"cloudchef.nodes.Compute","computeProfileName":"2c4g"},'
+                '{"node":"Network","type":"cloudchef.nodes.Network","params":{"networkId":"net-1"}}]}'
+            ),
+        ],
+        fake_post=fake_post,
+        fake_get=fake_get,
+    )
+
+    assert exit_code == 0
+    assert len(submitted["body"]["resourceSpecs"]) == 2
+    assert submitted["body"]["resourceSpecs"][0]["node"] == "Compute"
+    assert submitted["body"]["resourceSpecs"][1]["node"] == "Network"
+    assert "[SUCCESS] Request submitted" in stdout
+
+
+def test_submit_request_rejects_non_positive_quantity(monkeypatch):
+    exit_code, stdout, _ = run_script(
+        monkeypatch,
+        [
+            "--json",
+            (
+                '{"catalogName":"Linux OS","name":"vm-batch","quantity":0,'
+                '"resourceSpecs":{"node":"Compute","type":"cloudchef.nodes.Compute",'
+                '"computeProfileName":"2c4g"}}'
+            ),
+        ],
+    )
+
+    assert exit_code == 1
+    assert "Invalid `quantity` value" in stdout
+    assert "positive integer" in stdout
