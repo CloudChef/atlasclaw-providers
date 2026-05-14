@@ -6,6 +6,7 @@ Use this file when a descriptive requirement needs to be turned into multiple CM
 
 - The request clearly implies more than one resource type.
 - There are explicit dependencies such as app plus database, app plus storage, or app plus network exposure.
+- There are compute plus software, middleware, or database software dependencies.
 - The requirement includes environment, expected workload, or resilience hints that can guide service selection.
 - The user gives per-item differences using ordinal references such as first, second, third, fifth, or sixth.
 

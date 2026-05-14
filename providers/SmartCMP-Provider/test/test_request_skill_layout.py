@@ -258,6 +258,18 @@ def test_request_decomposition_skill_covers_multi_vm_chat_phrases() -> None:
     assert "differently configured component" in skill_text
 
 
+def test_request_decomposition_skill_covers_compute_plus_software_components() -> None:
+    skill_text = DECOMPOSITION_SKILL.read_text(encoding="utf-8")
+    guidelines_text = DECOMPOSITION_GUIDELINES.read_text(encoding="utf-8")
+
+    assert "software component request" in skill_text
+    assert "middleware request" in skill_text
+    assert "compute plus software, middleware, or database software" in skill_text
+    assert "database software component" in skill_text
+    assert "Software / Middleware" in skill_text
+    assert "compute plus software, middleware, or database software dependencies" in guidelines_text
+
+
 def test_request_skill_explicitly_allows_same_type_quantity_requests() -> None:
     skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
 

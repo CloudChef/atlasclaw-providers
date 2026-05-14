@@ -14,6 +14,8 @@ triggers:
   - mixed resource request
   - per-instance configuration differences
   - ordinal instance differences
+  - software component request
+  - middleware request
 
 use_when:
   - User describes infrastructure or application needs in natural language
@@ -23,6 +25,7 @@ use_when:
   - User asks for multiple resource types that should become separate CMP requests
   - User asks for multiple resources with distinct per-item configuration
   - User enumerates differences across instances or components using ordinal references such as first / second / third
+  - User asks for compute plus software, middleware, or database software in one request
 
 avoid_when:
   - User has specific parameters ready for a single request (use request skill)
@@ -32,6 +35,7 @@ avoid_when:
 
 examples:
   - "I need an application environment with compute, data, and traffic components"
+  - "Request one VM and a database software component for the same service"
   - "Set up a development environment for our new project"
   - "Provision infrastructure for a microservices deployment"
   - "Create several instances where the first needs a small profile and the second needs a larger profile"
@@ -161,6 +165,7 @@ AtlasClaw runtime:
 |----------------|-------------|
 | Compute | Application runtime components |
 | Data | Database or data service components |
+| Software / Middleware | Runtime software or database software requested alongside compute |
 | Storage | Storage capacity allocations |
 | Traffic | Ingress or distribution components |
 | Network | Connectivity dependencies |
@@ -176,6 +181,11 @@ If the user wants multiple instances of the same resource type with the same
 configuration under one service request, keep that request in the plain
 `request` skill instead of decomposing it.
 
+- If the user asks for a compute instance plus software, middleware, or
+  database software, preserve them as distinct components unless the selected
+  catalog explicitly represents that combined service. Keep the dependency
+  clear: the software component depends on the target compute host or
+  application environment.
 - Preserve the user-stated quantity.
 - Preserve per-item differences such as CPU, memory, disk, OS, environment,
   and naming hints.
