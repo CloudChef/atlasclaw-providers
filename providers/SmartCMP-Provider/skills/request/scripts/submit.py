@@ -49,7 +49,7 @@ _VERIFY_INTERVAL_SECONDS = max(
     float(os.environ.get("CMP_SUBMIT_VERIFY_INTERVAL_SECONDS", "1") or "1"),
 )
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Z]{3}\d{14}$", re.IGNORECASE)
-_COUNT_FIELD_KEYS = ("quantity", "count", "instanceCount", "serverCount")
+_FALLBACK_QUANTITY_FIELD = "quantity"
 _UUID_PATTERN = re.compile(
     r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
     re.IGNORECASE,
@@ -589,28 +589,15 @@ def _normalize_request_contract(body: object) -> object:
         return body
 
     normalized = dict(body)
-    present_count_fields: list[tuple[str, int]] = []
-    for key in _COUNT_FIELD_KEYS:
-        if key not in normalized:
-            continue
-        raw_value = normalized.get(key)
+    if _FALLBACK_QUANTITY_FIELD in normalized:
+        raw_value = normalized.get(_FALLBACK_QUANTITY_FIELD)
         if raw_value in (None, "", [], {}):
-            normalized.pop(key, None)
-            continue
-        parsed_value = _coerce_positive_int(raw_value)
-        if parsed_value is None:
-            raise ValueError(
-                f"Invalid `{key}` value. Same-type multi-instance requests require one positive integer count."
-            )
-        normalized[key] = parsed_value
-        present_count_fields.append((key, parsed_value))
-
-    if len(present_count_fields) > 1:
-        field_names = ", ".join(key for key, _ in present_count_fields)
-        raise ValueError(
-            "Use exactly one top-level instance-count field for same-type multi-instance requests. "
-            f"Found: {field_names}."
-        )
+            normalized.pop(_FALLBACK_QUANTITY_FIELD, None)
+        else:
+            parsed_value = _coerce_positive_int(raw_value)
+            if parsed_value is None:
+                raise ValueError("Invalid `quantity` value. Fallback quantity requires one positive integer.")
+            normalized[_FALLBACK_QUANTITY_FIELD] = parsed_value
 
     specs = normalized.get("resourceSpecs")
     if isinstance(specs, dict):
@@ -619,18 +606,6 @@ def _normalize_request_contract(body: object) -> object:
 
     if "resourceSpecs" in normalized and not isinstance(specs, list):
         raise ValueError("`resourceSpecs` must be an object or an array.")
-
-    if isinstance(specs, list) and len(specs) != 1:
-        if present_count_fields:
-            raise ValueError(
-                "Same-type multi-instance requests must use one shared top-level count field and exactly one "
-                "shared resourceSpecs item. Use request-decomposition-agent for per-instance differences."
-            )
-        raise ValueError(
-            "This request skill accepts exactly one shared resourceSpecs item per request body. "
-            "Use one top-level count field for same-type quantity, or use request-decomposition-agent "
-            "for per-instance differences."
-        )
 
     return normalized
 

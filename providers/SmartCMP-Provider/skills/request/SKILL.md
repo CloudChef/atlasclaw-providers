@@ -84,7 +84,7 @@ tool_list_services_parameters: |
     }
   }
 tool_submit_name: "smartcmp_submit_request"
-tool_submit_description: "Submit resource request to SmartCMP. RULES: (1) NEVER claim submitted without calling this tool. (2) Show JSON preview and wait for user confirmation BEFORE calling. (3) json_body is REQUIRED. (4) catalogId MUST be UUID from catalog metadata id field. (5) Same-type multi-instance requests must use one top-level count field plus one shared resourceSpecs item; per-instance differences belong in request-decomposition-agent. See Field Placement table in skill body for exact structure rules."
+tool_submit_description: "Submit resource request to SmartCMP. RULES: (1) NEVER claim submitted without calling this tool. (2) Show JSON preview and wait for user confirmation BEFORE calling. (3) json_body is REQUIRED. (4) catalogId MUST be UUID from catalog metadata id field. (5) Same-type multi-instance requests must use the selected catalog's declared count field, or fallback top-level quantity when no such field exists, without duplicating resourceSpecs; per-instance differences belong in request-decomposition-agent. See Field Placement table in skill body for exact structure rules."
 tool_submit_entrypoint: "scripts/submit.py"
 tool_submit_groups:
   - cmp
@@ -101,7 +101,7 @@ tool_submit_parameters: |
     "properties": {
       "json_body": {
         "type": "string",
-        "description": "REQUIRED. The complete request JSON as a string. For cloud/resource requests: include catalogId, catalogName, businessGroupId, name, resourceSpecs built from generated Markdown instructions.resourceSpecs, and optional top-level params built from instructions.params. Put resourceBundleId at resourceSpecs[].resourceBundleId, resourceBundleTags at resourceSpecs[].resourceBundleTags, resourceBundleParams under resourceSpecs[].resourceBundleParams, resource-spec params under resourceSpecs[].params, resource-spec fields under resourceSpecs[] directly, and catalog form params under top-level params. For same-type multi-instance requests, keep one shared resourceSpecs item and add one top-level count field instead of duplicating resourceSpecs. If resourceBundleTags is used, omit resourceBundleId for the same resource spec. For tickets: build genericRequest.description and optional genericRequest.processForm from generated Markdown instructions.genericRequest; for tickets without Markdown, include catalogId, catalogName, businessGroupId, name, and genericRequest {description}. Do NOT include userLoginId (auto-injected by script). FORBIDDEN fields: never add priority, category, requestor, parameters, impactScope, urgency, contactName, or any field not listed above. DO NOT omit this parameter."
+        "description": "REQUIRED. The complete request JSON as a string. For cloud/resource requests: include catalogId, catalogName, businessGroupId, name, resourceSpecs built from generated Markdown instructions.resourceSpecs, and optional top-level params built from instructions.params. Put resourceBundleId at resourceSpecs[].resourceBundleId, resourceBundleTags at resourceSpecs[].resourceBundleTags, resourceBundleParams under resourceSpecs[].resourceBundleParams, resource-spec params under resourceSpecs[].params, resource-spec fields under resourceSpecs[] directly, and catalog form params under top-level params. For same-type multi-instance requests, use the selected catalog's declared quantity/count field in its declared location; when no catalog field exists, add top-level quantity. Do not duplicate resourceSpecs just to represent count. If resourceBundleTags is used, omit resourceBundleId for the same resource spec. For tickets: build genericRequest.description and optional genericRequest.processForm from generated Markdown instructions.genericRequest; for tickets without Markdown, include catalogId, catalogName, businessGroupId, name, and genericRequest {description}. Do NOT include userLoginId (auto-injected by script). FORBIDDEN fields: never add priority, category, requestor, parameters, impactScope, urgency, contactName, or any field not listed above. DO NOT omit this parameter."
       }
     },
     "required": ["json_body"]
@@ -281,17 +281,23 @@ This skill supports two request shapes, and they are not interchangeable:
   `resourceSpecs` item, and no top-level count field unless the selected
   catalog explicitly requires one.
 - **Same-type multi-instance request**: one resource type, one shared
-  parameter set, one shared `resourceSpecs` item, plus one top-level count
-  field.
+  parameter set, one explicit quantity value from the selected catalog schema
+  or fallback `quantity`, with `resourceSpecs` following the selected catalog
+  schema.
 
 For same-type multi-instance requests:
 
-- Prefer the exact top-level count key declared by the selected catalog when it
-  exists, for example `quantity`, `count`, `instanceCount`, or `serverCount`.
-- If the selected catalog does not declare a top-level count key, use
+- Read the selected catalog instructions before choosing the quantity key. If
+  an active field in `instructions.topLevelFields` or `instructions.params`
+  clearly declares instance quantity, use that exact key and location. Do not
+  choose from a fixed alias list.
+- If the selected catalog does not declare a quantity/count field, use fallback
   top-level `quantity`.
-- Keep exactly one shared `resourceSpecs` item. This skill's submit contract
-  accepts one request-level parameter set per request body.
+- When the selected catalog has one `instructions.resourceSpecs` item, keep one
+  shared `resourceSpecs` item for the shared parameter set.
+- When the selected catalog declares multiple `instructions.resourceSpecs`
+  items, build each declared item exactly once; do not treat the number of
+  specs as the requested instance count.
 - Do **not** duplicate identical `resourceSpecs` entries just to represent
   quantity N.
 - Do **not** invent per-instance names, hostnames, IPs, disk sizes, or other
@@ -300,10 +306,10 @@ For same-type multi-instance requests:
   instance, or mixed component roles, stop using this skill and route to
   `request-decomposition-agent`.
 
-For any non-ticket request that uses `resourceSpecs`, this skill expects
-exactly one `resourceSpecs` item per request body. The only supported way to
-represent multiple same-type instances in this skill is a single shared
-`resourceSpecs` item plus one top-level count field.
+Do not infer decomposition solely from `resourceSpecs` length. A single catalog
+can legitimately declare multiple resource specs. Decomposition is driven by
+user semantics, such as separate CMP requests or per-instance differences, not
+by a submit-script spec-count heuristic.
 
 ### Submitted request status flow
 
@@ -446,9 +452,11 @@ scope.
 
 - Top-level JSON always includes `catalogId`, `catalogName`,
   `businessGroupId`, and `name`.
-- For same-type multi-instance requests with shared parameters, add one
-  top-level count field such as `quantity`, `count`, `instanceCount`, or
-  `serverCount`, and keep exactly one shared `resourceSpecs[]` item.
+- For same-type multi-instance requests with shared parameters, fill the
+  selected catalog's declared quantity field in its exact declared location. If
+  none exists, use fallback top-level `quantity`. Keep `resourceSpecs` aligned
+  to the selected catalog schema; for a single-spec catalog, use one shared
+  `resourceSpecs[]` item.
 - Quantity alone does not require decomposition; per-instance differences do.
 - Generated field attributes belong in `# Request Parameter Instructions`, not
   in the `# Request Instructions` prose. Keep field metadata such as `type`,
@@ -597,8 +605,9 @@ fields inside any `params`, and do not put network fields inside
 `resourceBundleParams` when `resourceBundleTags` is used in the same spec. Do
 not serialize a `fields` wrapper. Serialize each active direct resource-spec
 field schema as `resourceSpecs[].<key>`. Same-type multi-instance requests must
-keep one shared `resourceSpecs[]` item plus one top-level count field; never
-duplicate identical `resourceSpecs[]` entries just to represent quantity.
+use the catalog-declared quantity field or fallback `quantity`; never duplicate
+identical `resourceSpecs[]` entries just to represent quantity. Catalogs that
+declare multiple `resourceSpecs` should include each declared item once.
 For Compute, `securityGroupIds` must be an array, for example
 `"securityGroupIds": ["sg-xxxxxxxx"]`.
 

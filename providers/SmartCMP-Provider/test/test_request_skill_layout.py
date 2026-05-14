@@ -266,8 +266,10 @@ def test_request_skill_explicitly_allows_same_type_quantity_requests() -> None:
     assert "one service catalog / one resource type / one shared parameter set" in skill_text
     assert "Quantity by itself is **not** a decomposition signal." in skill_text
     assert "Single-instance vs shared-quantity contract" in skill_text
-    assert "one shared `resourceSpecs` item, plus one top-level count" in skill_text
-    assert "Keep exactly one shared `resourceSpecs` item" in skill_text
+    assert "selected catalog schema" in skill_text
+    assert "Do not\n  choose from a fixed alias list" in skill_text
+    assert "fallback top-level `quantity`" in skill_text
+    assert "multiple `instructions.resourceSpecs`" in skill_text
 
 
 def test_request_decomposition_skill_excludes_same_type_quantity_only_requests() -> None:
