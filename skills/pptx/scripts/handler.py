@@ -100,9 +100,10 @@ def _build_deck(
             first = False
 
     presentation.save(str(output_path))
+    resolved_output_path = str(output_path.resolve())
     return {
-        "artifact_path": output_path.name,
-        "file_path": output_path.name,
+        "artifact_path": resolved_output_path,
+        "file_path": resolved_output_path,
         "slide_count": len(presentation.slides),
         "item_count": len(items),
         "title": title,
@@ -116,6 +117,18 @@ def create_deck_handler(
     subtitle: str = "",
     output_filename: Optional[str] = None,
 ) -> dict[str, Any]:
+    """Create a PPTX deck in the current user's AtlasClaw work directory.
+
+    Args:
+        ctx: Runtime context whose ``deps.extra.work_dir`` points at the user work directory.
+        items: Structured request or summary items to render into slides.
+        title: Deck title shown on the title slide.
+        subtitle: Optional subtitle shown below the title.
+        output_filename: Optional safe file name for the generated ``.pptx`` artifact.
+
+    Returns:
+        A JSON-serializable result containing absolute artifact paths and slide counts.
+    """
     raw_items = items if isinstance(items, list) else []
     normalized_items = _coerce_items(raw_items)
     if not normalized_items:
