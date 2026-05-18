@@ -1,0 +1,161 @@
+{
+  "schema_version": 1,
+  "provider_type": "markdown-vault",
+  "catalog": {
+    "display_name": "Markdown Vault",
+    "description": "Local Markdown vault provider for read-only knowledge-base search and cited document retrieval.",
+    "badge": "KB",
+    "icon": "MD",
+    "icon_path": "assets/icon.svg",
+    "accent": "#2563eb"
+  },
+  "config_schema": {
+    "default_auth_type": "sso",
+    "auth_modes": {
+      "sso": {
+        "required_fields": []
+      }
+    },
+    "fields": [
+      {
+        "name": "auth_type",
+        "type": "hidden",
+        "scope": "instance",
+        "default": "sso"
+      },
+      {
+        "name": "vault_path",
+        "type": "text",
+        "required": true,
+        "scope": "instance",
+        "label": "Vault Path",
+        "placeholder": "/Users/shared/knowledge-vault"
+      },
+      {
+        "name": "index_backend",
+        "type": "text",
+        "required": false,
+        "scope": "instance",
+        "default": "sqlite",
+        "label": "Index Backend",
+        "placeholder": "sqlite or mysql"
+      },
+      {
+        "name": "index_path",
+        "type": "text",
+        "required": false,
+        "scope": "instance",
+        "label": "SQLite Index Path",
+        "placeholder": "/Users/shared/atlasclaw/markdown-vault.sqlite3"
+      },
+      {
+        "name": "mysql_host",
+        "type": "text",
+        "required": false,
+        "scope": "instance",
+        "label": "MySQL Host",
+        "placeholder": "127.0.0.1"
+      },
+      {
+        "name": "mysql_port",
+        "type": "number",
+        "required": false,
+        "scope": "instance",
+        "default": 3306,
+        "label": "MySQL Port",
+        "placeholder": "3306"
+      },
+      {
+        "name": "mysql_database",
+        "type": "text",
+        "required": false,
+        "scope": "instance",
+        "label": "MySQL Database",
+        "placeholder": "atlasclaw"
+      },
+      {
+        "name": "mysql_user",
+        "type": "text",
+        "required": false,
+        "scope": "instance",
+        "label": "MySQL User",
+        "placeholder": "atlasclaw"
+      },
+      {
+        "name": "mysql_password",
+        "type": "password",
+        "required": false,
+        "sensitive": true,
+        "scope": "instance",
+        "label": "MySQL Password",
+        "placeholder": "Enter password"
+      },
+      {
+        "name": "mysql_charset",
+        "type": "text",
+        "required": false,
+        "scope": "instance",
+        "default": "utf8mb4",
+        "label": "MySQL Charset",
+        "placeholder": "utf8mb4"
+      },
+      {
+        "name": "mysql_tls",
+        "type": "text",
+        "required": false,
+        "scope": "instance",
+        "default": "false",
+        "label": "MySQL TLS",
+        "placeholder": "true or false"
+      },
+      {
+        "name": "mysql_table_prefix",
+        "type": "text",
+        "required": false,
+        "scope": "instance",
+        "default": "markdown_vault_",
+        "label": "MySQL Table Prefix",
+        "placeholder": "markdown_vault_"
+      },
+      {
+        "name": "include_globs",
+        "type": "text",
+        "required": false,
+        "scope": "instance",
+        "default": "**/*.md",
+        "label": "Include Globs",
+        "placeholder": "**/*.md,docs/**/*.md"
+      },
+      {
+        "name": "exclude_globs",
+        "type": "text",
+        "required": false,
+        "scope": "instance",
+        "default": ".obsidian/**,.git/**,**/.*/**,**/node_modules/**",
+        "label": "Exclude Globs",
+        "placeholder": ".obsidian/**,.git/**,private/**"
+      },
+      {
+        "name": "max_file_bytes",
+        "type": "number",
+        "required": false,
+        "scope": "instance",
+        "default": 1048576,
+        "label": "Max File Bytes",
+        "placeholder": "1048576"
+      },
+      {
+        "name": "max_chunk_chars",
+        "type": "number",
+        "required": false,
+        "scope": "instance",
+        "default": 1800,
+        "label": "Max Chunk Characters",
+        "placeholder": "1800"
+      }
+    ]
+  },
+  "redaction": {
+    "sensitive_fields": ["mysql_password"]
+  }
+}
