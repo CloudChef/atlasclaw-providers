@@ -1,6 +1,6 @@
 # Markdown Vault Provider
 
-`markdown-vault` indexes a local Markdown vault into provider-owned SQLite or MySQL tables so AtlasClaw agents can answer knowledge-base questions with citations.
+`markdown-vault` indexes a configured Markdown vault into provider-owned SQLite or MySQL tables so AtlasClaw agents can answer knowledge-base questions with citations.
 
 V1 is read-only and does not depend on Obsidian at runtime. Obsidian-compatible Markdown behavior is handled directly for frontmatter, headings, tags, wikilinks, embeds, Markdown links, and callout text.
 
