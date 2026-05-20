@@ -3,16 +3,16 @@
   "provider_type": "markdown-vault",
   "catalog": {
     "display_name": "Markdown Vault",
-    "description": "Local Markdown vault provider for read-only knowledge-base search and cited document retrieval.",
+    "description": "Configured Markdown vault provider for read-only knowledge-base search and cited document retrieval.",
     "badge": "KB",
     "icon": "MD",
     "icon_path": "assets/icon.svg",
     "accent": "#2563eb"
   },
   "config_schema": {
-    "default_auth_type": "sso",
+    "default_auth_type": "app_credentials",
     "auth_modes": {
-      "sso": {
+      "app_credentials": {
         "required_fields": []
       }
     },
@@ -21,7 +21,7 @@
         "name": "auth_type",
         "type": "hidden",
         "scope": "instance",
-        "default": "sso"
+        "default": "app_credentials"
       },
       {
         "name": "vault_path",

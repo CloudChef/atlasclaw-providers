@@ -16,13 +16,13 @@ keywords:
   - wiki
 
 capabilities:
-  - Search a configured local Markdown vault through a provider-owned SQLite or MySQL index
+  - Search a configured Markdown vault through a provider-owned SQLite or MySQL index
   - Retrieve read-only cited line ranges from indexed Markdown notes
   - Parse Obsidian-style frontmatter, headings, tags, wikilinks, embeds, callouts, and Markdown links
 
 use_when:
   - User asks about a configured Markdown or Obsidian-style knowledge base
-  - User asks for answers grounded in local notes, runbooks, internal docs, or team documentation
+  - User asks for answers grounded in internal notes, runbooks, internal docs, or team documentation
   - User needs citations with vault-relative paths, heading paths, and line ranges
 
 avoid_when:
@@ -35,11 +35,11 @@ avoid_when:
 
 ## Purpose
 
-`markdown-vault` exposes a read-only Markdown knowledge base to AtlasClaw agents. It is designed for local vaults that follow common Markdown and Obsidian-style conventions such as frontmatter, nested headings, inline tags, wikilinks, embeds, and callouts.
+`markdown-vault` exposes a read-only Markdown knowledge base to AtlasClaw agents. It is designed for provider instances backed by Markdown content that follows common Markdown and Obsidian-style conventions such as frontmatter, nested headings, inline tags, wikilinks, embeds, and callouts.
 
 ## Use When
 
-- The user asks about internal documentation, team notes, runbooks, design records, or other local knowledge-base content.
+- The user asks about internal documentation, team notes, runbooks, design records, or other configured knowledge-base content.
 - The user asks a question that should be answered from a configured Markdown vault instead of from general model knowledge.
 - The user wants cited evidence from a known document collection.
 

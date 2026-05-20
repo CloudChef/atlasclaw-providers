@@ -41,8 +41,8 @@ def test_markdown_vault_manifest_declares_config_contract() -> None:
     assert manifest["schema_version"] == 1
     assert manifest["provider_type"] == "markdown-vault"
     assert manifest["catalog"]["icon_path"] == "assets/icon.svg"
-    assert manifest["config_schema"]["default_auth_type"] == "sso"
-    assert manifest["config_schema"]["auth_modes"]["sso"]["required_fields"] == []
+    assert manifest["config_schema"]["default_auth_type"] == "app_credentials"
+    assert manifest["config_schema"]["auth_modes"]["app_credentials"]["required_fields"] == []
     assert fields["vault_path"]["required"] is True
     assert fields["index_backend"]["default"] == "sqlite"
     assert fields["index_path"]["label"] == "SQLite Index Path"
@@ -56,6 +56,17 @@ def test_markdown_vault_manifest_declares_config_contract() -> None:
     assert fields["max_chunk_chars"]["default"] >= 200
 
 
+def test_markdown_vault_manifest_stays_with_supported_runtime_contract() -> None:
+    """Verify the manifest avoids runtime metadata not consumed by AtlasClaw."""
+
+    manifest = json.loads((PROVIDER_ROOT / "provider.schema.json").read_text(encoding="utf-8"))
+
+    assert "agent_skill_overlays" not in manifest
+    assert "auto_select" not in json.dumps(manifest)
+    assert "tool_graph_name" not in json.dumps(manifest)
+    assert "smartcmp" not in json.dumps(manifest).lower()
+
+
 def test_markdown_vault_skill_registers_only_read_runtime_tools() -> None:
     """Verify refresh and status are not registered as Agent tools."""
 
@@ -64,6 +75,7 @@ def test_markdown_vault_skill_registers_only_read_runtime_tools() -> None:
 
     assert 'tool_search_name: "markdown_vault_search"' in frontmatter
     assert 'tool_get_name: "markdown_vault_get"' in frontmatter
+    assert "tool_graph_name" not in frontmatter
     assert "tool_refresh_name" not in frontmatter
     assert "tool_status_name" not in frontmatter
     assert "manage_index.py" not in frontmatter
