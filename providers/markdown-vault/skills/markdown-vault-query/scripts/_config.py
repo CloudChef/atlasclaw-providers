@@ -6,7 +6,6 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
-import re
 from typing import Any
 
 
@@ -14,7 +13,8 @@ PROVIDER_TYPE = "markdown-vault"
 DEFAULT_INSTANCE_NAME = "default"
 DEFAULT_INCLUDE_GLOBS = ["**/*.md"]
 DEFAULT_EXCLUDE_GLOBS = [".obsidian/**", ".git/**", "**/.*/**", "**/node_modules/**"]
-DEFAULT_TABLE_PREFIX = "markdown_vault_"
+DEFAULT_MAX_CONTEXT_CHARS = 24576
+DEFAULT_MAX_RESULT_CHARS = 3072
 
 
 @dataclass(frozen=True)
@@ -24,20 +24,12 @@ class MarkdownVaultConfig:
     instance_name: str
     instance_id: str
     vault_path: Path
-    index_backend: str
-    index_path: Path | None
-    mysql_host: str
-    mysql_port: int
-    mysql_database: str
-    mysql_user: str
-    mysql_password: str
-    mysql_charset: str
-    mysql_tls: bool
-    table_prefix: str
     include_globs: list[str]
     exclude_globs: list[str]
     max_file_bytes: int
     max_chunk_chars: int
+    max_context_chars: int
+    max_result_chars: int
 
 
 class MarkdownVaultConfigError(ValueError):
@@ -79,7 +71,7 @@ def load_provider_config_from_file(
     instance_name: str | None = None,
     provider_type: str = PROVIDER_TYPE,
 ) -> MarkdownVaultConfig:
-    """Load one provider instance from an AtlasClaw JSON config file for offline admin scripts."""
+    """Load one provider instance from an AtlasClaw JSON config file for local validation."""
 
     try:
         payload = json.loads(config_path.read_text(encoding="utf-8"))
@@ -117,66 +109,40 @@ def build_markdown_vault_config(
     if not vault_path.is_dir():
         raise MarkdownVaultConfigError(f"vault_path must be an existing directory: {vault_path}")
 
-    index_backend = str(raw_config.get("index_backend") or "sqlite").strip().lower()
-    if index_backend not in {"sqlite", "mysql"}:
-        raise MarkdownVaultConfigError("index_backend must be either 'sqlite' or 'mysql'.")
-
-    index_path = _optional_path(raw_config, "index_path", base_dir=base_dir)
-    if index_backend == "sqlite" and index_path is None:
-        raise MarkdownVaultConfigError("index_path is required when index_backend is 'sqlite'.")
-
-    mysql_host = str(raw_config.get("mysql_host") or "").strip()
-    mysql_port = _int_value(raw_config.get("mysql_port"), default=3306, name="mysql_port")
-    mysql_database = str(raw_config.get("mysql_database") or "").strip()
-    mysql_user = str(raw_config.get("mysql_user") or "").strip()
-    mysql_password = str(raw_config.get("mysql_password") or "").strip()
-    mysql_charset = str(raw_config.get("mysql_charset") or "utf8mb4").strip() or "utf8mb4"
-    mysql_tls = _bool_value(raw_config.get("mysql_tls"), default=False)
-    table_prefix = str(raw_config.get("mysql_table_prefix") or DEFAULT_TABLE_PREFIX).strip()
-    _validate_table_prefix(table_prefix)
-
-    if index_backend == "mysql":
-        missing = [
-            name
-            for name, value in {
-                "mysql_host": mysql_host,
-                "mysql_database": mysql_database,
-                "mysql_user": mysql_user,
-                "mysql_password": mysql_password,
-            }.items()
-            if not value
-        ]
-        if missing:
-            raise MarkdownVaultConfigError(
-                f"MySQL index backend requires fields: {', '.join(missing)}."
-            )
-
     max_file_bytes = _int_value(raw_config.get("max_file_bytes"), default=1048576, name="max_file_bytes")
     max_chunk_chars = _int_value(raw_config.get("max_chunk_chars"), default=1800, name="max_chunk_chars")
+    max_context_chars = _int_value(
+        raw_config.get("max_context_chars"),
+        default=DEFAULT_MAX_CONTEXT_CHARS,
+        name="max_context_chars",
+    )
+    max_result_chars = _int_value(
+        raw_config.get("max_result_chars"),
+        default=DEFAULT_MAX_RESULT_CHARS,
+        name="max_result_chars",
+    )
     if max_file_bytes <= 0:
         raise MarkdownVaultConfigError("max_file_bytes must be greater than zero.")
     if max_chunk_chars < 200:
         raise MarkdownVaultConfigError("max_chunk_chars must be at least 200.")
+    if max_context_chars < 1000:
+        raise MarkdownVaultConfigError("max_context_chars must be at least 1000.")
+    if max_result_chars < 200:
+        raise MarkdownVaultConfigError("max_result_chars must be at least 200.")
+    if max_result_chars > max_context_chars:
+        raise MarkdownVaultConfigError("max_result_chars must be less than or equal to max_context_chars.")
 
     normalized_instance = instance_name.strip() or DEFAULT_INSTANCE_NAME
     return MarkdownVaultConfig(
         instance_name=normalized_instance,
         instance_id=f"{provider_type}:{normalized_instance}",
         vault_path=vault_path,
-        index_backend=index_backend,
-        index_path=index_path,
-        mysql_host=mysql_host,
-        mysql_port=mysql_port,
-        mysql_database=mysql_database,
-        mysql_user=mysql_user,
-        mysql_password=mysql_password,
-        mysql_charset=mysql_charset,
-        mysql_tls=mysql_tls,
-        table_prefix=table_prefix,
         include_globs=_string_list(raw_config.get("include_globs"), DEFAULT_INCLUDE_GLOBS),
         exclude_globs=_string_list(raw_config.get("exclude_globs"), DEFAULT_EXCLUDE_GLOBS),
         max_file_bytes=max_file_bytes,
         max_chunk_chars=max_chunk_chars,
+        max_context_chars=max_context_chars,
+        max_result_chars=max_result_chars,
     )
 
 
@@ -237,27 +203,19 @@ def _extract_instance(raw: Any, instance_name: str) -> tuple[dict[str, Any] | No
 
 
 def _looks_like_instance_config(value: dict[str, Any]) -> bool:
-    return "vault_path" in value or "index_backend" in value or "index_path" in value
+    return "vault_path" in value
 
 
 def _config_from_flat_environment() -> dict[str, Any]:
     config: dict[str, Any] = {}
     for name in (
         "vault_path",
-        "index_backend",
-        "index_path",
-        "mysql_host",
-        "mysql_port",
-        "mysql_database",
-        "mysql_user",
-        "mysql_password",
-        "mysql_charset",
-        "mysql_tls",
-        "mysql_table_prefix",
         "include_globs",
         "exclude_globs",
         "max_file_bytes",
         "max_chunk_chars",
+        "max_context_chars",
+        "max_result_chars",
     ):
         env_value = os.getenv(name.upper())
         if env_value is not None:
@@ -269,13 +227,6 @@ def _required_path(raw_config: dict[str, Any], name: str, *, base_dir: Path) -> 
     value = str(raw_config.get(name) or "").strip()
     if not value:
         raise MarkdownVaultConfigError(f"{name} is required.")
-    return _resolve_path(value, base_dir=base_dir)
-
-
-def _optional_path(raw_config: dict[str, Any], name: str, *, base_dir: Path) -> Path | None:
-    value = str(raw_config.get(name) or "").strip()
-    if not value:
-        return None
     return _resolve_path(value, base_dir=base_dir)
 
 
@@ -304,22 +255,6 @@ def _int_value(value: Any, *, default: int, name: str) -> int:
         return int(value)
     except (TypeError, ValueError) as exc:
         raise MarkdownVaultConfigError(f"{name} must be an integer.") from exc
-
-
-def _bool_value(value: Any, *, default: bool) -> bool:
-    if value is None or value == "":
-        return default
-    if isinstance(value, bool):
-        return value
-    return str(value).strip().lower() in {"1", "true", "yes", "on", "tls"}
-
-
-def _validate_table_prefix(prefix: str) -> None:
-    if not re.fullmatch(r"(?:[A-Za-z_][A-Za-z0-9_]*)?", prefix):
-        raise MarkdownVaultConfigError(
-            "mysql_table_prefix must be empty or start with a letter or underscore "
-            "and contain only letters, digits, and underscores."
-        )
 
 
 def _load_json_mapping(value: str, source_name: str) -> dict[str, Any]:

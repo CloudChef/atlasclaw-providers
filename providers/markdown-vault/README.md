@@ -1,39 +1,22 @@
 # Markdown Vault Provider
 
-`markdown-vault` indexes a configured Markdown vault into provider-owned SQLite or MySQL tables so AtlasClaw agents can answer knowledge-base questions with citations.
+`markdown-vault` searches a configured Markdown vault directly so AtlasClaw agents can answer knowledge-base questions with citations and bounded source text.
 
 V1 is read-only and does not depend on Obsidian at runtime. Obsidian-compatible Markdown behavior is handled directly for frontmatter, headings, tags, wikilinks, embeds, Markdown links, and callout text.
 
 ## Configuration
 
-Minimum SQLite instance:
+Minimum instance:
 
 ```json
 {
   "vault_path": "/Users/shared/knowledge-vault",
-  "index_backend": "sqlite",
-  "index_path": "/Users/shared/atlasclaw/markdown-vault.sqlite3",
   "include_globs": "**/*.md",
   "exclude_globs": ".obsidian/**,.git/**,**/.*/**",
   "max_file_bytes": 1048576,
-  "max_chunk_chars": 1800
-}
-```
-
-Minimum MySQL instance:
-
-```json
-{
-  "vault_path": "/Users/shared/knowledge-vault",
-  "index_backend": "mysql",
-  "mysql_host": "127.0.0.1",
-  "mysql_port": 3306,
-  "mysql_database": "atlasclaw",
-  "mysql_user": "atlasclaw",
-  "mysql_password": "secret",
-  "mysql_charset": "utf8mb4",
-  "mysql_tls": "false",
-  "mysql_table_prefix": "markdown_vault_"
+  "max_chunk_chars": 1800,
+  "max_context_chars": 24576,
+  "max_result_chars": 3072
 }
 ```
 
@@ -41,38 +24,25 @@ Minimum MySQL instance:
 
 The provider has no credential fields in V1. Access is controlled by the existing AtlasClaw provider instance and role permissions.
 
-## Admin Indexing
-
-Refresh the index from an AtlasClaw config file:
-
-```bash
-python providers/markdown-vault/skills/markdown-vault-query/scripts/manage_index.py \
-  refresh \
-  --config /path/to/atlasclaw.json \
-  --instance team-notes
-```
-
-Check index status:
-
-```bash
-python providers/markdown-vault/skills/markdown-vault-query/scripts/manage_index.py \
-  status \
-  --config /path/to/atlasclaw.json \
-  --instance team-notes
-```
-
-The script creates provider-owned `documents`, `chunks`, and `terms` tables. It does not require core database migrations.
-
 ## Runtime Tools
 
 Agents receive only the read tools:
 
-- `markdown_vault_search(query, limit, path_filter, tag_filter)`
+- `markdown_vault_search(query, keywords, limit, path_filter, tag_filter)`
 - `markdown_vault_get(path, start_line, end_line)`
 
 Provider instance RBAC is enforced by the existing AtlasClaw provider selection flow. Users can query only the configured vault instances their role can access.
 
-Search returns `stale=true` when vault files differ from the last indexed state. Missing indexes return a clear `index_not_built` error.
+Search returns scored Markdown regions with `text`, `snippet`, vault-relative paths, heading paths, line ranges, matched keywords, tags, and a context-budget status. The Agent LLM is responsible for final answer synthesis and support judgment.
+
+## Retrieval Flow
+
+1. The Agent LLM analyzes the user question and builds `keywords` from product names, system names, aliases, English/Chinese variants, and likely typo corrections.
+2. Python scans configured Markdown files directly, applies path/tag filters, parses metadata and headings, and splits content into bounded chunks.
+3. Python measures only the current query/keyword tokens across the scanned chunks and down-weights tokens that are common in that vault slice.
+4. Python scores each chunk with title, heading, alias, tag, path, phrase, and body matches.
+5. Python returns the highest-scoring chunks within `max_context_chars` and `max_result_chars`.
+6. The Agent LLM answers only from returned evidence, calling `markdown_vault_get` when more surrounding lines are needed.
 
 ## Out Of Scope
 

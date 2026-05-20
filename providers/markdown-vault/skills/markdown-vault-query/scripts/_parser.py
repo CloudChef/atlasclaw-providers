@@ -7,7 +7,7 @@ from fnmatch import fnmatch
 import hashlib
 from pathlib import Path
 import re
-from typing import Any, Iterable
+from typing import Any
 
 try:
     import yaml
@@ -47,13 +47,12 @@ class VaultChunk:
     start_line: int
     end_line: int
     text: str
-    terms: dict[str, float]
     content_hash: str
 
 
 @dataclass(frozen=True)
 class VaultDocument:
-    """Parsed Markdown document metadata plus the chunks that should be indexed."""
+    """Parsed Markdown document metadata plus chunks for direct retrieval."""
 
     path: str
     title: str
@@ -94,7 +93,7 @@ def iter_markdown_files(config: MarkdownVaultConfig) -> list[Path]:
 
 
 def parse_markdown_file(config: MarkdownVaultConfig, file_path: Path) -> VaultDocument:
-    """Parse one vault Markdown file into metadata, references, chunks, and weighted terms."""
+    """Parse one vault Markdown file into metadata, references, and bounded chunks."""
 
     safe_path = resolve_vault_markdown_path(config.vault_path, _relative_posix(config.vault_path, file_path))
     _assert_markdown_file_policy(config, safe_path)
@@ -119,11 +118,6 @@ def parse_markdown_file(config: MarkdownVaultConfig, file_path: Path) -> VaultDo
         body_lines=body_lines,
         line_offset=body_start_index,
         max_chunk_chars=config.max_chunk_chars,
-        title=title,
-        aliases=aliases,
-        tags=tags,
-        properties=properties,
-        references=links,
     )
 
     return VaultDocument(
@@ -190,23 +184,8 @@ def read_markdown_lines(
     }
 
 
-def collect_current_file_state(config: MarkdownVaultConfig) -> dict[str, tuple[int, int, str]]:
-    """Collect path, mtime, size, and content hash for the current vault scan."""
-
-    state: dict[str, tuple[int, int, str]] = {}
-    for file_path in iter_markdown_files(config):
-        raw_text = file_path.read_text(encoding="utf-8", errors="replace")
-        stat = file_path.stat()
-        state[_relative_posix(config.vault_path, file_path)] = (
-            stat.st_mtime_ns,
-            stat.st_size,
-            hashlib.sha1(raw_text.encode("utf-8")).hexdigest(),
-        )
-    return state
-
-
 def parse_vault(config: MarkdownVaultConfig) -> list[VaultDocument]:
-    """Parse all configured Markdown files in the vault for index refresh."""
+    """Parse all configured Markdown files in the vault for direct search."""
 
     return [parse_markdown_file(config, path) for path in iter_markdown_files(config)]
 
@@ -247,11 +226,6 @@ def _build_chunks(
     body_lines: list[str],
     line_offset: int,
     max_chunk_chars: int,
-    title: str,
-    aliases: list[str],
-    tags: list[str],
-    properties: dict[str, Any],
-    references: list[MarkdownReference],
 ) -> list[VaultChunk]:
     chunks: list[VaultChunk] = []
     heading_stack: list[tuple[int, str]] = []
@@ -268,16 +242,6 @@ def _build_chunks(
             return
         start_line = current_lines[0][0]
         end_line = current_lines[-1][0]
-        searchable_text = _searchable_markdown_text(text)
-        terms = _weighted_terms(
-            text=searchable_text,
-            heading_path=current_heading_path,
-            title=title,
-            aliases=aliases,
-            tags=tags,
-            properties=properties,
-            references=references,
-        )
         content_hash = hashlib.sha1(text.encode("utf-8")).hexdigest()
         chunk_id = hashlib.sha1(f"{relative_path}:{start_line}:{end_line}:{content_hash}".encode("utf-8")).hexdigest()
         chunks.append(
@@ -288,7 +252,6 @@ def _build_chunks(
                 start_line=start_line,
                 end_line=end_line,
                 text=text,
-                terms=terms,
                 content_hash=content_hash,
             )
         )
@@ -320,32 +283,6 @@ def _build_chunks(
 
     flush()
     return chunks
-
-
-def _weighted_terms(
-    *,
-    text: str,
-    heading_path: list[str],
-    title: str,
-    aliases: list[str],
-    tags: list[str],
-    properties: dict[str, Any],
-    references: list[MarkdownReference],
-) -> dict[str, float]:
-    weights: dict[str, float] = {}
-    _add_terms(weights, normalize_terms(text), 1.0)
-    _add_terms(weights, normalize_terms(" ".join(heading_path)), 3.0)
-    _add_terms(weights, normalize_terms(title), 2.5)
-    _add_terms(weights, normalize_terms(" ".join(aliases)), 2.0)
-    _add_terms(weights, normalize_terms(" ".join(tags)), 2.0)
-    _add_terms(weights, normalize_terms(_frontmatter_search_text(properties)), 1.5)
-    _add_terms(weights, normalize_terms(" ".join(ref.label + " " + ref.target for ref in references)), 1.5)
-    return weights
-
-
-def _add_terms(weights: dict[str, float], terms: Iterable[str], weight: float) -> None:
-    for term in terms:
-        weights[term] = weights.get(term, 0.0) + weight
 
 
 def _extract_inline_tags(lines: list[str]) -> set[str]:
@@ -395,7 +332,9 @@ def _extract_references(lines: list[str], *, line_offset: int) -> list[MarkdownR
     return references
 
 
-def _searchable_markdown_text(text: str) -> str:
+def searchable_markdown_text(text: str) -> str:
+    """Return Markdown text with links and callouts expanded for direct lexical matching."""
+
     def replace_wikilink(match: re.Match[str]) -> str:
         label, target = _split_wikilink(match.group(1))
         return f"{label} {target}".strip()
@@ -504,31 +443,6 @@ def _safe_frontmatter_value(value: Any, *, seen: set[int], depth: int) -> Any:
     return str(value)
 
 
-def _frontmatter_search_text(value: Any, *, seen: set[int] | None = None, depth: int = 0) -> str:
-    if depth >= MAX_FRONTMATTER_DEPTH:
-        return ""
-    seen = seen or set()
-    if isinstance(value, dict):
-        object_id = id(value)
-        if object_id in seen:
-            return ""
-        seen.add(object_id)
-        parts: list[str] = []
-        for key, item in value.items():
-            parts.append(str(key))
-            parts.append(_frontmatter_search_text(item, seen=seen, depth=depth + 1))
-        return " ".join(parts)
-    if isinstance(value, list):
-        object_id = id(value)
-        if object_id in seen:
-            return ""
-        seen.add(object_id)
-        return " ".join(_frontmatter_search_text(item, seen=seen, depth=depth + 1) for item in value)
-    if value is None:
-        return ""
-    return str(value)
-
-
 def _relative_posix(vault_path: Path, file_path: Path) -> str:
     return file_path.resolve().relative_to(vault_path.resolve()).as_posix()
 
@@ -540,9 +454,9 @@ def _is_excluded(relative_path: str, patterns: list[str]) -> bool:
 def _assert_markdown_file_policy(config: MarkdownVaultConfig, file_path: Path) -> None:
     relative_path = _relative_posix(config.vault_path, file_path)
     if not any(_matches_glob(relative_path, pattern) for pattern in config.include_globs):
-        raise VaultPathError(f"Markdown file is not included in this vault index: {relative_path}")
+        raise VaultPathError(f"Markdown file is not included in this vault scan: {relative_path}")
     if _is_excluded(relative_path, config.exclude_globs):
-        raise VaultPathError(f"Markdown file is excluded from this vault index: {relative_path}")
+        raise VaultPathError(f"Markdown file is excluded from this vault scan: {relative_path}")
     try:
         size_bytes = file_path.stat().st_size
     except OSError as exc:

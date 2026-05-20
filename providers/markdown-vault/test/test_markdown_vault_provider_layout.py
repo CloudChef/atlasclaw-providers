@@ -33,7 +33,7 @@ def test_markdown_vault_provider_context_frontmatter() -> None:
 
 
 def test_markdown_vault_manifest_declares_config_contract() -> None:
-    """Verify the provider config fields required for SQLite and MySQL indexing."""
+    """Verify the provider config fields required for direct Markdown retrieval."""
 
     manifest = json.loads((PROVIDER_ROOT / "provider.schema.json").read_text(encoding="utf-8"))
     fields = {field["name"]: field for field in manifest["config_schema"]["fields"]}
@@ -44,16 +44,15 @@ def test_markdown_vault_manifest_declares_config_contract() -> None:
     assert manifest["config_schema"]["default_auth_type"] == "app_credentials"
     assert manifest["config_schema"]["auth_modes"]["app_credentials"]["required_fields"] == []
     assert fields["vault_path"]["required"] is True
-    assert fields["index_backend"]["default"] == "sqlite"
-    assert fields["index_path"]["label"] == "SQLite Index Path"
-    assert fields["mysql_password"]["sensitive"] is True
-    assert fields["mysql_charset"]["default"] == "utf8mb4"
-    assert fields["mysql_tls"]["default"] == "false"
-    assert fields["mysql_table_prefix"]["default"] == "markdown_vault_"
+    assert "index_backend" not in fields
+    assert "index_path" not in fields
+    assert "mysql_password" not in fields
     assert fields["include_globs"]["default"] == "**/*.md"
     assert fields["exclude_globs"]["default"]
     assert fields["max_file_bytes"]["default"] > 0
     assert fields["max_chunk_chars"]["default"] >= 200
+    assert fields["max_context_chars"]["default"] == 24576
+    assert fields["max_result_chars"]["default"] == 3072
 
 
 def test_markdown_vault_manifest_stays_with_supported_runtime_contract() -> None:
@@ -68,7 +67,7 @@ def test_markdown_vault_manifest_stays_with_supported_runtime_contract() -> None
 
 
 def test_markdown_vault_skill_registers_only_read_runtime_tools() -> None:
-    """Verify refresh and status are not registered as Agent tools."""
+    """Verify only read tools are registered as Agent tools."""
 
     skill_text = (PROVIDER_ROOT / "skills" / "markdown-vault-query" / "SKILL.md").read_text(encoding="utf-8")
     frontmatter = skill_text.split("---", 2)[1]
@@ -79,3 +78,27 @@ def test_markdown_vault_skill_registers_only_read_runtime_tools() -> None:
     assert "tool_refresh_name" not in frontmatter
     assert "tool_status_name" not in frontmatter
     assert "manage_index.py" not in frontmatter
+
+
+def test_markdown_vault_provider_removes_database_index_contract() -> None:
+    """Verify direct retrieval has no database index scripts, config fields, or error codes."""
+
+    searchable_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in PROVIDER_ROOT.rglob("*")
+        if path.is_file()
+        and "__pycache__" not in path.parts
+        and "test" not in path.parts
+        and path.suffix in {".md", ".json", ".py"}
+    ).lower()
+
+    for forbidden in (
+        "sqlite",
+        "mysql",
+        "index_backend",
+        "index_path",
+        "manage_index.py",
+        "index_not_built",
+        "indexed_documents",
+    ):
+        assert forbidden not in searchable_text

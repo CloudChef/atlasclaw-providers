@@ -27,7 +27,7 @@ use_when:
 avoid_when:
   - User asks a general public factual question with no knowledge-base or document intent.
   - User wants to edit, create, move, or delete vault notes.
-  - User asks for index refresh or status; those are offline admin script operations, not Agent tools.
+  - User asks to operate the Obsidian desktop app.
 
 examples:
   - "Search the knowledge base for deployment rollback steps"
@@ -41,7 +41,7 @@ related:
   - obsidian
 
 tool_search_name: "markdown_vault_search"
-tool_search_description: "Search indexed Markdown vault chunks. Use only for knowledge-base, internal-doc, runbook, wiki, or vault-note intent. Returns cited file paths, heading paths, line ranges, snippets, tags, and stale/index status."
+tool_search_description: "Search Markdown vault files directly. Use only for knowledge-base, internal-doc, runbook, wiki, or vault-note intent. Pass LLM-expanded keywords when available. Returns cited file paths, heading paths, line ranges, snippets, bounded text, matched keywords, tags, and context-budget status."
 tool_search_entrypoint: "scripts/search.py:handler"
 tool_search_groups:
   - markdown-vault
@@ -54,12 +54,20 @@ tool_search_parameters: |
     "properties": {
       "query": {
         "type": "string",
-        "description": "Natural-language query or keywords to search in the configured Markdown vault."
+        "description": "Original user question or natural-language query."
+      },
+      "keywords": {
+        "type": "array",
+        "description": "Optional LLM-expanded search keywords, including entities, synonyms, English/Chinese variants, and typo corrections.",
+        "items": {
+          "type": "string"
+        },
+        "default": []
       },
       "limit": {
         "type": "integer",
-        "description": "Maximum result count. Defaults to 5 and is capped by the tool.",
-        "default": 5
+        "description": "Maximum result count. Defaults to 12 and is capped by the tool.",
+        "default": 12
       },
       "path_filter": {
         "type": "string",
@@ -108,23 +116,16 @@ Use this skill when the user wants answers grounded in a configured Markdown vau
 
 ## Workflow
 
-1. Call `markdown_vault_search` for knowledge-base, internal-doc, wiki, runbook, or vault-note questions.
-2. If search results are too narrow, call `markdown_vault_get` on the most relevant path and line range.
-3. Answer with citations that include the vault-relative path, heading path, and line range when available.
+1. Analyze the question before searching. Extract useful `keywords`: product names, cloud/provider names, system names, aliases, English/Chinese variants, and likely typo corrections. Prefer domain terms over generic words; the provider down-weights vault-specific common tokens, but precise keywords still improve the top results.
+2. Call `markdown_vault_search` for knowledge-base, internal-doc, wiki, runbook, or vault-note questions. Pass both the original `query` and the expanded `keywords`.
+3. Read the returned `text`, `path`, `heading_path`, and line range. The returned text is intentionally bounded so the LLM can analyze it directly.
+4. If the top results are too narrow or ambiguous, search again with clearer keywords or a `path_filter`.
+5. Call `markdown_vault_get` on the most relevant path and line range when surrounding context matters.
+6. Answer with citations that include the vault-relative path, heading path, and line range when available.
 
 ## Evidence Rules
 
 - Do not use this provider for every factual question. Use it only when the user intent is document or knowledge-base grounded.
 - If no result is returned, say the current knowledge base has no matching evidence.
-- If the tool reports `index_not_built`, tell the user an admin must run the offline refresh script.
-- If the tool reports `stale=true`, use the returned indexed evidence but mention that the vault index may need refresh.
 - Do not claim that an answer came from the vault unless it is supported by returned search or get output.
-
-## Admin Boundary
-
-Index refresh and status are intentionally not Agent tools. Administrators run:
-
-```bash
-python providers/markdown-vault/skills/markdown-vault-query/scripts/manage_index.py refresh --config /path/to/atlasclaw.json --instance <name>
-python providers/markdown-vault/skills/markdown-vault-query/scripts/manage_index.py status --config /path/to/atlasclaw.json --instance <name>
-```
+- Python retrieval only ranks and bounds Markdown evidence. The Agent LLM remains responsible for final answer synthesis and support judgment.

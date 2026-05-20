@@ -8,30 +8,31 @@ import sys
 from typing import Any
 
 from _config import MarkdownVaultConfigError, load_provider_config_from_env
-from _index import open_index_store
-from _parser import collect_current_file_state
+from _direct_search import search_direct
 
 
 def main(argv: list[str] | None = None) -> int:
     """Run `markdown_vault_search` as a CLI-compatible AtlasClaw skill script."""
 
-    parser = argparse.ArgumentParser(description="Search an indexed Markdown vault.")
+    parser = argparse.ArgumentParser(description="Search a Markdown vault directly.")
     parser.add_argument("--query", required=True)
-    parser.add_argument("--limit", type=int, default=5)
+    parser.add_argument("--keywords", nargs="*", default=[])
+    parser.add_argument("--keywords-json", default="[]")
+    parser.add_argument("--keyword", action="append", default=[])
+    parser.add_argument("--limit", type=int, default=12)
     parser.add_argument("--path-filter", default="")
     parser.add_argument("--tag-filter", default="")
     args = parser.parse_args(argv)
 
     try:
         config = load_provider_config_from_env()
-        store = open_index_store(config)
-        current_state = collect_current_file_state(config)
-        payload = store.search(
+        payload = search_direct(
+            config,
             args.query,
-            limit=max(1, min(args.limit, 20)),
+            keywords=[*args.keywords, *args.keyword, *_keywords_from_json(args.keywords_json)],
+            limit=max(1, min(args.limit, 50)),
             path_filter=args.path_filter or None,
             tag_filter=args.tag_filter or None,
-            current_state=current_state,
         )
         _emit(payload)
         return 0
@@ -41,6 +42,17 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # Runtime boundary: return a structured tool error instead of raw traceback.
         _emit_error("search_failed", str(exc))
         return 0
+
+
+def _keywords_from_json(value: str) -> list[str]:
+    if not value or not value.strip():
+        return []
+    payload = json.loads(value)
+    if payload is None:
+        return []
+    if not isinstance(payload, list):
+        raise ValueError("--keywords-json must be a JSON array of strings.")
+    return [str(item).strip() for item in payload if str(item).strip()]
 
 
 def _emit(payload: dict[str, Any]) -> None:

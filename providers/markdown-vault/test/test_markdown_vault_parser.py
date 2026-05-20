@@ -22,15 +22,13 @@ from _parser import (  # noqa: E402
 
 
 def _config(tmp_path: Path):
-    """Build a SQLite-backed test config for a temporary vault."""
+    """Build a direct-search test config for a temporary vault."""
 
     vault = tmp_path / "vault"
     vault.mkdir()
     return build_markdown_vault_config(
         raw_config={
             "vault_path": str(vault),
-            "index_backend": "sqlite",
-            "index_path": str(tmp_path / "index.sqlite3"),
             "max_chunk_chars": 400,
         },
         instance_name="test",
@@ -121,8 +119,6 @@ def test_read_markdown_lines_rejects_files_outside_scan_policy(tmp_path: Path) -
     config = build_markdown_vault_config(
         raw_config={
             "vault_path": str(vault),
-            "index_backend": "sqlite",
-            "index_path": str(tmp_path / "index.sqlite3"),
             "include_globs": ["public/**/*.md"],
             "exclude_globs": ["public/private/**"],
             "max_file_bytes": 24,
@@ -133,8 +129,8 @@ def test_read_markdown_lines_rejects_files_outside_scan_policy(tmp_path: Path) -
     )
     (vault / "public").mkdir()
     (vault / "public" / "private").mkdir()
-    (vault / "hidden.md").write_text("# Hidden\nnot indexed\n", encoding="utf-8")
-    (vault / "public" / "private" / "secret.md").write_text("# Secret\nnot indexed\n", encoding="utf-8")
+    (vault / "hidden.md").write_text("# Hidden\nnot scanned\n", encoding="utf-8")
+    (vault / "public" / "private" / "secret.md").write_text("# Secret\nnot scanned\n", encoding="utf-8")
     (vault / "public" / "large.md").write_text("# Large\n" + ("x" * 40), encoding="utf-8")
     (vault / "public" / "ok.md").write_text("# OK\nincluded\n", encoding="utf-8")
 
@@ -148,7 +144,7 @@ def test_read_markdown_lines_rejects_files_outside_scan_policy(tmp_path: Path) -
 
 
 def test_iter_markdown_files_skips_symlink_outside_vault(tmp_path: Path) -> None:
-    """Verify out-of-vault symlinks do not break indexing scans."""
+    """Verify out-of-vault symlinks do not break direct scans."""
 
     config = _config(tmp_path)
     outside = tmp_path / "outside.md"
@@ -158,7 +154,7 @@ def test_iter_markdown_files_skips_symlink_outside_vault(tmp_path: Path) -> None
         link.symlink_to(outside)
     except OSError:
         pytest.skip("filesystem does not support symlinks")
-    (config.vault_path / "inside.md").write_text("# Inside\nindexed\n", encoding="utf-8")
+    (config.vault_path / "inside.md").write_text("# Inside\nscanned\n", encoding="utf-8")
 
     assert [path.name for path in iter_markdown_files(config)] == ["inside.md"]
 
