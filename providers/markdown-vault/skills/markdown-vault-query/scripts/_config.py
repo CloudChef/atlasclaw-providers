@@ -21,6 +21,7 @@ DEFAULT_MAX_RESULT_CHARS = 3072
 class MarkdownVaultConfig:
     """Validated runtime configuration for one Markdown vault provider instance."""
 
+    provider_type: str
     instance_name: str
     instance_id: str
     vault_path: Path
@@ -134,6 +135,7 @@ def build_markdown_vault_config(
 
     normalized_instance = instance_name.strip() or DEFAULT_INSTANCE_NAME
     return MarkdownVaultConfig(
+        provider_type=provider_type,
         instance_name=normalized_instance,
         instance_id=f"{provider_type}:{normalized_instance}",
         vault_path=vault_path,

@@ -80,6 +80,27 @@ def test_markdown_vault_skill_registers_only_read_runtime_tools() -> None:
     assert "manage_index.py" not in frontmatter
 
 
+def test_markdown_vault_prompt_forbids_raw_search_result_answers() -> None:
+    """Verify provider instructions require synthesized answers rather than evidence dumps."""
+
+    provider_text = (PROVIDER_ROOT / "PROVIDER.md").read_text(encoding="utf-8")
+    skill_text = (PROVIDER_ROOT / "skills" / "markdown-vault-query" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    combined = f"{provider_text}\n{skill_text}".lower()
+
+    assert "evidence only" in combined
+    assert "not a final answer" in combined
+    assert "never return raw search results" in combined
+    assert "- source:" in combined
+    assert "vault evidence block is not an answer" in combined
+    assert "do not start the final reply with a source heading" in combined
+    assert "cite the source once" in combined
+    assert "final answers must not contain the literal `source:` label" in combined
+    assert "never copy result blocks or source lines into the final answer" in combined
+    assert "natural-language synthesis" in combined
+
+
 def test_markdown_vault_provider_removes_database_index_contract() -> None:
     """Verify direct retrieval has no database index scripts, config fields, or error codes."""
 

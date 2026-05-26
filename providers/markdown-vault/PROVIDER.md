@@ -63,11 +63,21 @@ Agents may call only:
 
 The search tool scans configured Markdown files, scores matching regions, and returns bounded `text` for LLM analysis. The get tool reads a safe line range when the answer needs surrounding context beyond a search result.
 
+`path_filter` is a vault-relative path constraint, not a topic or provider selector. Agents should omit it for ordinary knowledge-base Q&A. Use it only when the user explicitly provides a vault-relative directory/file path, or when a previous search result's `path` field should constrain a follow-up search.
+
+Search and get outputs are evidence only, not user-facing answers. Agents must synthesize a concise natural-language answer from the evidence and cite only the most relevant vault paths. Never return raw search result blocks, repeated `### ...` source sections, JSON payloads, or copied `text` fields as the final reply.
+
+A vault evidence block is not an answer. If tool output contains Markdown shaped like `### title` followed by `- Source: path.md`, treat that block as internal evidence and rewrite it into a conclusion, key points, and a short citation. Do not start the final reply with a source heading, do not list every returned result, and do not paste an entire returned chunk.
+
 ## Answering Rules
 
 - Search before answering knowledge-base questions unless the user already supplied enough cited vault content.
 - Before search, extract useful `keywords`: product names, component names, synonyms, English/Chinese variants, and typo corrections.
 - Prefer domain-specific keywords over generic words. Python will down-weight terms that are common in the current vault, but precise LLM keyword expansion is still the main quality control.
+- Do not infer `path_filter` from product names, provider names, provider instance names, knowledge-base names, or topic words. If no vault-relative path is explicit, search without `path_filter`.
+- Start the final reply with the answer or support judgment. Summarize only the evidence needed for that answer; do not concatenate search results.
+- Use citations sparingly. Prefer one or two relevant vault-relative citations after the synthesized point; avoid repeating `Source:` lines or one section per search hit.
+- Do not use the literal label `Source:` in final answers. Use concise prose citations such as `来源：path.md` and cite each path at most once.
 - Cite the vault-relative path, heading path, and line range when available.
 - If search returns no matches, say that the current knowledge base has no matching evidence.
 - Do not claim that an answer came from the vault unless it is supported by returned search or get output.
