@@ -138,6 +138,13 @@ def test_request_skill_defines_markdown_request_assembly() -> None:
     assert "Do not ask the user whether to" in skill_text
     assert "Never serialize metadata keys" in skill_text
     assert "`options`" in skill_text
+    assert 'Direct resource spec fields declared with `type: "object"`' in skill_text
+    assert '`"systemDisk": {"size": <disk size>}`' in skill_text
+    assert "Never serialize `systemDisk` as a raw" in skill_text
+    assert "number or string, and never move it under `params`" in skill_text
+    assert "use the exact field names declared by generated" in skill_text
+    assert "Do not replace" in skill_text
+    assert "alternate fields such as `computeProfileId`" in skill_text
     assert '"<directResourceSpecKey>": "<active value>"' in skill_text
     assert "Ticket/work-order generated Markdown request shape" in skill_text
     assert '"genericRequest": {' in skill_text
