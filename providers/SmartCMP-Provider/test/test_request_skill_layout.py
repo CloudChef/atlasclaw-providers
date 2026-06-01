@@ -235,6 +235,15 @@ def test_request_skill_declares_status_query_tool() -> None:
     assert "`APPROVAL_PENDING`: not approved yet" in skill_text
 
 
+def test_request_skill_owns_new_ticket_work_order_catalog_requests() -> None:
+    skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
+
+    assert "User wants to create a new ticket/work-order service catalog item" in skill_text
+    assert "Ticket/work-order names may contain approval or pre-approval wording" in skill_text
+    assert "still a new service catalog request, not an approval action" in skill_text
+    assert "Only approval actions on existing requests belong to the approval skills" in skill_text
+
+
 def test_request_skill_defers_multi_vm_requests_to_decomposition_agent() -> None:
     skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
 

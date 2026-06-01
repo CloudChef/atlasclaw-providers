@@ -124,11 +124,15 @@ use_when:
   - Webhook payload targets approval pre-review
   - Automated approval decision is required for a service request
   - agent_identity is agent-approver
+  - Existing pending approval request is available
+  - Valid user-facing request_id is already known
 
 avoid_when:
   - User manually wants to approve/reject (use approval skill)
   - User wants to query approval status (use approval skill)
   - User wants to submit a new request (use request skill)
+  - User wants to create or submit a new service catalog request (use request skill)
+  - User wants to create a ticket or work order, even if the requested catalog name contains approval or pre-approval wording (use request skill)
 
 examples:
   - "Process approval webhook for request #12345"
@@ -142,6 +146,7 @@ related:
 # Preapproval Agent
 
 Autonomous backend agent for approval pre-review. **Not a human confirmation flow.**
+It reviews existing pending approval requests and does not create service catalog requests.
 
 ## Purpose
 

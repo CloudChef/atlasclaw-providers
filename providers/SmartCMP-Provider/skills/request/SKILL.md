@@ -35,6 +35,8 @@ use_when:
   - User wants to request a VM, cloud resource, database, or application environment
   - User wants to submit a self-service request through the service catalog
   - User wants to create a ticket or work order
+  - User wants to create a new ticket/work-order service catalog item
+  - Ticket/work-order names may contain approval or pre-approval wording; this is still a new service catalog request, not an approval action
   - User already knows the service they want and is ready to provide request parameters
   - User wants multiple instances of the same resource type under one service request with the same parameters
   - User wants to check the status of a submitted SmartCMP request by Request ID
@@ -43,6 +45,7 @@ use_when:
 avoid_when:
   - User only wants to browse available resources (use datasource skill)
   - User wants to approve or reject requests (use approval skill)
+  - Only approval actions on existing requests belong to the approval skills
   - User describes requirements in natural language without specific parameters (use request-decomposition-agent)
   - User asks for different resource types that should become separate CMP requests (use request-decomposition-agent)
   - User gives per-instance differences such as first/second/third configurations or different specs per instance (use request-decomposition-agent)
