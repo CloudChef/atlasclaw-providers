@@ -503,6 +503,15 @@ scope.
   serialize Compute `securityGroupIds` as a JSON array of security group id
   strings, even when only one security group is selected; never serialize it as
   a single string or comma-separated string.
+- Direct resource spec fields declared with `type: "object"` must be serialized
+  as JSON objects at `resourceSpecs[]` level. For Compute `systemDisk`, preserve
+  the object shape from Markdown or user input, for example
+  `"systemDisk": {"size": <disk size>}`. Never serialize `systemDisk` as a raw
+  number or string, and never move it under `params`.
+- For direct Compute fields, use the exact field names declared by generated
+  Markdown, such as `computeProfileName`, `cpu`, and `memory`. Do not replace
+  them with alternate fields such as `computeProfileId` unless the selected
+  catalog declares those alternate fields.
 - Do not create or consume a literal `fields` object. Direct resource spec
   fields must be declared directly on `instructions.resourceSpecs[]`.
 - Put `resourceBundleTags` at the same level as `resourceBundleId`,
@@ -610,6 +619,8 @@ identical `resourceSpecs[]` entries just to represent quantity. Catalogs that
 declare multiple `resourceSpecs` should include each declared item once.
 For Compute, `securityGroupIds` must be an array, for example
 `"securityGroupIds": ["sg-xxxxxxxx"]`.
+For Compute, `systemDisk` must be an object, for example
+`"systemDisk": {"size": <disk size>}`.
 
 Ticket/work-order generated Markdown request shape:
 
