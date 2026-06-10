@@ -11,6 +11,7 @@ SmartCMP Provider is a service provider module for AtlasClaw, integrating with S
 - **Resource Operations** - List current-user executable operations and run enabled no-parameter day2 operations on existing cloud resources
 - **Data Queries** - Query service catalogs, applications, templates, images, and other reference data
 - **Intelligent Agents** - Automated pre-approval and request decomposition capabilities
+- **Form Designer Agent** - Generate, review, and modify SmartCMP Schema Form JSON for extension attributes, component creation, Day2 display, platform object attributes, and visual designer modules
 - **Cost Optimization** - Review optimization recommendations, analyze savings, execute SmartCMP-native fixes, and track remediation progress
 - **Resource Compliance** - Resolve resources by exact name or visible list index, reuse the shared normalized resource view, and analyze lifecycle, patch, security, and configuration posture
 
@@ -343,6 +344,43 @@ Transforms descriptive infrastructure or application demands into executable CMP
 - `draft` - Generate drafts only, no submission
 - `review_required` - Create requests pending human adjustment
 
+### form-designer-agent - Form Designer Agent
+
+Generates SmartCMP Schema Form JSON for request extension attributes,
+component creation, Day2 parameter display, platform object extension
+attributes, lifecycle forms, visual designer modules, and backend parameters.
+The agent returns JSON for review only; it does not save, mount, publish, or
+submit anything in CMP.
+
+The agent returns designer paste JSON (`designerPasteJson`) as the primary
+result and preserves the target form module shape. It does not force every form into `model/schema/options`;
+Angular2 schema-only, Angular1 `schema/form/model`, and Form.io `components`
+shapes are all valid when they match the source or target module.
+
+**Features:**
+- Prepare new Schema Form interactions through `smartcmp_prepare_request_form`
+- Recognize a same-host SmartCMP service-model form URL through `smartcmp_fetch_request_form_source`
+- Generate Schema Form JSON from module-specific requirements
+- Preserve the selected module shape instead of rewriting every form into one structure
+- Keep parameter or extension-attribute keys aligned within the selected shape
+- Show a KV parameter preview separately when a `model` exists
+- Return form JSON for review only
+
+**Output Modes:**
+- `new` - Generate Schema Form JSON from module-specific requirements
+- `create` - Use a service-model form list URL as source context for a draft
+- `update` - Use a service-model form edit URL and existing form definition as the draft source
+- `auto` - Infer new vs URL source mode from whether `source_request_url` is present
+
+**Safety Boundary:**
+- Output Schema Form JSON for review
+- Returned JSON is not saved, mounted, published, or submitted by this agent
+- URL source mode is read-only and must not update pending work orders, submitted requests, or CMP form entities in place
+- Do not create, update, publish, or save CMP form entities from this skill
+- Do not call request workflow tools from this skill
+- No downloadable HTML/YAML artifacts
+- Do not expose internal UUID-shaped form detail identifiers
+
 ### Webhook Robot Execution
 
 SmartCMP backend agents can be invoked by AtlasClaw webhooks with a scoped
@@ -450,6 +488,10 @@ SmartCMP-Provider/
 │   │   ├── scripts/                 # Datasource-owned standalone business-group directory helper
 │   │   ├── references/
 │   │   └── SKILL.md
+│   ├── form-designer-agent/         # Schema Form JSON design agent
+│   │   ├── scripts/                 # Schema Form preparation and URL source helpers
+│   │   ├── references/              # Schema Form design guidance
+│   │   └── SKILL.md
 │   ├── preapproval-agent/           # Pre-approval agent
 │   │   ├── references/
 │   │   └── SKILL.md
@@ -488,6 +530,8 @@ scripts are located in `datasource/scripts/`:
 | `_common.py` | `shared/scripts/` | Authentication & URL normalization (used by all scripts) |
 | `list_resource.py` | `datasource/scripts/` | Fetch resource summary, details, raw resource fields, and the shared normalized `type + properties` view by ID |
 | `list_services.py` | `datasource/scripts/` | List published service catalogs |
+| `prepare_request_form.py` | `form-designer-agent/scripts/` | Read-only preparation for SmartCMP Schema Form JSON flows |
+| `fetch_request_form_source.py` | `form-designer-agent/scripts/` | Read-only service-model form URL recognition for Schema Form source context |
 | `list_all_business_groups.py` | `datasource/scripts/` | List standalone business-group scopes |
 
 ## Notes
@@ -498,8 +542,9 @@ scripts are located in `datasource/scripts/`:
 4. **Alarm Coverage** - Monitoring and alert workflows are supported directly by the `alarm` skill in this provider
 5. **Error Handling** - On `[ERROR]` output, report to user immediately; do NOT self-debug
 6. **Resource Compliance** - `resource-compliance` reuses the shared normalized resource view from `list_resource.py`, then attempts live external validation for lifecycle and support checks
-7. **Localized Responses** - Scripts should return stable fields and metadata. Agents are responsible for explaining results in the current user's message language.
-8. **No Raw Day2 Dumps** - Resource operations should not print raw request payloads or raw SmartCMP response details after a successful submission.
+7. **Form Designer Safety** - `form-designer-agent` outputs Schema Form JSON for SmartCMP form modules only; it preserves module shape and does not save, mount, publish, submit requests, call request workflow tools, or expose internal UUID-shaped identifiers.
+8. **Localized Responses** - Scripts should return stable fields and metadata. Agents are responsible for explaining results in the current user's message language.
+9. **No Raw Day2 Dumps** - Resource operations should not print raw request payloads or raw SmartCMP response details after a successful submission.
 
 ## Related Documentation
 

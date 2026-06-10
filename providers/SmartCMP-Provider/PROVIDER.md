@@ -35,6 +35,13 @@ keywords:
   - resource compliance
   - lifecycle analysis
   - security posture
+  - form designer
+  - schema form
+  - schema form json
+  - request form
+  - catalog form
+  - backend parameter form
+  - service-model form
   - infrastructure
   - cmp
   - CMP
@@ -50,6 +57,7 @@ capabilities:
   - Review cost optimization recommendations and savings opportunities
   - Execute and track native day2 remediation for cost optimization findings
   - Fetch resource details by ID, reuse the shared normalized resource view, and analyze lifecycle, patch, security, and configuration risk
+  - Generate, create, review, rewrite, or modify SmartCMP Schema Form JSON for request forms, catalog forms, backend parameter forms, and visual form designer modules
 
 use_when:
   - User wants to request a VM, database, application environment, or other service catalog item
@@ -63,10 +71,12 @@ use_when:
   - User wants to review cost optimization recommendations, savings opportunities, or remediation progress
   - User wants to execute a native day2 fix for a cost finding
   - User wants to analyze one or more existing resources by exact name or visible list index for compliance or security risk
+  - User wants to generate, create, review, rewrite, or modify a SmartCMP Schema Form JSON, request form, catalog form, backend parameter form, or service-model form JSON
 
 avoid_when:
   - User wants generic issue tracking outside cloud service requests (use Jira provider)
   - User wants to manage code or repositories (use Git provider)
+  - User wants to submit a completed SmartCMP service request instead of designing form JSON (use request skill)
 ---
 
 # SmartCMP Service Provider
@@ -303,6 +313,7 @@ CMP_URL=https://cmp.example.com
 | `alarm` | Monitoring | Alarm alert listing, analysis, and status operations | `list_alerts`, `analyze_alert`, `operate_alert` |
 | `preapproval-agent` | Agent | Autonomous approval pre-review | Webhook-triggered, policy-based decisions |
 | `request-decomposition-agent` | Agent | Transform natural-language requirements into request drafts | NL parsing, multi-skill orchestration |
+| `form-designer-agent` | Agent | Generate, review, and modify SmartCMP Schema Form JSON for extension attributes, component creation, Day2 display, platform object attributes, and visual designer modules | Schema Form preparation, service-model form URL context, JSON output |
 | `cost-optimization` | Optimization | Analyze savings opportunities and execute platform-native fixes | `list_recommendations`, `analyze_recommendation`, `execute_optimization`, `track_execution` |
 | `resource-compliance` | Analysis | Resolve resources by exact name or visible list index, normalize `type + properties`, and run componentType-driven cloud/software/OS compliance analysis | `list_resource`, `analyze_resource` |
 
@@ -484,6 +495,36 @@ Orchestration agent that transforms descriptive infrastructure demands into stru
 | `agent_identity` | string | Yes | Must be `agent-request-orchestrator` |
 | `request_text` | string | Yes | Free-form requirement description |
 | `submission_mode` | string | No | `draft` or `review_required` |
+
+#### form-designer-agent
+
+Agent that generates SmartCMP Schema Form JSON for request extension
+attributes, component creation, Day2 parameter display, platform object
+extension attributes, lifecycle forms, visual designer modules, and backend
+parameters. New flows use `smartcmp_prepare_request_form` to establish the
+Schema Form generation contract.
+
+The agent returns designer paste JSON (`designerPasteJson`) as the primary
+result and preserves the target form module shape. It does not force every form into `model/schema/options`;
+Angular2 schema-only, Angular1 `schema/form/model`, and Form.io `components`
+shapes are all valid when they match the source or target module.
+
+URL flows may recognize a same-host SmartCMP service-model form URL through
+`smartcmp_fetch_request_form_source`. List URLs enter create mode. Edit URLs
+such as `#/main/service-model/forms/edit/<form_id>` enter update mode and use
+the returned existing form definition as source context. URL source mode must
+not claim that pending work orders, submitted requests, or CMP form entities
+were modified in place.
+
+The agent generates or updates Schema Form JSON while preserving parameter or
+extension-attribute keys inside the selected module shape. It may show a
+separate KV preview when a `model` exists, but returned JSON remains for review
+only.
+
+It must not create, update, publish, or persist CMP form entities. It must not
+call CMP form-designer write APIs directly or through tools, create
+downloadable HTML/YAML files, call request workflow tools, use approval tools,
+or expose internal UUID-shaped detail identifiers.
 
 ## Shared Scripts Reference
 
