@@ -51,6 +51,10 @@ def _extract_meta(stderr: str) -> dict:
     return json.loads(payload)
 
 
+def _cjk(*codepoints: str) -> str:
+    return "".join(chr(int(codepoint, 16)) for codepoint in codepoints)
+
+
 def test_resolve_catalog_fields_maps_request_instruction_fields() -> None:
     detail = {
         "id": "catalog-eip",
@@ -155,3 +159,49 @@ def test_resolve_catalog_fields_accepts_named_non_ascii_separators() -> None:
     assert exit_code == 0
     assert meta["canGenerateCatalogContextForm"] is True
     assert meta["catalogContextFields"] == "billing type=InternetChargeType,bandwidth=Bandwidth"
+
+
+def test_resolve_catalog_fields_translates_common_cjk_catalog_labels() -> None:
+    business_group = _cjk("4E1A", "52A1", "7EC4")
+    owner = _cjk("6240", "6709", "8005")
+    compute_specification = _cjk("8BA1", "7B97", "89C4", "683C")
+    detail = {
+        "id": "catalog-linux",
+        "name": "Linux VM",
+        "instructions": {
+            "topLevelRequired": ["businessGroupName"],
+            "topLevelFields": {
+                "ownerName": {
+                    "key": "ownerName",
+                    "label": "owner",
+                    "description": "owner",
+                },
+            },
+            "resourceSpecs": [
+                {
+                    "node": "VM",
+                    "params": {
+                        "computeProfileId": {
+                            "key": "computeProfileId",
+                            "label": "compute profile",
+                            "description": "flavor compute specification",
+                        },
+                    },
+                }
+            ],
+        },
+    }
+
+    exit_code, _, stderr = _run_script(
+        detail,
+        f"{business_group},{owner},{compute_specification}",
+    )
+
+    meta = _extract_meta(stderr)
+    assert exit_code == 0
+    assert meta["canGenerateCatalogContextForm"] is True
+    assert meta["catalogContextFields"] == (
+        "business group=businessGroupName,"
+        "owner=ownerName,"
+        "compute specification=computeProfileId"
+    )

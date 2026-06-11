@@ -26,6 +26,33 @@ RESOURCE_SPEC_RESERVED = {
     "resourceBundleTags",
 }
 FIELD_SEPARATOR_NAMES = {"FULLWIDTH COMMA", "IDEOGRAPHIC COMMA"}
+CJK_LABEL_TRANSLATIONS = [
+    (("90E8", "95E8"), "department"),
+    (("9879", "76EE"), "project"),
+    (("4E1A", "52A1", "7EC4"), "business group"),
+    (("6240", "6709", "8005"), "owner"),
+    (("540D", "79F0"), "name"),
+    (("8BA1", "7B97", "89C4", "683C"), "compute specification"),
+    (("8BA1", "8D39", "7C7B", "578B"), "billing type"),
+    (("5E26", "5BBD"), "bandwidth"),
+]
+SEMANTIC_ALIAS_GROUPS = {
+    "department": ("department", "dept"),
+    "project": ("project",),
+    "business group": ("businessgroup", "businessgroupname", "businessgroupid", "tenant", "bu"),
+    "owner": ("owner", "ownername", "ownerid"),
+    "name": ("displayname",),
+    "compute specification": (
+        "computespecification",
+        "computeprofile",
+        "computeprofileid",
+        "flavor",
+        "flavorid",
+        "instancetype",
+    ),
+    "billing type": ("billingtype", "internetcharge", "chargetype"),
+    "bandwidth": ("bandwidth",),
+}
 
 
 def _clean(value: Any) -> str:
@@ -37,6 +64,47 @@ def _clean(value: Any) -> str:
 def _normalize(value: Any) -> str:
     text = _clean(value).lower()
     return "".join(ch for ch in text if ch.isalnum())
+
+
+def _cjk_signature(value: str) -> str:
+    codepoints = [
+        f"{ord(ch):04X}"
+        for ch in value
+        if unicodedata.name(ch, "").startswith("CJK UNIFIED IDEOGRAPH-")
+    ]
+    return "-".join(codepoints)
+
+
+def _translated_label(value: str) -> str:
+    signature = _cjk_signature(value)
+    if not signature:
+        return ""
+    for codepoints, label in CJK_LABEL_TRANSLATIONS:
+        if "-".join(codepoints) in signature:
+            return label
+    return ""
+
+
+def _output_label(value: str) -> str:
+    return _translated_label(value) or value
+
+
+def _semantic_groups_from_text(value: Any) -> set[str]:
+    text = _normalize(value)
+    groups = set()
+    for group, aliases in SEMANTIC_ALIAS_GROUPS.items():
+        if any(alias in text for alias in aliases):
+            groups.add(group)
+    return groups
+
+
+def _semantic_groups_for_label(label: str) -> set[str]:
+    groups = _semantic_groups_from_text(label)
+    translated = _translated_label(label)
+    if translated:
+        groups.add(translated)
+        groups.update(_semantic_groups_from_text(translated))
+    return groups
 
 
 def _looks_like_backend_key(value: str) -> bool:
@@ -86,6 +154,15 @@ def _iter_named_fields(value: Any, source: str):
                 yield {"key": key, "label": _field_label(raw_field, key), "source": source, "field": raw_field}
 
 
+def _iter_required_fields(value: Any, source: str):
+    if not isinstance(value, list):
+        return
+    for raw_key in value:
+        key = _clean(raw_key)
+        if key:
+            yield {"key": key, "label": key, "source": source, "field": {"key": key}}
+
+
 def _field_candidates(detail: dict[str, Any]) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
 
@@ -99,6 +176,7 @@ def _field_candidates(detail: dict[str, Any]) -> list[dict[str, Any]]:
 
     add_many(detail.get("catalogPayloadFields"), "catalogPayloadFields")
     instructions = detail.get("instructions") if isinstance(detail.get("instructions"), dict) else {}
+    add_many(list(_iter_required_fields(instructions.get("topLevelRequired"), "instructions.topLevelRequired")), "instructions.topLevelRequired")
     add_many(instructions.get("topLevelFields"), "instructions.topLevelFields")
     add_many(instructions.get("params"), "instructions.params")
     generic = instructions.get("genericRequest") if isinstance(instructions.get("genericRequest"), dict) else {}
@@ -148,11 +226,20 @@ def _candidate_tokens(candidate: dict[str, Any]) -> set[str]:
     return {token for token in tokens if token}
 
 
+def _candidate_semantic_groups(candidate: dict[str, Any]) -> set[str]:
+    return _semantic_groups_from_text(_candidate_evidence(candidate))
+
+
 def _matches_candidate_text(label: str, candidate: dict[str, Any]) -> bool:
     target = _normalize(label)
     if not target:
         return False
     if target in _candidate_tokens(candidate):
+        return True
+    translated = _translated_label(label)
+    if translated and _normalize(translated) in _candidate_tokens(candidate):
+        return True
+    if _semantic_groups_for_label(label) & _candidate_semantic_groups(candidate):
         return True
     evidence = _normalize(_candidate_evidence(candidate))
     # Substring evidence matching is useful for CJK descriptions, but short
@@ -186,7 +273,7 @@ def resolve_catalog_fields(detail: dict[str, Any], labels_text: str) -> dict[str
         candidate, ambiguous_matches = _resolve_one(label, candidates)
         if candidate:
             mappings.append(
-                {"label": label, "key": candidate["key"], "source": candidate["source"]}
+                {"label": _output_label(label), "key": candidate["key"], "source": candidate["source"]}
             )
         elif ambiguous_matches:
             ambiguous.append(
