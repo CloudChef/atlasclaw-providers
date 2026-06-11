@@ -93,6 +93,10 @@ def _extract_meta(stderr: str) -> dict:
     return json.loads(payload)
 
 
+def _cjk(*codepoints: str) -> str:
+    return "".join(chr(int(codepoint, 16)) for codepoint in codepoints)
+
+
 def test_catalog_detail_fetches_by_id_and_extracts_preapproval_section(monkeypatch) -> None:
     module = _load_module(monkeypatch)
     instructions = """
@@ -111,18 +115,19 @@ Use the request parameter contract.
 """.strip()
 
     def fake_get(url, headers=None, verify=None, timeout=None):
-        assert url == "https://cmp.example.com/platform-api/catalogs/catalog-1"
-        assert timeout == 30
-        return _FakeResponse(
-            {
-                "id": "catalog-1",
-                "name": "Linux VM",
-                "sourceKey": "resource.iaas.machine.instance.abstract",
-                "serviceCategory": "CLOUD_COMPONENT_SERVICE",
-                "type": "CLOUD_COMPONENT",
-                "instructions": instructions,
-            }
-        )
+        if url == "https://cmp.example.com/platform-api/catalogs/catalog-1":
+            assert timeout == 30
+            return _FakeResponse(
+                {
+                    "id": "catalog-1",
+                    "name": "Linux VM",
+                    "sourceKey": "resource.iaas.machine.instance.abstract",
+                    "serviceCategory": "CLOUD_COMPONENT_SERVICE",
+                    "type": "CLOUD_COMPONENT",
+                    "instructions": instructions,
+                }
+            )
+        raise module.requests.exceptions.HTTPError(f"not found: {url}")
 
     monkeypatch.setattr(module.requests, "get", fake_get)
     stdout = io.StringIO()
@@ -212,17 +217,18 @@ Use the request parameter contract.
 """.strip()
 
     def fake_get(url, headers=None, verify=None, timeout=None):
-        assert url == "https://cmp.example.com/platform-api/catalogs/catalog-fields"
-        return _FakeResponse(
-            {
-                "id": "catalog-fields",
-                "name": "EIP",
-                "sourceKey": "resource.example.eip",
-                "serviceCategory": "CLOUD_COMPONENT_SERVICE",
-                "type": "APPLICATION",
-                "instructions": instructions,
-            }
-        )
+        if url == "https://cmp.example.com/platform-api/catalogs/catalog-fields":
+            return _FakeResponse(
+                {
+                    "id": "catalog-fields",
+                    "name": "EIP",
+                    "sourceKey": "resource.example.eip",
+                    "serviceCategory": "CLOUD_COMPONENT_SERVICE",
+                    "type": "APPLICATION",
+                    "instructions": instructions,
+                }
+            )
+        raise module.requests.exceptions.HTTPError(f"not found: {url}")
 
     monkeypatch.setattr(module.requests, "get", fake_get)
     stdout = io.StringIO()
@@ -364,6 +370,73 @@ def test_catalog_detail_extracts_payload_fields_from_related_form_id(monkeypatch
     assert meta["catalogPayloadFields"]["applicationSystem"]["label"] == "应用系统"
     assert meta["catalogPayloadFields"]["applicationSystem"]["location"] == "form:form-ip.content.schema.properties"
     assert meta["catalogFieldKeys"]["payloadFields"] == ["applicationSystem", "ownerName"]
+
+
+def test_catalog_detail_fetches_related_form_fields_even_with_instructions(monkeypatch) -> None:
+    module = _load_module(monkeypatch)
+    owner = _cjk("6240", "6709", "8005")
+    compute_specification = _cjk("8BA1", "7B97", "89C4", "683C")
+    instructions = """
+# Request Parameter Instructions
+
+topLevelRequired:
+  - catalogId
+  - businessGroupName
+resourceSpecs:
+  - node: VM
+    params:
+      computeProfileId:
+        type: string
+        label: compute profile id
+      flavorId:
+        type: string
+        label: flavor id
+""".strip()
+    calls: list[str] = []
+
+    def fake_get(url, headers=None, verify=None, timeout=None):
+        calls.append(url)
+        if url == "https://cmp.example.com/platform-api/catalogs/catalog-linux":
+            return _FakeResponse(
+                {
+                    "id": "catalog-linux",
+                    "name": "Linux VM",
+                    "instructions": instructions,
+                    "requestFormId": "form-linux",
+                }
+            )
+        if url == "https://cmp.example.com/platform-api/forms/form-linux":
+            return _FakeResponse(
+                {
+                    "content": {
+                        "schema": {
+                            "properties": {
+                                "ownerName": {"type": "string", "title": owner},
+                                "computeProfileId": {
+                                    "type": "string",
+                                    "i18nTitle": {"zh": compute_specification, "en": "Compute specification"},
+                                },
+                            }
+                        }
+                    }
+                }
+            )
+        raise AssertionError(f"unexpected URL: {url}")
+
+    monkeypatch.setattr(module.requests, "get", fake_get)
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    with redirect_stdout(stdout), redirect_stderr(stderr):
+        exit_code = module.main(["catalog-linux"])
+
+    meta = _extract_meta(stderr.getvalue())
+    assert exit_code == 0
+    assert "https://cmp.example.com/platform-api/forms/form-linux" in calls
+    assert meta["hasRequestParameterInstructions"] is True
+    assert meta["hasCatalogPayloadFields"] is True
+    assert meta["catalogPayloadFields"]["ownerName"]["label"] == owner
+    assert meta["catalogPayloadFields"]["computeProfileId"]["label"] == compute_specification
 
 
 def test_catalog_detail_probes_catalog_form_endpoints_when_detail_has_no_fields(monkeypatch) -> None:

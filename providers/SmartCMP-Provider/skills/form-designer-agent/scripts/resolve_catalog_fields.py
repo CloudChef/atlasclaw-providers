@@ -230,17 +230,17 @@ def _candidate_semantic_groups(candidate: dict[str, Any]) -> set[str]:
     return _semantic_groups_from_text(_candidate_evidence(candidate))
 
 
-def _matches_candidate_text(label: str, candidate: dict[str, Any]) -> bool:
+def _candidate_match_rank(label: str, candidate: dict[str, Any]) -> int | None:
     target = _normalize(label)
     if not target:
-        return False
+        return None
     if target in _candidate_tokens(candidate):
-        return True
+        return 0
     translated = _translated_label(label)
     if translated and _normalize(translated) in _candidate_tokens(candidate):
-        return True
+        return 1
     if _semantic_groups_for_label(label) & _candidate_semantic_groups(candidate):
-        return True
+        return 2
     evidence = _normalize(_candidate_evidence(candidate))
     # Substring evidence matching is useful for CJK descriptions, but short
     # ASCII labels such as "name" must not match unrelated keys like ownerName.
@@ -250,15 +250,24 @@ def _matches_candidate_text(label: str, candidate: dict[str, Any]) -> bool:
         or bool(re.search(r"\s", raw_label))
     )
     if len(target) >= 2 and bool(evidence) and can_use_substring and target in evidence:
-        return True
-    return False
+        return 3
+    return None
 
 
 def _resolve_one(label: str, candidates: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
-    matches = [candidate for candidate in candidates if _matches_candidate_text(label, candidate)]
-    if len({item["key"] for item in matches}) == 1:
+    ranked = [
+        (rank, candidate)
+        for candidate in candidates
+        if (rank := _candidate_match_rank(label, candidate)) is not None
+    ]
+    if not ranked:
+        return None, []
+    best_rank = min(rank for rank, _ in ranked)
+    matches = [candidate for rank, candidate in ranked if rank == best_rank]
+    keys = {item["key"] for item in matches}
+    if len(keys) == 1:
         return matches[0], []
-    if len({item["key"] for item in matches}) > 1:
+    if len(keys) > 1:
         return None, matches
     return None, []
 

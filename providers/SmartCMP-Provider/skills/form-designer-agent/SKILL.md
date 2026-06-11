@@ -177,7 +177,7 @@ generation.
    `smartcmp_prepare_request_form` repeatedly to discover catalog fields.
    If `smartcmp_prepare_request_form` returns `catalogLookupGate`, stop JSON
    generation and follow that gate first.
-5. For a service catalog URL with a UUID, call `smartcmp_form_designer_get_catalog_detail`; use Request Parameter Instructions when present. When they are missing, use `catalogPayloadFields`/`catalogFieldKeys.payloadFields` from the detail result before asking or guessing.
+5. For a service catalog URL with a UUID, call `smartcmp_form_designer_get_catalog_detail`; use both Request Parameter Instructions and `catalogPayloadFields`/`catalogFieldKeys.payloadFields` from embedded or related request-form schemas before asking or guessing. Request Parameter Instructions are not enough by themselves because user-facing form titles may be localized. Exact payload labels/titles win over English semantic aliases when resolving fields.
 ## Key Rules
 
 Do not special-case department, project, owner, or name. If the user says a

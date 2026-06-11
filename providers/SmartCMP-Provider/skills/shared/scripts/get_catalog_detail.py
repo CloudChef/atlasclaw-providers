@@ -145,7 +145,7 @@ def _extract_markdown_section(markdown_text: str, headings: tuple[str, ...]) -> 
     normalized_headings = {heading.strip(): heading.strip() for heading in headings}
 
     for index, line in enumerate(lines):
-        stripped = line.strip().lstrip("\ufeff")
+        stripped = line.strip().lstrip(chr(0xFEFF))
         if stripped in normalized_headings:
             start_index = index + 1
             matched_heading = normalized_headings[stripped]
@@ -171,6 +171,19 @@ def _first_text(*values: Any) -> str:
             if text:
                 return text
     return ""
+
+
+def _localized_text(value: Any) -> str:
+    if not isinstance(value, dict):
+        return _first_text(value)
+    return _first_text(
+        value.get("zh"),
+        value.get("zh_CN"),
+        value.get("zh-CN"),
+        value.get("cn"),
+        value.get("en"),
+        value.get("value"),
+    )
 
 
 def _catalog_name(catalog: dict[str, Any]) -> str:
@@ -531,6 +544,8 @@ def _payload_field_label(raw_field: dict[str, Any], key: str) -> str:
     return _first_text(
         raw_field.get("label"),
         raw_field.get("title"),
+        _localized_text(raw_field.get("i18nTitle")),
+        _localized_text(raw_field.get("i18n_title")),
         raw_field.get("displayName"),
         raw_field.get("nameZh"),
         raw_field.get("name"),
@@ -716,7 +731,7 @@ def _build_meta(catalog: dict[str, Any], catalog_id: str) -> dict[str, Any]:
         _add_request_instruction_section(normalized_request_instructions, raw_instructions)
     payload_fields = _extract_payload_form_fields(catalog)
     payload_field_source = "catalog" if payload_fields else ""
-    if not normalized_request_instructions and not payload_fields:
+    if not payload_fields:
         payload_fields, payload_field_source = _fetch_related_payload_form_fields(catalog, catalog_id)
 
     meta = {
