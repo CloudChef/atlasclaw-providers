@@ -439,6 +439,63 @@ resourceSpecs:
     assert meta["catalogPayloadFields"]["computeProfileId"]["label"] == compute_specification
 
 
+def test_catalog_detail_extracts_nested_localized_payload_labels(monkeypatch) -> None:
+    module = _load_module(monkeypatch)
+    owner = _cjk("6240", "6709", "8005")
+    compute_specification = _cjk("8BA1", "7B97", "89C4", "683C")
+
+    def fake_get(url, headers=None, verify=None, timeout=None):
+        if url == "https://cmp.example.com/platform-api/catalogs/catalog-linux":
+            return _FakeResponse(
+                {
+                    "id": "catalog-linux",
+                    "name": "Linux VM",
+                    "requestFormId": "form-linux",
+                }
+            )
+        if url == "https://cmp.example.com/platform-api/forms/form-linux":
+            return _FakeResponse(
+                {
+                    "content": {
+                        "schema": {
+                            "properties": {
+                                "ownerName": {
+                                    "type": "string",
+                                    "templateOptions": {"label": owner},
+                                },
+                                "computeProfileId": {"type": "string"},
+                            },
+                            "i18n": {
+                                "zh": {
+                                    "computeProfileId": {"title": compute_specification},
+                                }
+                            },
+                        }
+                    },
+                    "components": [
+                        {
+                            "key": "ownerName",
+                            "type": "select",
+                            "props": {"label": owner},
+                        }
+                    ],
+                }
+            )
+        raise module.requests.exceptions.HTTPError(f"not found: {url}")
+
+    monkeypatch.setattr(module.requests, "get", fake_get)
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    with redirect_stdout(stdout), redirect_stderr(stderr):
+        exit_code = module.main(["catalog-linux"])
+
+    meta = _extract_meta(stderr.getvalue())
+    assert exit_code == 0
+    assert meta["catalogPayloadFields"]["ownerName"]["label"] == owner
+    assert meta["catalogPayloadFields"]["computeProfileId"]["label"] == compute_specification
+
+
 def test_catalog_detail_probes_catalog_form_endpoints_when_detail_has_no_fields(monkeypatch) -> None:
     module = _load_module(monkeypatch)
     calls: list[str] = []

@@ -66,6 +66,27 @@ def _normalize(value: Any) -> str:
     return "".join(ch for ch in text if ch.isalnum())
 
 
+def _localized_text(value: Any) -> str:
+    if not isinstance(value, dict):
+        return _clean(value)
+    for key in ("zh", "zh_CN", "zh-CN", "cn", "en", "value", "label", "title"):
+        if _clean(value.get(key)):
+            return _clean(value.get(key))
+    return ""
+
+
+def _label_from_mapping(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    for key in ("label", "title", "displayName", "display_name", "nameZh", "name"):
+        if _clean(value.get(key)):
+            return _clean(value.get(key))
+    for key in ("i18nTitle", "i18n_title"):
+        if text := _localized_text(value.get(key)):
+            return text
+    return ""
+
+
 def _cjk_signature(value: str) -> str:
     codepoints = [
         f"{ord(ch):04X}"
@@ -135,6 +156,12 @@ def _field_label(field: Any, fallback_key: str) -> str:
         for key in ("label", "title", "name", "displayName", "display_name"):
             if _clean(field.get(key)):
                 return _clean(field.get(key))
+        for key in ("i18nTitle", "i18n_title"):
+            if text := _localized_text(field.get(key)):
+                return text
+        for key in ("templateOptions", "template_options", "props", "options", "ui"):
+            if text := _label_from_mapping(field.get(key)):
+                return text
     return fallback_key
 
 

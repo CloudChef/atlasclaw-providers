@@ -257,3 +257,24 @@ def test_resolve_catalog_fields_prefers_exact_cjk_payload_labels_over_semantics(
         "owner=ownerName,"
         "compute specification=computeProfileId"
     )
+
+
+def test_resolve_catalog_fields_reads_nested_localized_labels() -> None:
+    owner = _cjk("6240", "6709", "8005")
+    detail = {
+        "id": "catalog-linux",
+        "name": "Linux VM",
+        "catalogPayloadFields": {
+            "userId": {
+                "key": "userId",
+                "templateOptions": {"label": owner},
+            },
+        },
+    }
+
+    exit_code, _, stderr = _run_script(detail, owner)
+
+    meta = _extract_meta(stderr)
+    assert exit_code == 0
+    assert meta["canGenerateCatalogContextForm"] is True
+    assert meta["catalogContextFields"] == "owner=userId"

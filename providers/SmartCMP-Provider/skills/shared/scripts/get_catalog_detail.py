@@ -186,6 +186,39 @@ def _localized_text(value: Any) -> str:
     )
 
 
+def _label_from_mapping(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    return _first_text(
+        value.get("label"),
+        value.get("title"),
+        _localized_text(value.get("i18nTitle")),
+        _localized_text(value.get("i18n_title")),
+        value.get("displayName"),
+        value.get("nameZh"),
+        value.get("name"),
+    )
+
+
+def _schema_i18n_label(schema: dict[str, Any], field_key: str) -> str:
+    i18n = schema.get("i18n")
+    if not isinstance(i18n, dict):
+        return ""
+    for locale_key in ("zh", "zh_CN", "zh-CN", "cn", "en"):
+        locale_map = i18n.get(locale_key)
+        if not isinstance(locale_map, dict):
+            continue
+        if label := _first_text(locale_map.get(field_key)):
+            return label
+        field_i18n = locale_map.get(field_key)
+        if isinstance(field_i18n, dict) and (label := _label_from_mapping(field_i18n)):
+            return label
+    field_i18n = i18n.get(field_key)
+    if isinstance(field_i18n, dict):
+        return _localized_text(field_i18n) or _label_from_mapping(field_i18n)
+    return ""
+
+
 def _catalog_name(catalog: dict[str, Any]) -> str:
     return _first_text(catalog.get("nameZh"), catalog.get("name"), catalog.get("displayName"))
 
@@ -533,6 +566,9 @@ def _looks_like_field_definition(value: object) -> bool:
         "type",
         "widget",
         "config",
+        "templateOptions",
+        "props",
+        "i18nTitle",
         "defaultValue",
         "default_value",
         "required",
@@ -541,11 +577,17 @@ def _looks_like_field_definition(value: object) -> bool:
 
 
 def _payload_field_label(raw_field: dict[str, Any], key: str) -> str:
+    nested_label = ""
+    for nested_key in ("templateOptions", "template_options", "props", "options", "ui"):
+        nested_label = _label_from_mapping(raw_field.get(nested_key))
+        if nested_label:
+            break
     return _first_text(
         raw_field.get("label"),
         raw_field.get("title"),
         _localized_text(raw_field.get("i18nTitle")),
         _localized_text(raw_field.get("i18n_title")),
+        nested_label,
         raw_field.get("displayName"),
         raw_field.get("nameZh"),
         raw_field.get("name"),
@@ -567,6 +609,19 @@ def _add_mapping_fields(out: dict[str, Any], mapping: object, location: str) -> 
     for field_key, raw_field in mapping.items():
         if isinstance(field_key, str) and _looks_like_field_definition(raw_field):
             out.setdefault(field_key, _payload_field_param(field_key, raw_field, location))
+
+
+def _add_schema_properties(out: dict[str, Any], schema: dict[str, Any], location: str) -> None:
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return
+    for field_key, raw_field in properties.items():
+        if not isinstance(field_key, str) or not _looks_like_field_definition(raw_field):
+            continue
+        field = dict(raw_field) if isinstance(raw_field, dict) else {}
+        if "label" not in field:
+            field["label"] = _schema_i18n_label(schema, field_key)
+        out.setdefault(field_key, _payload_field_param(field_key, field, location))
 
 
 def _add_component_fields(out: dict[str, Any], components: object, location: str) -> None:
@@ -592,7 +647,7 @@ def _extract_payload_form_fields(catalog: dict[str, Any], root_label: str = "cat
             return
         schema = node.get("schema")
         if isinstance(schema, dict):
-            _add_mapping_fields(fields, schema.get("properties"), f"{path}.schema.properties")
+            _add_schema_properties(fields, schema, f"{path}.schema.properties")
         _add_mapping_fields(fields, node.get("properties"), f"{path}.properties")
         _add_mapping_fields(fields, node.get("processForm"), f"{path}.processForm")
         _add_mapping_fields(fields, node.get("process_form"), f"{path}.process_form")
