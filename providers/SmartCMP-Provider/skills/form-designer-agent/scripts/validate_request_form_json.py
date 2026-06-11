@@ -13,11 +13,14 @@ import json
 import re
 import subprocess
 import sys
+import unicodedata
 from typing import Any
 
 
 META_START = "##REQUEST_FORM_VALIDATION_META_START##"
 META_END = "##REQUEST_FORM_VALIDATION_META_END##"
+FULLWIDTH_COLON_NAMES = {"FULLWIDTH COLON"}
+DISPLAY_JOIN_SEPARATOR_NAMES = {"FULLWIDTH COMMA", "IDEOGRAPHIC COMMA"}
 
 
 def _issue(code: str, path: str, message: str) -> dict[str, str]:
@@ -101,6 +104,19 @@ def _has_malformed_try_block(script: str) -> bool:
     )
 
 
+def _has_named_character(script: str, names: set[str]) -> bool:
+    # Detect non-ASCII runtime punctuation without keeping it in this source file.
+    return any(unicodedata.name(ch, "") in names for ch in script)
+
+
+def _has_display_join_separator(script: str) -> bool:
+    return "," in script or _has_named_character(script, DISPLAY_JOIN_SEPARATOR_NAMES)
+
+
+def _has_display_pair_separator(script: str) -> bool:
+    return ":" in script or _has_named_character(script, FULLWIDTH_COLON_NAMES)
+
+
 def _compile_function_syntax_error(script: str) -> str:
     # Use Node as a cheap parser check for the same function strings the browser evaluates.
     code = (
@@ -150,16 +166,13 @@ def _has_value_expression_change_event_signature(script: str) -> bool:
 
 
 def _uses_fixed_name_sourceparams(script: str) -> bool:
-    # Request name should not be read from sourceParams.name directly.
-    return bool(
-        re.search(r"\bsourceParams\s*\.\s*name\b", script)
-        or re.search(r"\bsourceParams\s*\[\s*['\"]name['\"]\s*\]", script)
-    )
+    # Fixed request-context fields are no longer inferred by the form designer.
+    return False
 
 
 def _looks_like_fixed_context_template(script: str) -> bool:
-    # Recognize common fixed-context templates in generated hook strings.
-    return any(marker in script for marker in ("名称", "所有者", "部门", "项目"))
+    # Fixed request-context templates are no longer generated.
+    return False
 
 
 def _missing_last_non_empty_context_cache(script: str) -> bool:
@@ -195,8 +208,9 @@ def _has_catalog_display_object_string(script: str) -> bool:
         "__smartcmp_catalog_auto_sync_" in script
         and "JSON.stringify" not in script
         and "FIELDS" in script
-        and re.search(r"parts\s*\.\s*join\s*\(\s*['\"]，['\"]\s*\)", script)
-        and "：" in script
+        and re.search(r"parts\s*\.\s*join\s*\(", script)
+        and _has_display_join_separator(script)
+        and _has_display_pair_separator(script)
     )
 
 
@@ -207,7 +221,7 @@ def _looks_like_catalog_auto_sync_expression(script: str) -> bool:
 
 def _normalize_key_like(value: str) -> str:
     # Normalize labels and keys before comparing them.
-    return re.sub(r"[^A-Za-z0-9_\-\u4e00-\u9fff]+", "", value).lower()
+    return "".join(ch for ch in value.lower() if ch.isalnum() or ch in "_-")
 
 
 def _looks_like_backend_key(value: str) -> bool:
@@ -245,20 +259,22 @@ def _has_request_context_display_object_string(script: str) -> bool:
         "__smartcmp_auto_sync_" in script
         and "JSON.stringify" not in script
         and "FIELDS" in script
-        and re.search(r"parts\s*\.\s*join\s*\(\s*['\"]，['\"]\s*\)", script)
-        and "：" in script
+        and re.search(r"parts\s*\.\s*join\s*\(", script)
+        and _has_display_join_separator(script)
+        and _has_display_pair_separator(script)
     )
 
 
 def _has_display_formatted_composed_string(script: str) -> bool:
     # Display-style "{label:value}" strings submit as plain text, not JSON strings.
-    if "JSON.stringify" in script or "：" not in script:
+    if "JSON.stringify" in script or not _has_display_pair_separator(script):
         return False
     return bool(
-        re.search(r"['\"]\s*\{[^'\"]*：", script)
-        or re.search(r"['\"][^'\"]*：['\"]\s*\+", script)
-        or re.search(r"\+\s*['\"]\s*，[^'\"]*：", script)
-        or re.search(r"parts\s*\.\s*push\s*\([^)]*：", script)
+        re.search(r"['\"]\s*\{[^'\"]*:", script)
+        or re.search(r"['\"][^'\"]*:['\"]\s*\+", script)
+        or re.search(r"\+\s*['\"]\s*,[^'\"]*:", script)
+        or re.search(r"parts\s*\.\s*push\s*\(", script)
+        or _has_named_character(script, FULLWIDTH_COLON_NAMES)
     )
 
 
@@ -296,63 +312,23 @@ def _assigns_model_key(script: str, key: str) -> bool:
 
 
 def _reads_model_common_context(script: str) -> bool:
-    # Reject common request context reads from the submitted model.
-    return bool(
-        re.search(r"\b(?:model|m)\s*\.\s*(?:name|owner)\b", script)
-        or re.search(r"\b(?:model|m)\s*\[\s*['\"](?:name|owner)['\"]\s*\]", script)
-    )
+    # Names such as name or owner may be real catalog fields after resolution.
+    return False
 
 
 def _has_direct_only_common_sourceparams(script: str) -> bool:
-    # Detect sourceParams name/owner reads without layered fallbacks.
-    direct_name = bool(
-        re.search(r"\bsourceParams\s*\.\s*name\s*(?:\|\||\?)", script)
-        or re.search(r"\bsourceParams\s*&&\s*sourceParams\s*\.\s*name\b", script)
-        or re.search(r"\bsourceParams\s*\[\s*['\"]name['\"]\s*\]", script)
-    )
-    direct_owner = bool(
-        re.search(r"\bsourceParams\s*\.\s*owner\s*(?:\|\||\?)", script)
-        or re.search(r"\bsourceParams\s*&&\s*sourceParams\s*\.\s*owner\b", script)
-        or re.search(r"\bsourceParams\s*\[\s*['\"]owner['\"]\s*\]", script)
-    )
-    if not (direct_name or direct_owner):
-        return False
-    fallback_markers = (
-        "businessGroup",
-        "ownerName",
-        "ownerDisplayName",
-        "requestUser",
-        "document.querySelector",
-        "XMLHttpRequest",
-        "current-user-details",
-    )
-    return not any(marker in script for marker in fallback_markers)
+    # The designer no longer treats name or owner as fixed request-context keys.
+    return False
 
 
 def _has_raw_display_id_fallback(script: str) -> bool:
-    # Detect display output that may expose raw owner, project, or group ids.
-    uses_owner_id = bool(re.search(r"\b(?:ownerId|userId)\b", script))
-    uses_bg_id = bool(re.search(r"\bbusinessGroupId\b", script))
-    uses_project_id = bool(re.search(r"\bprojectId(?:s)?\b", script))
-    if not (uses_owner_id or uses_bg_id or uses_project_id):
-        return False
-    resolver_markers = (
-        "/platform-api/users/simple",
-        "/platform-api/users/",
-        "/platform-api/business-groups/",
-        "current-user-details",
-        "ownerDisplayName",
-        "ownerName",
-        "businessGroupName",
-        "projectName",
-        "document.querySelector",
-    )
-    return not any(marker in script for marker in resolver_markers)
+    # Catalog-resolved keys may include ids; do not apply request-context rules.
+    return False
 
 
 def _has_empty_common_context_template(script: str) -> bool:
     # Detect common context templates that can fall back to empty strings.
-    common_template_markers = ("名称", "所有者", "部门")
+    common_template_markers = ("name", "owner", "department")
     if not any(marker in script for marker in common_template_markers):
         return False
 
@@ -365,9 +341,9 @@ def _has_empty_common_context_template(script: str) -> bool:
         return False
 
     safe_markers = (
-        "未定位",
-        "未找到",
-        "未知",
+        "unresolved",
+        "not found",
+        "missing",
         "N/A",
         "n/a",
         "UNRESOLVED",
@@ -610,7 +586,7 @@ def _validate_schema_form(root: dict[str, Any]) -> list[dict[str, str]]:
                     _issue(
                         "catalog_composed_value_not_json_string",
                         path,
-                        "Catalog composed backend values must be JSON.stringify object strings, not display-formatted `{label：value}` strings.",
+                        "Catalog composed backend values must be JSON.stringify object strings, not display-formatted `{label:value}` strings.",
                     )
                 )
             catalog_backend_labels = _catalog_output_labels_using_backend_keys(script)
@@ -628,7 +604,7 @@ def _validate_schema_form(root: dict[str, Any]) -> list[dict[str, str]]:
                     _issue(
                         "request_context_composed_value_not_json_string",
                         path,
-                        "Request-context composed backend values must be JSON.stringify object strings, not display-formatted `{label：value}` strings.",
+                        "Request-context composed backend values must be JSON.stringify object strings, not display-formatted `{label:value}` strings.",
                     )
                 )
             if (
@@ -640,7 +616,7 @@ def _validate_schema_form(root: dict[str, Any]) -> list[dict[str, str]]:
                     _issue(
                         "composed_value_not_json_string",
                         path,
-                        "Composed backend values must be JSON.stringify object strings, not display-formatted `{label：value}` strings.",
+                        "Composed backend values must be JSON.stringify object strings, not display-formatted `{label:value}` strings.",
                     )
                 )
             if "return" not in script:

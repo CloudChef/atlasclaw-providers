@@ -83,6 +83,16 @@ OUTPUT_DELIVERY_CONTRACT = {
     "fileOutputAllowed": False,
     "artifactOutputAllowed": False,
     "downloadOutputAllowed": False,
+    "localFileOutputAllowed": False,
+    "workspaceWriteAllowedForGeneratedJson": False,
+    "mustInlineCompleteJsonTextInChat": True,
+    "forbiddenDeliveryMethods": [
+        "local_file_path",
+        "workspace_artifact",
+        "download_link",
+        "attachment",
+        "partial_json_plus_file_reference",
+    ],
     "requiredFormat": "single_fenced_json_block",
 }
 

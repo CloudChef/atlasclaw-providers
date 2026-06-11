@@ -18,13 +18,14 @@ Supported modes:
   JSON and modify only the requested parts.
 - Existing pasted JSON: preserve the shape and modify only the requested
   parts.
-Return the generated JSON as chat text in one fenced `json` code block, and
-the fenced JSON block must contain the bare JSON value itself. Do not wrap
-schema-only output in
+Return the complete generated JSON as chat text in one fenced `json` code block,
+and the fenced JSON block must contain the bare JSON value itself. Do not wrap schema-only output in
 `designerPasteJson`, `content`, `metadata`, or another outer object unless the
 user explicitly asks for a diagnostic envelope. Do not create, write, attach,
 or mention a `.json` file. Do not use workspace artifacts or download links.
-Never say the file has been written to the workspace. Output to chat only.
+Never return a local path, truncated JSON with a file reference, or
+instructions to open a generated file. Never say the file has been written to
+the workspace. Output to chat only.
 
 ## Shape
 
@@ -130,7 +131,7 @@ or a composed value. User-entered fields do not need dynamic lookup.
 Successful existing form scripts use field-level SmartCMP hooks, not a
 separate computed-field DSL. Put `config.changeEvent` under
 `properties.<fieldKey>.config.changeEvent` for schema-only output, or under `schema.properties.<fieldKey>.config.changeEvent` for complete model/schema/options output. `config.value.customFunction` is also valid when
-the field's value source runs it. For automatic common request context sync, use a rendered backend field with `config.value.source: mock`, `method: mock`, and one-line `config.value.expression`; generators hide composed backend fields off-screen by default while preserving submission. Do not put dynamic logic in root-level changeEvent; do not put field definitions under `options.fields`.
+the field's value source runs it. For automatic service-catalog context sync, use a rendered backend field with `config.value.source: mock`, `method: mock`, and one-line `config.value.expression`; generators hide composed backend fields off-screen by default while preserving submission. Do not put dynamic logic in root-level changeEvent; do not put field definitions under `options.fields`.
 For `config.value.expression` mock watcher, use `function(model, sourceParams, schema, ...)`; do not use the changeEvent signature there.
 
 A change event string uses the parameter order
@@ -143,14 +144,12 @@ renderer expects a return value.
 If the backend value is composed from multiple fields, the assigned value must
 be a JSON object string created with `JSON.stringify`, not display text.
 customFunction must also assign `model[backendKey] = value`; do not generate
-`model.name || ''` or `model.owner || ''` for common request context, and do
-not generate direct-only `sourceParams.name` or `sourceParams.owner` reads.
-For fixed request fields, use `sourceParams.businessGroupId`,
-`sourceParams.projectId`, and `sourceParams.ownerId` when reading department,
-project, and owner from a form hook. The request name is not passed as
-`sourceParams.name`; read it from the submit payload hook when available or
-from the request page DOM/model fallback.
-Do not compose empty common context templates, for example name/owner or department/owner blank values; use a non-empty unresolved marker instead.
+`model.name || ''` or `model.owner || ''` as shortcuts for service-catalog
+fields, and do not generate direct-only `sourceParams.name` or
+`sourceParams.owner` reads. Fields such as department, project, owner, and name
+are normal requested fields unless the user says they come from a service
+catalog; in that case resolve them from the specified catalog detail first.
+Do not compose empty catalog context templates; use a non-empty unresolved marker instead.
 
 Working runtime patterns are derived from successful forms, not hardcoded URLs
 or UUIDs:
@@ -177,8 +176,7 @@ field. Other hooks still need an actual editable trigger field or known source
 evidence.
 
 For refresh behavior, remember that changeEvent runs only when its owning field changes, and the owning field must allow request modification. Do not
-rely on submit to refresh computed values. If a value should be recomputed on demand, provide a visible editable trigger field. When no user-entered refresh field is wanted for common request context, use a rendered backend field with a mock expression watcher and default `AUTO_SYNC_PENDING`; generated composed backend fields are hidden off-screen by default while still submitting. For fixed request-context fields (name/owner/department/project), generate from the requested backend key and field list; do not hard-code example keys, labels, or field combinations. Composed fixed-field backend values must be JSON.stringify object strings, not `{label:value}` display text. Read Angular scope/API before DOM (`vm.deploymentObj.name`, `vm.selectedUser`/`sourceConfigParamter.ownerId`); never read `sourceParams.name` for request name, never concatenate raw `ownerId` or `selectedUser.id` as owner display text, never read fixed context from `window.vm`, `window.sourceConfigParamter`, or unqualified global `vm`, do not use jQuery owner selectors, do not store watcher state in a local `var interval = null`, do not clear the watcher interval inside its callback after the first computed value, and do not use a one-shot DOM query. Retain the last non-empty value for each fixed field; guard `model[backendKey]` with `Object.defineProperty` so empty renderer writes are ignored; never overwrite a correct computed value with empty or unresolved context; if the current read is empty, return the previous good field/model value and do not write; do not skip `write()` only because the computed value is unchanged; throttle input/change dispatches and restore DOM/model silently for the same computed value. Missing watcher is invalid; return the computed value instead of literal `AUTO_SYNC_PENDING`. Clear the previous interval before starting a new one, assign the model key, write the DOM input, call Angular ngModel `$setViewValue`/`$render`/`$applyAsync` when available, return the computed value, and dispatch `input` and `change` events on the target input so the rendered control and submitted model stay in sync.
-If the user explicitly asks fixed context values to appear as separate visible business properties plus a composed field, generate guarded raw source fields plus the hidden-submitted composed field with the request-context generator. Raw source fields stay visible raw strings; only the composed backend field submits a JSON object string. Preserve the requested display meaning, for example business group versus department, while using the same department/businessGroupId runtime locator.
+rely on submit to refresh computed values. If a value should be recomputed on demand, provide a visible editable trigger field. When no user-entered refresh field is wanted for service-catalog context, use a rendered backend field with a mock expression watcher and default `AUTO_SYNC_PENDING`; generated composed backend fields are hidden off-screen by default while still submitting. Generate from the requested backend key and catalog-resolved field list; do not hard-code example keys, labels, or field combinations. Composed backend values must be JSON.stringify object strings, not `{label:value}` display text. Retain the last non-empty value for each catalog field; guard `model[backendKey]` with `Object.defineProperty` so empty renderer writes are ignored; never overwrite a correct computed value with empty or unresolved context. Missing watcher is invalid; return the computed value instead of literal `AUTO_SYNC_PENDING`. Clear the previous interval before starting a new one, assign the model key, write the DOM input, call Angular ngModel `$setViewValue`/`$render`/`$applyAsync` when available, return the computed value, and dispatch `input` and `change` events on the target input so the rendered control and submitted model stay in sync.
 Do not set fields that own dynamic hooks to `readOnly`, `readonly`, or
 `config.modification.allowInRequest: false`; that prevents reliable change
 events and request-time synchronization.
@@ -191,36 +189,17 @@ renderer executes it; do not add `_trigger_*` fields solely for refresh.
 
 ## Catalog Context
 
-Common resource request fields are department, project, owner, and name. These
-common fields can be dynamically read from the request page. Do not call catalog
-tools for common resource request fields only. For fixed request fields
-department, project, owner, and name, do not ask for a service catalog name or
-URL, inspect Request Parameter Instructions, or call
-`smartcmp_form_designer_get_catalog_detail`/`smartcmp_form_designer_list_services`
-for department, project, owner, or name.
-The fixed SmartCMP request-page keys are:
+Do not special-case department, project, owner, or name. If a value should read
+one of these fields from a service catalog, ask the user for the specific
+service catalog name or URL, then read the catalog detail and resolve the exact
+field key. If the user asks for these names as normal user-entered fields,
+generate ordinary visible input fields from the requested form requirements.
 
-- Department/business group: request page `vm.deploymentObj.businessGroupId`,
-  form hook `sourceConfigParamter.businessGroupId`, submit payload
-  `businessGroupId`.
-- Project: request page `vm.selectedGroup`, form hook
-  `sourceConfigParamter.projectId`, submit payload `projectId`.
-- Owner: request page `vm.selectedUser.id`, form hook
-  `sourceConfigParamter.ownerId`, submit payload `ownerId`.
-- Name: request page `vm.deploymentObj.name`, submit payload `name`. Name is
-  not passed into `catalog-form` as `sourceConfigParamter.name`.
-
-Treat business group, project, and owner values as ids; resolve ids through
-SmartCMP APIs or DOM before concatenating human-readable output strings.
-Do not generate common resource request fields as user input fields just to read request context. When the user explicitly asks those fixed context values to be visible business properties, generate raw synchronized source fields plus the hidden-submitted composed field instead of hand-writing JavaScript. The composed field submits a JSON object string; raw synchronized source fields remain visible ordinary strings. Do not use common resource request fields as refresh trigger fields. Read common values from `sourceParams`, schema/source context, current request page DOM, or browser-accessible SmartCMP APIs. Do not read common request context from `model.name` or `model.owner` in a new generated form; those model keys exist only if a fetched source form already defines them as real form fields.
-If a manual refresh is needed, use a non-common refresh trigger field such as
-`refresh_backend_test`.
-User-filled special fields do not need a service catalog name or URL. Examples
+User-filled fields do not need a service catalog name or URL. Examples
 include CPU core count, IP address, environment text, tags, or other values the
-applicant will type into the form. Use catalog lookup only when a
-catalog-specific field must be dynamic from catalog context and is outside the
-fixed/common request field set above.
-For named service catalogs, first scan Request Parameter Instructions or catalog payload fields and run `smartcmp_form_designer_resolve_catalog_fields` with the user's exact output labels to map requested labels to exact keys and resolve requested labels to label=key pairs before generating dynamic JSON. Preserve labels from the user's phrase or template; do not replace requested labels with resolved backend keys. Only department, project, owner, and name are fixed request-context fields; every other dynamic field must come from catalog metadata unless the user says it is manually entered. For mixed composed values, pass fixed fields as `@request:department`, `@request:project`, `@request:owner`, or `@request:name`, and pass catalog-specific fields as scanned `label=key` pairs. Do not guess keys from display labels; use only exact key/label/evidence matches from catalog detail. If the requested form has only one field or the user provides a template like `{A:A value,B:B value}`, resolved catalog keys are runtime sources only and must not become visible form fields. After resolver success, call `smartcmp_generate_catalog_context_form` immediately with `label=key` pairs and a hidden-submitted mock expression watcher; do not ask whether the composed field should be visible. Its submitted backend value is a JSON object string, not `{label:value}` display text. If the same form also has user-entered custom fields such as priority, show only those custom fields.
+applicant will type into the form. Use catalog lookup only when a field must be
+dynamic from service catalog context.
+For named service catalogs, first scan Request Parameter Instructions or catalog payload fields and run `smartcmp_form_designer_resolve_catalog_fields` with the user's exact output labels to map requested labels to exact keys and resolve requested labels to label=key pairs before generating dynamic JSON. Preserve labels from the user's phrase or template; do not replace requested labels with resolved backend keys. Do not guess keys from display labels; use only exact key/label/evidence matches from catalog detail. If the requested form has only one field or the user provides a template like `{A:A value,B:B value}`, resolved catalog keys are runtime sources only and must not become visible form fields. After resolver success, call `smartcmp_generate_catalog_context_form` immediately with `label=key` pairs and a hidden-submitted mock expression watcher; do not ask whether the composed field should be visible. Its submitted backend value is a JSON object string, not `{label:value}` display text. If the same form also has user-entered custom fields such as priority, show only those custom fields.
 
 When the user provides a service catalog URL with a UUID, call
 `smartcmp_form_designer_get_catalog_detail` and read exact Request Parameter
@@ -230,8 +209,10 @@ and disambiguate if needed.
 
 Do not call `smartcmp_prepare_request_form` repeatedly to discover catalog
 fields. Do not ask the user for internal field keys when read-only catalog
-tools can inspect them. If prepare metadata returns `catalogLookupGate`, stop
-JSON generation and resolve the catalog/detail key mapping first.
+tools can inspect them. Ask the user for the service catalog only when the
+request requires a service-catalog field and no catalog name or URL was
+provided. If prepare metadata returns `catalogLookupGate`, stop JSON generation
+and resolve the catalog/detail key mapping first.
 
 ## JSON Validation
 
@@ -241,7 +222,8 @@ syntax-valid and must keep field parameters in the supported locations:
 `schema.properties.<fieldKey>` for content or complete configurations.
 Run `smartcmp_validate_request_form_json` before returning generated JSON; fix
 any reported hidden dynamic fields, missing returns, model common-field reads,
-direct-only `sourceParams.name`/`sourceParams.owner` reads, or empty common context templates.
+direct-only local-name reads such as `sourceParams.name`/`sourceParams.owner`,
+or empty catalog context templates.
 
 ## Review Checklist
 

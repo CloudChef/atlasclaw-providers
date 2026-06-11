@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import unicodedata
 from typing import Any
 
 
@@ -24,40 +25,9 @@ RESOURCE_SPEC_RESERVED = {
     "resourceBundleParams",
     "resourceBundleTags",
 }
-FIXED_REQUEST_CONTEXT_ALIASES = {
-    "department": {
-        "部门",
-        "业务组",
-        "业务群组",
-        "business group",
-        "business_group",
-        "businessGroupName",
-        "businessGroupId",
-        "department",
-        "departmentName",
-    },
-    "project": {
-        "项目",
-        "project",
-        "projectName",
-        "projectId",
-    },
-    "owner": {
-        "所有者",
-        "负责人",
-        "owner",
-        "ownerName",
-        "ownerDisplayName",
-        "requestUserName",
-    },
-    "name": {
-        "名称",
-        "表单名称",
-        "服务名称",
-        "name",
-        "service_name",
-    },
-}
+FIELD_SEPARATOR_NAMES = {"FULLWIDTH COMMA", "IDEOGRAPHIC COMMA"}
+
+
 def _clean(value: Any) -> str:
     if value is None:
         return ""
@@ -66,7 +36,7 @@ def _clean(value: Any) -> str:
 
 def _normalize(value: Any) -> str:
     text = _clean(value).lower()
-    return "".join(ch for ch in text if ch.isalnum() or "\u4e00" <= ch <= "\u9fff")
+    return "".join(ch for ch in text if ch.isalnum())
 
 
 def _looks_like_backend_key(value: str) -> bool:
@@ -81,7 +51,11 @@ def _looks_like_backend_key(value: str) -> bool:
 
 def _split_labels(value: str) -> list[str]:
     labels: list[str] = []
-    for item in re.split(r"[,，、]+", value.strip()):
+    normalized = "".join(
+        "," if ch in {",", "\n"} or unicodedata.name(ch, "") in FIELD_SEPARATOR_NAMES else ch
+        for ch in value.strip()
+    )
+    for item in re.split(r",+", normalized):
         item = item.strip()
         if item and item not in labels:
             labels.append(item)
@@ -181,29 +155,19 @@ def _matches_candidate_text(label: str, candidate: dict[str, Any]) -> bool:
     if target in _candidate_tokens(candidate):
         return True
     evidence = _normalize(_candidate_evidence(candidate))
-    if len(target) >= 2 and bool(evidence) and target in evidence:
+    # Substring evidence matching is useful for CJK descriptions, but short
+    # ASCII labels such as "name" must not match unrelated keys like ownerName.
+    raw_label = _clean(label)
+    can_use_substring = (
+        any(ord(ch) > 127 for ch in target)
+        or bool(re.search(r"\s", raw_label))
+    )
+    if len(target) >= 2 and bool(evidence) and can_use_substring and target in evidence:
         return True
     return False
 
 
-def _fixed_request_context_candidate(label: str) -> dict[str, str] | None:
-    normalized = _normalize(label)
-    for key, aliases in FIXED_REQUEST_CONTEXT_ALIASES.items():
-        normalized_aliases = {_normalize(alias) for alias in aliases}
-        if normalized == _normalize(key) or normalized in normalized_aliases:
-            return {
-                "key": f"@request:{key}",
-                "label": label,
-                "source": "requestContext.fixed",
-            }
-    return None
-
-
 def _resolve_one(label: str, candidates: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
-    fixed = _fixed_request_context_candidate(label)
-    if fixed:
-        return fixed, []
-
     matches = [candidate for candidate in candidates if _matches_candidate_text(label, candidate)]
     if len({item["key"] for item in matches}) == 1:
         return matches[0], []

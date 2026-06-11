@@ -136,13 +136,15 @@ def test_fetch_request_form_source_accepts_service_model_form_url(monkeypatch):
     assert meta["designerOutputContract"]["expertModePreviewDefault"] == "schema_only"
     assert meta["designerOutputContract"]["previewPasteTargets"]["visual_designer_expert_mode"] == "schema_only"
     assert meta["artifactAllowed"] is False
-    assert meta["outputDeliveryContract"] == {
-        "delivery": "chat_json_text_only",
-        "fileOutputAllowed": False,
-        "artifactOutputAllowed": False,
-        "downloadOutputAllowed": False,
-        "requiredFormat": "single_fenced_json_block",
-    }
+    assert meta["outputDeliveryContract"]["delivery"] == "chat_json_text_only"
+    assert meta["outputDeliveryContract"]["fileOutputAllowed"] is False
+    assert meta["outputDeliveryContract"]["artifactOutputAllowed"] is False
+    assert meta["outputDeliveryContract"]["downloadOutputAllowed"] is False
+    assert meta["outputDeliveryContract"]["localFileOutputAllowed"] is False
+    assert meta["outputDeliveryContract"]["workspaceWriteAllowedForGeneratedJson"] is False
+    assert meta["outputDeliveryContract"]["mustInlineCompleteJsonTextInChat"] is True
+    assert "local_file_path" in meta["outputDeliveryContract"]["forbiddenDeliveryMethods"]
+    assert meta["outputDeliveryContract"]["requiredFormat"] == "single_fenced_json_block"
     assert meta["retention"] == "schema_form_json"
     assert meta["interactionSurface"] == "smartcmp_platform_service_model_form"
     assert "handoffSkill" not in meta
