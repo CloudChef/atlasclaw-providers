@@ -21,7 +21,7 @@ SHARED_SCRIPTS_DIR = SCRIPT_DIR.parents[1] / "shared" / "scripts"
 if str(SHARED_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SHARED_SCRIPTS_DIR))
 
-from _common import render_markdown_table, require_config  # noqa: E402
+from _common import require_config  # noqa: E402
 
 
 DEFAULT_RESOURCE_CATEGORY = "virtual-machines"
@@ -217,7 +217,6 @@ def render_operation_list(
         lines.append("No executable no-parameter operations were returned for the current user.")
         return "\n".join(lines)
 
-    rows = []
     for index, operation in enumerate(operations, start=1):
         item = normalize_operation(index, operation)
         suffixes = []
@@ -227,8 +226,8 @@ def render_operation_list(
             suffixes.append("batch")
         if item["supportScheduledTask"]:
             suffixes.append("scheduled")
-        rows.append([index, item["displayName"], item["id"], "; ".join(suffixes)])
-    lines.append(render_markdown_table("", ["#", "Operation", "ID", "Flags"], rows).lstrip())
+        suffix = f" | {'; '.join(suffixes)}" if suffixes else ""
+        lines.append(f"  [{index}] {item['displayName']} ({item['id']}){suffix}")
 
     return "\n".join(lines)
 

@@ -147,8 +147,7 @@ def test_main_queries_resource_scoped_user_operations_and_emits_metadata(monkeyp
     assert calls["headers"]["CloudChef-Authenticate"] == "token"
     assert calls["verify"] is False
     assert calls["timeout"] == 30
-    assert "| # | Operation | ID | Flags |" in output
-    assert "| 1 | REFRESH_RESOURCE | refresh | MACHINE_TOP_ACTION; batch |" in output
+    assert "REFRESH_RESOURCE (refresh)" in output
     assert "STOP" not in output
     assert meta[0]["id"] == "refresh"
     assert meta[0]["supportBatchAction"] is True
