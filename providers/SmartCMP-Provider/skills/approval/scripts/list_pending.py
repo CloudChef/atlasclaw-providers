@@ -10,7 +10,7 @@ Arguments:
   --days N    Query pending approvals updated within the last N days
 
 Output:
-  - Detailed list of pending approval items with priority analysis
+  - Standard Markdown table of pending approval items with priority analysis
   - ##APPROVAL_META_START## ... ##APPROVAL_META_END##
       JSON array with full structured info for agent processing
 
@@ -37,7 +37,7 @@ from typing import Any, Optional
 import requests
 
 try:
-    from _common import require_config
+    from _common import build_approval_object_actions, require_config
 except ImportError:
     import os
 
@@ -45,7 +45,7 @@ except ImportError:
         0,
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shared", "scripts"),
     )
-    from _common import require_config
+    from _common import build_approval_object_actions, require_config
 
 from _approval_validation import request_id_from_item
 from _approval_specs import (
@@ -405,15 +405,27 @@ def build_meta(
     items: list[dict[str, Any]],
     *,
     now_ms: int,
+    base_url: str = "",
     flavor_names_by_id: Optional[dict[str, str]] = None,
 ) -> list[dict[str, Any]]:
-    """Build the structured approval meta payload."""
+    """Build the structured approval meta payload.
+
+    The visible Markdown table stays presentation-only. This sidecar payload is
+    what lets AtlasClaw bind row-level actions to the correct approval object
+    without requiring the provider to know how core renders buttons.
+    """
     meta: list[dict[str, Any]] = []
     for index, item in enumerate(items, start=1):
         meta.append(
             {
                 "index": index,
                 "requestId": _request_id(item),
+                "object_type": "approval_request",
+                "object_id": _request_id(item),
+                "object_name": item.get("name") or item.get("requestName") or "",
+                # Core matches these actions to the Markdown row by object
+                # identity/index and renders them as generic controls.
+                "object_actions": build_approval_object_actions(base_url, item),
                 "name": item.get("name") or item.get("requestName") or "",
                 "catalogName": item.get("catalogName") or "",
                 "applicant": item.get("applicant") or "",
@@ -458,7 +470,12 @@ def render_pending_table(
     now_ms: int,
     flavor_names_by_id: Optional[dict[str, str]] = None,
 ) -> str:
-    """Render pending approvals as a compact Markdown table."""
+    """Render pending approvals as a compact Markdown table.
+
+    Operation controls are intentionally not embedded in the Markdown text. They
+    travel in ``APPROVAL_META.object_actions`` so non-supporting renderers still
+    show a normal table while AtlasClaw can add clickable controls.
+    """
     lines = [
         f"Pending approvals - total {total} (sorted by updated time desc)",
         "",
@@ -488,7 +505,7 @@ def main(argv: list[str]) -> int:
     """Execute the pending approvals query and render output."""
     days = parse_days_from_argv(argv)
     now_ms = int(time.time() * 1000)
-    base_url, auth_token, headers, _instance = require_config()
+    base_url, _auth_token, headers, _instance = require_config()
     url = f"{base_url}/generic-request/current-activity-approval"
     params = build_pending_query_params(now_ms=now_ms, days=days)
 
@@ -532,8 +549,16 @@ def main(argv: list[str]) -> int:
     print(f"  Priority distribution: high {high_count} | medium {mid_count} | low {low_count}")
     print("")
 
-    meta = build_meta(items, now_ms=now_ms, flavor_names_by_id=flavor_names_by_id)
+    meta = build_meta(
+        items,
+        now_ms=now_ms,
+        base_url=base_url,
+        flavor_names_by_id=flavor_names_by_id,
+    )
 
+    # Keep machine-readable metadata on stderr. The agent consumes it silently to
+    # resolve row numbers, object IDs, and actions; the user only sees the table
+    # and the priority summary.
     print("##APPROVAL_META_START##", file=sys.stderr)
     print(
         json.dumps(

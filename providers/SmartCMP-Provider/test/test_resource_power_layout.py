@@ -40,6 +40,8 @@ def test_resource_skill_includes_power_tool():
     assert 'tool_operations_result_mode: "llm"' in skill_text
     assert "smartcmp_list_resource_operations" in skill_text
     assert "use this result as permission/operation validation evidence" in skill_text
+    assert '"resource_name"' in skill_text
+    assert '"required": []' in skill_text
     assert "tool_power_name:" in skill_text
     assert "tool_power_parameters:" in skill_text
     assert "smartcmp_operate_resource" in skill_text
@@ -56,7 +58,9 @@ def test_resource_skill_explains_operation_workflow_after_lookup():
     assert "action + index + name" in skill_text
     assert "stop 1 vm-a" in skill_text
     assert "LinUx-testd" not in skill_text
-    assert "Never pass a display name, list index, or natural-language phrase as `resource_id`" in skill_text
+    assert "use `resource_name` for name-based detail inspection" in skill_text
+    assert "call `smartcmp_resource_detail` with `resource_name` directly" in skill_text
+    assert "Do not call `smartcmp_list_all_resource` first just to resolve or display the name" in skill_text
     assert "latest explicit operation command supersedes older unfinished operation intent" in skill_text
     assert "Confirm this operation?" in skill_text
     assert "确认要执行吗？" not in skill_text

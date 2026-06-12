@@ -48,6 +48,16 @@ def extract_payload(output: str):
     return json.loads(match.group(1))
 
 
+def localized(default: str, zh_cn: str) -> dict[str, object]:
+    return {
+        "default": default,
+        "translations": {
+            "en-US": default,
+            "zh-CN": zh_cn,
+        },
+    }
+
+
 def make_alert():
     return {
         "id": "alert-1",
@@ -119,8 +129,16 @@ def test_main_emits_human_summary_and_analysis_block(monkeypatch):
         "assessment",
         "recommendations",
         "suggested_status_operation",
+        "object_type",
+        "object_id",
+        "object_name",
+        "object_actions",
     }
     assert payload["alert_ids"] == ["alert-1"]
+    assert payload["object_type"] == "alarm_alert"
+    assert payload["object_id"] == "alert-1"
+    assert payload["object_name"] == "vm-01"
+    assert payload["object_actions"] == []
     assert payload["facts"][0]["alert_id"] == "alert-1"
     assert payload["facts"][0]["rule"]["policy_id"] == "policy-1"
     assert payload["assessment"]["pattern"] == "persistent"
@@ -155,6 +173,52 @@ def test_main_degrades_when_optional_context_calls_fail(monkeypatch):
     assert payload["assessment"]["pattern"] == "persistent"
     assert payload["recommendations"]
     assert payload["suggested_status_operation"]["should_operate"] is False
+
+
+def test_main_exposes_suggested_alarm_operation_action(monkeypatch):
+    module = load_module()
+
+    def fake_get_json(path, *, params=None, timeout=30):
+        if path == "/alarm-alert/alert-1":
+            alert = make_alert()
+            alert["triggerCount"] = 8
+            alert["triggerAt"] = "2026-03-28T00:00:00Z"
+            alert["lastTriggerAt"] = "2026-03-28T01:00:00Z"
+            return alert
+        if path == "/alarm-policies/policy-1":
+            return make_policy()
+        if path in {
+            "/alarm-overview/recent",
+            "/alarm-overview/alarm-trend",
+            "/stats/alarm-alert/detail",
+        }:
+            return []
+        raise AssertionError(f"Unexpected path: {path}")
+
+    monkeypatch.setattr(module, "get_json", fake_get_json)
+
+    stdout = io.StringIO()
+    with redirect_stdout(stdout):
+        exit_code = module.main(["alert-1"])
+
+    payload = extract_payload(stdout.getvalue())
+    assert exit_code == 0
+    assert payload["suggested_status_operation"]["operation"] == "mute"
+    assert payload["object_actions"] == [
+        {
+            "action_id": "mute",
+            "kind": "agent_prompt",
+            "display_label": localized("Mute", "静音"),
+            "agent_prompt": localized("Mute alert alert-1", "静音告警 alert-1"),
+            "effect": "mutate",
+            "tone": "warning",
+            "requires_confirmation": True,
+            "confirmation_message": localized(
+                "Confirm mute alert alert-1?",
+                "确认静音告警 alert-1？",
+            ),
+        }
+    ]
 
 
 def test_main_enriches_resource_context_when_datasource_lookup_succeeds(monkeypatch):

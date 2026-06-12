@@ -11,7 +11,13 @@ import sys
 import requests
 
 try:
-    from _common import require_config
+    from _common import (
+        build_object_open_action,
+        build_object_prompt_action,
+        build_resource_page_href,
+        infer_resource_page_category,
+        require_config,
+    )
 except ImportError:
     import os
 
@@ -19,7 +25,13 @@ except ImportError:
         0,
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shared", "scripts"),
     )
-    from _common import require_config
+    from _common import (  # type: ignore
+        build_object_open_action,
+        build_object_prompt_action,
+        build_resource_page_href,
+        infer_resource_page_category,
+        require_config,
+    )
 
 try:
     from _cost_common import (
@@ -59,6 +71,8 @@ def normalize_violation(
         "policyName": item.get("policyName", ""),
         "resourceId": item.get("resourceId", ""),
         "resourceName": item.get("resourceName", ""),
+        "resourceType": item.get("resourceType", ""),
+        "componentType": item.get("componentType", ""),
         "status": item.get("status", ""),
         "severity": item.get("severity", ""),
         "category": item.get("category", ""),
@@ -74,6 +88,70 @@ def normalize_violation(
     if include_related_policy_count:
         normalized["relatedPolicyCount"] = max(0, int(item.get("relatedPolicyCount", 0) or 0))
     return normalized
+
+
+def escape_markdown_cell(value: object) -> str:
+    """Render one value safely inside a Markdown table cell."""
+    rendered = str(value or "").replace("\n", " ").replace("\r", " ").strip()
+    rendered = " ".join(rendered.split())
+    return rendered.replace("|", "\\|")
+
+
+def build_recommendation_object_actions(
+    item: dict,
+    *,
+    base_url: str = "",
+) -> list[dict[str, object]]:
+    """Build explicit UI actions for one cost optimization recommendation."""
+    violation_id = str(item.get("violationId") or "").strip()
+    resource_id = str(item.get("resourceId") or "").strip()
+    actions: list[dict[str, object]] = []
+    if violation_id:
+        action = build_object_prompt_action(
+            "view_detail",
+            label_en="View details",
+            label_zh="查看详情",
+            prompt_en=f"Analyze cost optimization recommendation {violation_id}",
+            prompt_zh=f"分析成本优化建议 {violation_id}",
+        )
+        if action:
+            actions.append(action)
+
+    resource_category = infer_resource_page_category(item)
+    if resource_id and base_url and resource_category:
+        href = build_resource_page_href(base_url, resource_id, category=resource_category)
+        action = build_object_open_action(
+            href,
+            action_id="open_resource",
+            label_en="Open resource",
+            label_zh="打开资源",
+        )
+        if action:
+            actions.append(action)
+    return actions
+
+
+def enrich_recommendation_object_metadata(
+    item: dict,
+    *,
+    base_url: str = "",
+) -> dict:
+    """Attach object identity and action metadata to a normalized recommendation."""
+    enriched = dict(item)
+    object_id = str(item.get("violationId") or "").strip()
+    object_name = str(item.get("policyName") or item.get("resourceName") or object_id).strip()
+    enriched.update(
+        {
+            "object_type": "cost_optimization_recommendation",
+            "object_id": object_id,
+            "object_name": object_name,
+            "object_actions": build_recommendation_object_actions(
+                item,
+                base_url=base_url,
+            ),
+        }
+    )
+    return enriched
 
 
 def format_summary_line(item: dict, with_related: bool = False, currency: str = "") -> str:
@@ -96,8 +174,47 @@ def format_summary_line(item: dict, with_related: bool = False, currency: str = 
     return " | ".join(parts)
 
 
-def render_output(items: list[dict], with_related_policies: bool = False,
-                  base_url: str = "", auth_token: str = "") -> str:
+def render_recommendation_table(
+    items: list[dict],
+    *,
+    with_related_policies: bool = False,
+    currency: str = "",
+) -> str:
+    """Render cost optimization recommendations as a standard Markdown table."""
+    headers = ["#", "Resource", "Policy", "Status", "Operation", "Saving"]
+    if with_related_policies:
+        headers.append("Related Policies")
+    lines = [
+        f"Found {len(items)} cost optimization recommendation(s):",
+        "",
+        "| " + " | ".join(headers) + " |",
+        "| " + " | ".join("---" for _ in headers) + " |",
+    ]
+    for item in items:
+        saving = item["monthlySaving"]
+        saving_text = "unknown"
+        if saving is not None:
+            saving_text = f"{currency}{saving:.2f}" if currency else f"{saving:.2f}"
+        row = [
+            item["index"],
+            item["resourceName"] or "unknown-resource",
+            item["policyName"] or "unknown-policy",
+            item["status"] or "UNKNOWN",
+            item["savingOperationType"] or "N/A",
+            saving_text,
+        ]
+        if with_related_policies:
+            row.append(item.get("relatedPolicyCount", 0))
+        lines.append("| " + " | ".join(escape_markdown_cell(value) for value in row) + " |")
+    return "\n".join(lines)
+
+
+def render_output(
+    items: list[dict],
+    with_related_policies: bool = False,
+    base_url: str = "",
+    auth_token: str = "",
+) -> str:
     """Render user-visible summary plus machine-readable metadata."""
     normalized = [
         normalize_violation(
@@ -108,16 +225,27 @@ def render_output(items: list[dict], with_related_policies: bool = False,
         for index, item in enumerate(items)
     ]
     currency = get_currency_symbol(base_url, auth_token) if (base_url or auth_token) else ""
+    meta = [
+        enrich_recommendation_object_metadata(
+            item,
+            base_url=base_url,
+        )
+        for item in normalized
+    ]
     lines = []
     if normalized:
-        lines.append(f"Found {len(normalized)} cost optimization recommendation(s):")
-        lines.append("")
-        lines.extend(format_summary_line(item, with_related_policies, currency) for item in normalized)
+        lines.append(
+            render_recommendation_table(
+                normalized,
+                with_related_policies=with_related_policies,
+                currency=currency,
+            )
+        )
     else:
         lines.append("No cost optimization recommendations found.")
     lines.append("")
     lines.append("##COST_RECOMMENDATION_META_START##")
-    lines.append(json.dumps(normalized, ensure_ascii=False))
+    lines.append(json.dumps(meta, ensure_ascii=False))
     lines.append("##COST_RECOMMENDATION_META_END##")
     return "\n".join(lines)
 
@@ -134,7 +262,7 @@ def main() -> int:
                         help="Show count of related policies in the same category.")
     args = parser.parse_args()
 
-    base_url, auth_token, headers, _ = require_config()
+    base_url, auth_token, headers, _instance = require_config()
     params = {}
     if args.status:
         params["status"] = args.status
@@ -187,7 +315,14 @@ def main() -> int:
             # Subtract 1 for the current policy
             item["relatedPolicyCount"] = max(0, total_policies - 1)
 
-    print(render_output(items, args.with_related_policies, base_url=base_url, auth_token=auth_token))
+    print(
+        render_output(
+            items,
+            args.with_related_policies,
+            base_url=base_url,
+            auth_token=auth_token,
+        )
+    )
     return 0
 
 

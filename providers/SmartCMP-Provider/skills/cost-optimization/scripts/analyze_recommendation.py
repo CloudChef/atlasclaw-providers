@@ -29,13 +29,25 @@ def _load_module_from_path(module_name: str, file_path: str):
     return module
 
 try:
-    from _common import require_config
+    from _common import (
+        build_object_open_action,
+        build_object_prompt_action,
+        build_resource_page_href,
+        infer_resource_page_category,
+        require_config,
+    )
 except ImportError:
     sys.path.insert(
         0,
         SHARED_SCRIPT_DIR,
     )
-    from _common import require_config
+    from _common import (  # type: ignore
+        build_object_open_action,
+        build_object_prompt_action,
+        build_resource_page_href,
+        infer_resource_page_category,
+        require_config,
+    )
 
 try:
     from _analysis import (
@@ -383,6 +395,59 @@ def build_analysis_payload(
     }
 
 
+def build_analysis_object_actions(payload: dict, *, base_url: str = "") -> list[dict[str, object]]:
+    """Build explicit UI actions for one cost optimization analysis result."""
+    violation_id = str(payload.get("violationId") or "").strip()
+    facts = payload.get("facts", {}) if isinstance(payload.get("facts"), dict) else {}
+    resource_id = str(facts.get("resourceId") or "").strip()
+    actions: list[dict[str, object]] = []
+    resource_category = infer_resource_page_category(facts)
+    if resource_id and base_url and resource_category:
+        href = build_resource_page_href(base_url, resource_id, category=resource_category)
+        action = build_object_open_action(
+            href,
+            action_id="open_resource",
+            label_en="Open resource",
+            label_zh="打开资源",
+        )
+        if action:
+            actions.append(action)
+
+    if violation_id and payload.get("suggestedNextStep") == "execute_fix":
+        action = build_object_prompt_action(
+            "execute",
+            label_en="Execute",
+            label_zh="执行",
+            prompt_en=f"Execute cost optimization recommendation {violation_id}",
+            prompt_zh=f"执行成本优化建议 {violation_id}",
+            confirmation_en=f"Confirm executing cost optimization recommendation {violation_id}?",
+            confirmation_zh=f"确认执行成本优化建议 {violation_id}？",
+            effect="mutate",
+            tone="warning",
+            requires_confirmation=True,
+        )
+        if action:
+            actions.append(action)
+    return actions
+
+
+def attach_analysis_object_metadata(payload: dict, *, base_url: str = "") -> dict:
+    """Attach object identity and action metadata to an analysis payload copy."""
+    enriched = dict(payload)
+    facts = payload.get("facts", {}) if isinstance(payload.get("facts"), dict) else {}
+    object_id = str(payload.get("violationId") or "").strip()
+    object_name = str(facts.get("policyName") or facts.get("resourceName") or object_id).strip()
+    enriched.update(
+        {
+            "object_type": "cost_optimization_recommendation",
+            "object_id": object_id,
+            "object_name": object_name,
+            "object_actions": build_analysis_object_actions(payload, base_url=base_url),
+        }
+    )
+    return enriched
+
+
 def render_analysis(payload: dict, base_url: str = "", auth_token: str = "") -> str:
     """Render human-readable text in English plus the structured payload block."""
     facts = payload["facts"]
@@ -465,7 +530,7 @@ def render_analysis(payload: dict, base_url: str = "", auth_token: str = "") -> 
     lines.extend([
         "",
         "##COST_ANALYSIS_START##",
-        json.dumps(payload, ensure_ascii=False),
+        json.dumps(attach_analysis_object_metadata(payload, base_url=base_url), ensure_ascii=False),
         "##COST_ANALYSIS_END##",
     ])
     return "\n".join(lines)

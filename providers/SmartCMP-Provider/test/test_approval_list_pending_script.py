@@ -48,6 +48,16 @@ class _FakeResponse:
         return self._payload
 
 
+def localized(default: str, zh_cn: str) -> dict[str, object]:
+    return {
+        "default": default,
+        "translations": {
+            "en-US": default,
+            "zh-CN": zh_cn,
+        },
+    }
+
+
 def test_build_pending_query_params_defaults_to_all_pending() -> None:
     module = _load_module()
 
@@ -128,6 +138,20 @@ def test_build_meta_accepts_request_id_alias_fields() -> None:
         "RES20260427000004",
         "TIC20260427000005",
         "CHG20260427000006",
+    ]
+    assert [item["object_actions"][0]["agent_prompt"] for item in meta] == [
+        localized(
+            "Show approval details for RES20260427000004",
+            "查看 RES20260427000004 的审批详情",
+        ),
+        localized(
+            "Show approval details for TIC20260427000005",
+            "查看 TIC20260427000005 的审批详情",
+        ),
+        localized(
+            "Show approval details for CHG20260427000006",
+            "查看 CHG20260427000006 的审批详情",
+        ),
     ]
 
 
@@ -361,6 +385,17 @@ def test_main_renders_newest_first_table_and_hides_internal_meta(monkeypatch) ->
     )[0]
     meta = json.loads(payload)
     assert [item["requestId"] for item in meta] == ["RES20260427000004", "RES20260426000003"]
+    assert meta[0]["object_type"] == "approval_request"
+    assert meta[0]["object_id"] == "RES20260427000004"
+    assert meta[0]["object_name"] == "Linux-test-agent"
+    assert [action["display_label"] for action in meta[0]["object_actions"]] == [
+        localized("View details", "查看详情")
+    ]
+    assert meta[0]["object_actions"][0]["agent_prompt"] == localized(
+        "Show approval details for RES20260427000004",
+        "查看 RES20260427000004 的审批详情",
+    )
+    assert "https://cmp.example.com/#/main/service-request/my-approval" not in rendered
     assert meta[0]["priority"] == "low"
     assert meta[0]["priorityFactors"] == []
     assert meta[1]["priority"] == "high"
@@ -371,6 +406,72 @@ def test_main_renders_newest_first_table_and_hides_internal_meta(monkeypatch) ->
     for internal_field in ("id", "workflowId", "internalRequestId", "taskId", "processInstanceId"):
         assert internal_field not in meta[0]
     assert "https://cmp.example.com/platform-api/flavors" not in called_urls
+
+
+def test_main_meta_derives_open_url_from_base_url_without_printing_raw_url(monkeypatch) -> None:
+    module = _load_module()
+    monkeypatch.setattr(
+        module,
+        "require_config",
+        lambda: (
+            "https://cmp.example.com/platform-api",
+            "token",
+            {"Cookie": "token"},
+            {
+                "base_url": "https://cmp.example.com/platform-api",
+            },
+        ),
+    )
+    monkeypatch.setattr(module.time, "time", lambda: 1_772_000_120)
+
+    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        assert url == "https://cmp.example.com/platform-api/generic-request/current-activity-approval"
+        return _FakeResponse(
+            {
+                "content": [
+                    {
+                        "id": "request-row-1",
+                        "workflowId": "RES20260427000004",
+                        "name": "Linux-test-agent",
+                        "catalogName": "Linux VM",
+                        "applicant": "Admin User",
+                        "createdDate": 1_772_000_000_000,
+                        "updatedDate": 1_772_000_060_000,
+                        "exts": {
+                            "approval_state": "PENDING",
+                            "approval_type": "PROVISION_BP",
+                            "approval_id": "approval-activity-1",
+                        },
+                    }
+                ],
+                "totalElements": 1,
+            }
+        )
+
+    monkeypatch.setattr(module.requests, "get", fake_get)
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    with redirect_stdout(stdout), redirect_stderr(stderr):
+        assert module.main([]) == 0
+
+    rendered = stdout.getvalue()
+    payload = stderr.getvalue().split("##APPROVAL_META_START##\n", 1)[1].split(
+        "\n##APPROVAL_META_END##",
+        1,
+    )[0]
+    meta = json.loads(payload)
+    expected_href = (
+        "https://cmp.example.com/#/main/new-application/"
+        "pendingApproval/PROVISION_BP/approval-activity-1?from=normal&fromPagePartUrl=SR_MY_APPROVAL"
+    )
+    assert meta[0]["object_actions"][1]["href"] == expected_href
+    assert meta[0]["object_actions"][0]["agent_prompt"] == localized(
+        "Show approval details for RES20260427000004",
+        "查看 RES20260427000004 的审批详情",
+    )
+    assert expected_href not in rendered
+    assert "https://cmp.example.com" not in rendered
 
 
 def test_main_returns_empty_specs_when_compute_profile_name_cannot_be_resolved(monkeypatch) -> None:

@@ -34,15 +34,39 @@ Direct Environment Variables (local scripts):
 import os
 import sys
 import json
+import re
 import urllib3
 import requests
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import quote, urlencode, urlparse, urlunparse
 
 # Suppress SSL warnings globally when this module is imported
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # API path that should be appended if missing
 _API_PATH = "/platform-api"
+_APPROVAL_DETAIL_FROM_PARAMS = {"from": "normal", "fromPagePartUrl": "SR_MY_APPROVAL"}
+_APPROVAL_APPLICATION_TYPES = {
+    "PROVISION_BP",
+    "TEAR_DOWN_APP",
+    "PROCESS_NEW_PROJECT",
+    "PROCESS_NEW_RESOURCEPOOL",
+    "PROCESS_EXPAND_VM",
+    "PROCESS_EXPAND_PROJECT",
+    "DAY2_OPERATION",
+    "PROCESS_EXPAND_RESOURCEPOOL",
+    "VM_OPERATION",
+    "TASK_EXECUTION_REQUEST",
+}
+_REQUEST_ID_PATTERN = re.compile(r"^[A-Z]{3}\d{14}$", re.IGNORECASE)
+_REQUEST_ID_FIELD_NAMES = (
+    "requestId",
+    "request_id",
+    "workflowId",
+    "workflow_id",
+    "requestNo",
+    "requestNumber",
+    "customizedId",
+)
 
 # SaaS environment detection
 # Domain suffix alone is not reliable because private deployments can also use
@@ -91,6 +115,548 @@ def normalize_url(url: str) -> str:
     ))
 
     return normalized
+
+
+def normalize_ui_base_url(url: str) -> str:
+    """Normalize a SmartCMP browser URL root for building user-facing links.
+
+    Args:
+        url: SmartCMP UI root or API root. Missing schemes default to HTTPS.
+
+    Returns:
+        Absolute UI base URL without a trailing slash or trailing ``/platform-api`` segment.
+    """
+    if not url:
+        return ""
+
+    normalized = url.strip()
+    if not normalized:
+        return ""
+    if not normalized.startswith(("http://", "https://")):
+        normalized = f"https://{normalized}"
+
+    parsed = urlparse(normalized)
+    path = parsed.path.rstrip("/")
+    if path.endswith(_API_PATH):
+        path = path[: -len(_API_PATH)].rstrip("/")
+
+    return urlunparse((
+        parsed.scheme,
+        parsed.netloc,
+        path,
+        "",
+        "",
+        "",
+    ))
+
+
+def build_ui_hash_href(ui_base_url: str, hash_route: str) -> str:
+    """Build an absolute SmartCMP hash-route URL.
+
+    Args:
+        ui_base_url: Browser-facing SmartCMP root.
+        hash_route: Route such as ``#/main/virtual-machines/<id>/details``.
+
+    Returns:
+        Absolute browser URL, or an empty string when the UI root is unavailable.
+    """
+    normalized_base_url = normalize_ui_base_url(ui_base_url)
+    if not normalized_base_url:
+        return ""
+
+    route = (hash_route or "").strip()
+    if not route:
+        return normalized_base_url
+    if route.startswith("/#/"):
+        return f"{normalized_base_url}{route}"
+    if route.startswith("#/"):
+        return f"{normalized_base_url}/{route}"
+    if route.startswith("/"):
+        return f"{normalized_base_url}/#{route}"
+    return f"{normalized_base_url}/#/{route}"
+
+
+def build_resource_page_href(
+    base_url: str,
+    resource_id: str,
+    category: str = "virtual-machines",
+) -> str:
+    """Build a SmartCMP resource detail page URL for object actions.
+
+    Args:
+        base_url: SmartCMP instance base URL.
+        resource_id: SmartCMP resource UUID or external route identifier.
+        category: SmartCMP UI resource category path segment.
+
+    Returns:
+        Absolute browser URL for the resource detail page.
+    """
+    ui_base_url = normalize_ui_base_url(base_url)
+    encoded_resource_id = quote(str(resource_id or ""), safe="")
+    if not encoded_resource_id:
+        return ""
+    normalized_category = str(category or "virtual-machines").strip("/")
+    return build_ui_hash_href(
+        ui_base_url,
+        f"#/main/{normalized_category}/{encoded_resource_id}/details",
+    )
+
+
+def infer_resource_page_category(resource: dict | None) -> str:
+    """Infer the SmartCMP UI resource category only when the resource type is explicit.
+
+    Args:
+        resource: Resource-like metadata containing SmartCMP ``resourceType`` and/or
+            ``componentType`` fields.
+
+    Returns:
+        The UI route category for known resource shapes, or an empty string when a
+        safe object page cannot be inferred.
+    """
+    if not isinstance(resource, dict):
+        return ""
+
+    resource_type = str(resource.get("resourceType") or "").strip().lower()
+    component_type = str(resource.get("componentType") or "").strip().lower()
+    if resource_type in {"virtualmachine", "virtual_machine", "vm"}:
+        return "virtual-machines"
+    if "virtual_machine" in component_type:
+        return "virtual-machines"
+    if "machine.instance" in component_type or "windows_instance" in component_type:
+        return "virtual-machines"
+    return ""
+
+
+def _localized_text(default: str, *, zh_cn: str, en_us: str | None = None) -> dict[str, object]:
+    """Return the locale envelope consumed by AtlasClaw's generic action renderer."""
+    default_text = str(default or "").strip()
+    zh_text = str(zh_cn or "").strip()
+    en_text = str(en_us if en_us is not None else default_text).strip()
+    return {
+        "default": default_text,
+        "translations": {
+            "en-US": en_text,
+            "zh-CN": zh_text,
+        },
+    }
+
+
+def _display_label(en_us: str, zh_cn: str) -> dict[str, object]:
+    return _localized_text(en_us, zh_cn=zh_cn, en_us=en_us)
+
+
+def _agent_prompt(en_us: str, zh_cn: str) -> dict[str, object]:
+    return _localized_text(en_us, zh_cn=zh_cn, en_us=en_us)
+
+
+def _confirmation_message(en_us: str, zh_cn: str) -> dict[str, object]:
+    return _localized_text(en_us, zh_cn=zh_cn, en_us=en_us)
+
+
+def escape_markdown_cell(value: object) -> str:
+    """Render one value safely inside a Markdown table cell."""
+    rendered = str(value or "").replace("\n", " ").replace("\r", " ").strip()
+    rendered = " ".join(rendered.split())
+    return rendered.replace("|", "\\|")
+
+
+def render_markdown_table(summary: str, headers: list[str], rows: list[list[object]]) -> str:
+    """Render a provider script list result as a standard Markdown table.
+
+    Args:
+        summary: One-line count or empty-state summary shown above the table.
+        headers: Visible table header labels.
+        rows: Table row values aligned with ``headers``.
+
+    Returns:
+        Markdown table text. When ``rows`` is empty, only the summary is returned.
+    """
+    lines = [summary]
+    if not rows:
+        return "\n".join(lines)
+    lines.extend(
+        [
+            "",
+            "| " + " | ".join(headers) + " |",
+            "| " + " | ".join("---" for _ in headers) + " |",
+        ]
+    )
+    for row in rows:
+        lines.append("| " + " | ".join(escape_markdown_cell(value) for value in row) + " |")
+    return "\n".join(lines)
+
+
+def build_object_open_action(
+    href: str,
+    *,
+    action_id: str = "open_detail",
+    label_en: str = "Open",
+    label_zh: str = "打开",
+) -> dict[str, object] | None:
+    """Build a generic browser navigation action for a verified object URL.
+
+    Args:
+        href: Absolute SmartCMP UI URL for the target object page.
+        action_id: Provider-stable action identifier.
+        label_en: English display label.
+        label_zh: Simplified Chinese display label.
+
+    Returns:
+        An ``open_url`` action, or ``None`` when no object URL is available.
+    """
+    normalized_href = str(href or "").strip()
+    if not normalized_href:
+        return None
+
+    # Open actions are rendered as direct browser links by core. Returning None
+    # is intentional when SmartCMP does not provide a verified object route; a
+    # fallback list URL would make the provider action look object-specific when
+    # it is not.
+    return {
+        "action_id": str(action_id or "open_detail"),
+        "kind": "open_url",
+        "display_label": _display_label(label_en, label_zh),
+        "href": normalized_href,
+        "effect": "navigate",
+        "tone": "default",
+    }
+
+
+def build_object_prompt_action(
+    action_id: str,
+    *,
+    label_en: str,
+    label_zh: str,
+    prompt_en: str,
+    prompt_zh: str,
+    effect: str = "read",
+    tone: str = "default",
+    requires_confirmation: bool = False,
+    confirmation_en: str = "",
+    confirmation_zh: str = "",
+    prompt_template: bool = False,
+    inputs: list[dict[str, object]] | None = None,
+) -> dict[str, object] | None:
+    """Build a generic agent-prompt action for object sidecar controls.
+
+    Args:
+        action_id: Provider-stable action identifier.
+        label_en: English display label.
+        label_zh: Simplified Chinese display label.
+        prompt_en: English prompt or prompt template sent back to the agent.
+        prompt_zh: Simplified Chinese prompt or prompt template sent back to the agent.
+        effect: Declarative side effect category, such as ``read`` or ``mutate``.
+        tone: UI tone hint consumed by the generic renderer.
+        requires_confirmation: Whether the UI must confirm before submitting the prompt.
+        confirmation_en: English confirmation message for mutating actions.
+        confirmation_zh: Simplified Chinese confirmation message for mutating actions.
+        prompt_template: Whether to emit ``agent_prompt_template`` instead of ``agent_prompt``.
+        inputs: Optional input definitions used to fill prompt templates.
+
+    Returns:
+        An ``agent_prompt`` action, or ``None`` when required fields are blank.
+    """
+    normalized_action_id = str(action_id or "").strip()
+    if not normalized_action_id or not str(prompt_en or "").strip() or not str(prompt_zh or "").strip():
+        return None
+
+    # The provider describes the action; core owns rendering and submits the
+    # prompt back through the same conversation path as normal user input.
+    # Mutating operations use confirmation metadata rather than provider-specific
+    # UI code.
+    action: dict[str, object] = {
+        "action_id": normalized_action_id,
+        "kind": "agent_prompt",
+        "display_label": _display_label(label_en, label_zh),
+        "effect": str(effect or "read"),
+        "tone": str(tone or "default"),
+    }
+    prompt_key = "agent_prompt_template" if prompt_template else "agent_prompt"
+    action[prompt_key] = _agent_prompt(prompt_en, prompt_zh)
+    if requires_confirmation:
+        action["requires_confirmation"] = True
+        if confirmation_en or confirmation_zh:
+            action["confirmation_message"] = _confirmation_message(
+                confirmation_en or prompt_en,
+                confirmation_zh or prompt_zh,
+            )
+    if inputs:
+        action["inputs"] = inputs
+    return action
+
+
+def build_resource_object_actions(
+    base_url: str,
+    resource_id: str,
+    category: str = "virtual-machines",
+    *,
+    resource_name: str = "",
+    include_detail_action: bool = False,
+    include_analysis_action: bool = False,
+    include_operations_action: bool = False,
+) -> list[dict[str, object]]:
+    """Build provider-agnostic actions for a SmartCMP resource object.
+
+    Args:
+        base_url: SmartCMP instance base URL.
+        resource_id: SmartCMP resource UUID or external route identifier.
+        category: SmartCMP UI resource category path segment.
+        resource_name: Human-visible resource name used as object context.
+        include_detail_action: Whether to expose a detail lookup prompt.
+        include_analysis_action: Whether to expose a compliance analysis prompt.
+        include_operations_action: Whether to expose the available-operation lookup prompt.
+
+    Returns:
+        A list suitable for the generic ``object_actions`` metadata contract.
+    """
+    target = str(resource_id or resource_name or "").strip()
+    actions: list[dict[str, object]] = []
+    if target and include_detail_action:
+        action = build_object_prompt_action(
+            "view_detail",
+            label_en="View details",
+            label_zh="查看详情",
+            prompt_en=f"Show resource details for {target}",
+            prompt_zh=f"查看 {target} 的资源详情",
+        )
+        if action:
+            actions.append(action)
+
+    # Browser navigation must be based on a known SmartCMP route category. When
+    # a resource type cannot be mapped safely, build_resource_page_href returns
+    # an empty href and no open action is emitted.
+    page_href = build_resource_page_href(base_url, resource_id, category=category)
+    action = build_object_open_action(page_href)
+    if action:
+        actions.append(action)
+
+    if target and include_analysis_action:
+        action = build_object_prompt_action(
+            "analyze",
+            label_en="Analyze",
+            label_zh="分析",
+            prompt_en=f"Analyze resource {target}",
+            prompt_zh=f"分析资源 {target}",
+        )
+        if action:
+            actions.append(action)
+    if target and include_operations_action:
+        action = build_object_prompt_action(
+            "list_operations",
+            label_en="Operations",
+            label_zh="操作",
+            prompt_en=f"List available operations for resource {target}",
+            prompt_zh=f"查看资源 {target} 的可用操作",
+        )
+        if action:
+            actions.append(action)
+    return actions
+
+
+def build_approval_page_href(base_url: str, item: dict) -> str:
+    """Build the SmartCMP approval page URL used by approval actions.
+
+    The route logic mirrors SmartCMP's My Approval list UI. It builds item detail
+    links only from fields that the UI itself uses. When the API response does not
+    include enough route fields, this returns an empty string instead of falling
+    back to a list page, because ``open_url`` actions must target the object itself.
+
+    Args:
+        base_url: SmartCMP instance base URL.
+        item: SmartCMP approval row from ``generic-request/current-activity-approval``.
+
+    Returns:
+        Absolute browser URL for the approval row, or an empty string.
+    """
+    ui_base_url = normalize_ui_base_url(base_url)
+    hash_route = _build_approval_hash_route(item)
+    return build_ui_hash_href(ui_base_url, hash_route) if hash_route else ""
+
+
+def build_approval_object_actions(
+    base_url: str,
+    item: dict,
+    *,
+    include_detail_actions: bool = False,
+) -> list[dict[str, object]]:
+    """Build provider-agnostic actions for a SmartCMP approval object.
+
+    Args:
+        base_url: SmartCMP instance base URL.
+        item: SmartCMP approval row from ``generic-request/current-activity-approval``.
+        include_detail_actions: Whether to include detail-only analysis and decision actions.
+
+    Returns:
+        A list suitable for the generic ``object_actions`` metadata contract.
+    """
+    request_id = _approval_request_id(item)
+    page_href = build_approval_page_href(base_url, item)
+    actions: list[dict[str, object]] = []
+    if page_href:
+        actions.append(
+            {
+                "action_id": "open_detail",
+                "kind": "open_url",
+                "display_label": _display_label("Open", "打开"),
+                "href": page_href,
+                "effect": "navigate",
+                "tone": "default",
+            }
+        )
+    if request_id and not include_detail_actions:
+        # List rows should expose a read-only transition into the detail view.
+        # Decision actions are reserved for the detail response so the user sees
+        # the request context before approving or rejecting.
+        actions.insert(
+            0,
+            {
+                "action_id": "view_detail",
+                "kind": "agent_prompt",
+                "display_label": _display_label("View details", "查看详情"),
+                "agent_prompt": _agent_prompt(
+                    f"Show approval details for {request_id}",
+                    f"查看 {request_id} 的审批详情",
+                ),
+                "effect": "read",
+                "tone": "default",
+            },
+        )
+    if request_id and include_detail_actions:
+        # Detail responses have enough context to expose mutating decisions.
+        # They still execute through agent prompts so approval/rejection scripts
+        # keep validating SmartCMP request IDs server-side.
+        actions.extend(
+            [
+                {
+                    "action_id": "analyze",
+                    "kind": "agent_prompt",
+                    "display_label": _display_label("Analyze", "分析"),
+                    "agent_prompt": _agent_prompt(
+                        f"Analyze approval details for {request_id}",
+                        f"分析 {request_id} 的审批详情",
+                    ),
+                    "effect": "read",
+                    "tone": "default",
+                },
+                {
+                    "action_id": "approve",
+                    "kind": "agent_prompt",
+                    "display_label": _display_label("Approve", "同意"),
+                    "agent_prompt": _agent_prompt(
+                        f"Approve {request_id}",
+                        f"批准 {request_id}",
+                    ),
+                    "confirmation_message": _confirmation_message(
+                        f"Confirm approving {request_id}?",
+                        f"确认同意 {request_id}？",
+                    ),
+                    "effect": "mutate",
+                    "tone": "success",
+                    "requires_confirmation": True,
+                },
+                {
+                    "action_id": "reject",
+                    "kind": "agent_prompt",
+                    "display_label": _display_label("Reject", "拒绝"),
+                    "agent_prompt_template": _agent_prompt(
+                        f"Reject {request_id}, reason: {{{{reason}}}}",
+                        f"拒绝 {request_id}，原因：{{{{reason}}}}",
+                    ),
+                    "confirmation_message": _confirmation_message(
+                        f"Confirm rejecting {request_id}?",
+                        f"确认拒绝 {request_id}？",
+                    ),
+                    "effect": "mutate",
+                    "tone": "danger",
+                    "requires_confirmation": True,
+                    "inputs": [
+                        {
+                            "name": "reason",
+                            "display_label": _display_label("Rejection reason", "拒绝原因"),
+                            "type": "textarea",
+                            "required": True,
+                        }
+                    ],
+                },
+            ]
+        )
+    return actions
+
+
+def _approval_request_id(item: dict) -> str:
+    """Return a canonical user-facing SmartCMP Request ID from known payload shapes."""
+    if not isinstance(item, dict):
+        return ""
+
+    request_id = _request_id_from_mapping(item)
+    if request_id:
+        return request_id
+
+    current_activity = item.get("currentActivity")
+    request_id = _request_id_from_mapping(current_activity)
+    if request_id:
+        return request_id
+
+    if isinstance(current_activity, dict):
+        approval_requests = current_activity.get("approvalRequests")
+        if isinstance(approval_requests, list):
+            for approval_request in approval_requests:
+                request_id = _request_id_from_mapping(approval_request)
+                if request_id:
+                    return request_id
+    return ""
+
+
+def _request_id_from_mapping(mapping: object) -> str:
+    """Extract a validated SmartCMP Request ID from a mapping."""
+    if not isinstance(mapping, dict):
+        return ""
+    for field_name in _REQUEST_ID_FIELD_NAMES:
+        candidate = _text_value(mapping.get(field_name))
+        if _REQUEST_ID_PATTERN.fullmatch(candidate):
+            return candidate
+    return ""
+
+
+def _build_approval_hash_route(item: dict) -> str:
+    """Return the SmartCMP hash route for a My Approval row."""
+    if not isinstance(item, dict):
+        return ""
+
+    exts = item.get("exts") if isinstance(item.get("exts"), dict) else {}
+    approval_type = _text_value(exts.get("approval_type") or item.get("approval_type"))
+    approval_id = _text_value(exts.get("approval_id") or item.get("approval_id"))
+    approval_state = _text_value(exts.get("approval_state") or item.get("approval_state")).upper()
+    row_id = _text_value(item.get("id"))
+
+    # SmartCMP uses a separate service-request editor route for inventory
+    # approvals. Those rows are keyed by the row id, not by approval_id.
+    if approval_type == "REQUEST_INVENTORY" and row_id:
+        return (
+            f"#/main/service-request/my-approval/edit/{quote(row_id, safe='')}"
+            f"?{urlencode({'fromPagePartUrl': 'SR_MY_APPROVAL'})}"
+        )
+
+    # Application approvals reuse the new-application route and need the
+    # approval state to choose pending vs. completed tabs. Unknown application
+    # types intentionally collapse to GENERIC, matching SmartCMP's own route.
+    if approval_state and approval_id:
+        stage = "pendingApproval" if approval_state == "PENDING" else "doneApproval"
+        route_type = approval_type if approval_type in _APPROVAL_APPLICATION_TYPES else "GENERIC"
+        return (
+            f"#/main/new-application/{quote(stage, safe='')}/"
+            f"{quote(route_type, safe='')}/{quote(approval_id, safe='')}"
+            f"?{urlencode(_APPROVAL_DETAIL_FROM_PARAMS)}"
+        )
+
+    return ""
+
+
+def _text_value(value: object) -> str:
+    """Normalize a route field from SmartCMP's loosely typed JSON payload."""
+    if value in (None, ""):
+        return ""
+    return str(value).strip()
 
 
 def _infer_auth_url(cmp_url: str) -> str:

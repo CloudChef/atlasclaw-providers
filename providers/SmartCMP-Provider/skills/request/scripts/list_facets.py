@@ -27,11 +27,11 @@ import sys
 import requests
 
 try:
-    from _common import require_config
+    from _common import render_markdown_table, require_config
 except ImportError:
     import os
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared', 'scripts'))
-    from _common import require_config
+    from _common import render_markdown_table, require_config
 
 
 def parse_args(argv=None):
@@ -186,10 +186,25 @@ def main(argv=None) -> int:
         print("No facets found.")
         return 0
 
-    print(f"Found {len(compacted_facets)} facet(s):\n")
-    for facet in compacted_facets:
-        print(format_facet_summary(facet))
-        print()
+    print(
+        render_markdown_table(
+            f"Found {len(compacted_facets)} facet(s):",
+            ["#", "Facet", "Key", "Options"],
+            [
+                [
+                    index,
+                    facet["label"],
+                    facet["key"],
+                    "; ".join(
+                        f"{option['label']} ({option['key']})"
+                        for option in facet.get("options", [])
+                    ) or "No selectable options returned.",
+                ]
+                for index, facet in enumerate(compacted_facets, start=1)
+            ],
+        )
+    )
+    print()
 
     # Output machine-readable metadata for agent consumption
     print("##FACET_META_START##")

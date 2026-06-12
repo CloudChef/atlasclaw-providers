@@ -31,6 +31,16 @@ class _FakeResponse:
         return self._payload
 
 
+def localized(default: str, zh_cn: str) -> dict[str, object]:
+    return {
+        "default": default,
+        "translations": {
+            "en-US": default,
+            "zh-CN": zh_cn,
+        },
+    }
+
+
 def _load_module(monkeypatch):
     monkeypatch.setenv("CMP_URL", "https://cmp.example.com")
     monkeypatch.setenv("CMP_COOKIE", "CloudChef-Authenticate=token")
@@ -87,6 +97,11 @@ def test_detail_uses_language_neutral_labels_and_extensible_resource_specs(monke
                                 },
                             },
                         },
+                        "exts": {
+                            "approval_state": "PENDING",
+                            "approval_type": "PROVISION_BP",
+                            "approval_id": "approval-uuid",
+                        },
                     }
                 ],
             }
@@ -115,6 +130,47 @@ def test_detail_uses_language_neutral_labels_and_extensible_resource_specs(monke
     )[0]
     meta = json.loads(payload)
     assert meta["requestId"] == "RES20260427000004"
+    expected_href = (
+        "https://cmp.example.com/#/main/new-application/"
+        "pendingApproval/PROVISION_BP/approval-uuid?from=normal&fromPagePartUrl=SR_MY_APPROVAL"
+    )
+    assert meta["object_type"] == "approval_request"
+    assert meta["object_id"] == "RES20260427000004"
+    assert meta["object_name"] == "Linux-test-agent"
+    assert [action["display_label"] for action in meta["object_actions"]] == [
+        localized("Open", "打开"),
+        localized("Analyze", "分析"),
+        localized("Approve", "同意"),
+        localized("Reject", "拒绝"),
+    ]
+    assert meta["object_actions"][0]["href"] == expected_href
+    assert meta["object_actions"][1]["agent_prompt"] == localized(
+        "Analyze approval details for RES20260427000004",
+        "分析 RES20260427000004 的审批详情",
+    )
+    assert meta["object_actions"][2]["agent_prompt"] == localized(
+        "Approve RES20260427000004",
+        "批准 RES20260427000004",
+    )
+    assert meta["object_actions"][2]["confirmation_message"] == localized(
+        "Confirm approving RES20260427000004?",
+        "确认同意 RES20260427000004？",
+    )
+    assert meta["object_actions"][2]["requires_confirmation"] is True
+    assert meta["object_actions"][3]["agent_prompt_template"] == localized(
+        "Reject RES20260427000004, reason: {{reason}}",
+        "拒绝 RES20260427000004，原因：{{reason}}",
+    )
+    assert meta["object_actions"][3]["confirmation_message"] == localized(
+        "Confirm rejecting RES20260427000004?",
+        "确认拒绝 RES20260427000004？",
+    )
+    assert meta["object_actions"][3]["inputs"][0]["name"] == "reason"
+    assert meta["object_actions"][3]["inputs"][0]["display_label"] == localized(
+        "Rejection reason",
+        "拒绝原因",
+    )
+    assert expected_href not in rendered
     assert meta["catalogId"] == "catalog-linux"
     assert meta["requestParams"]["extensibleParameters"]["node_1"]["memory"]["value"] == 1024
     assert meta["resourceSpecs"][:3] == [
@@ -166,6 +222,23 @@ def test_detail_returns_empty_resource_specs_when_request_has_no_specs(monkeypat
     )[0]
     meta = json.loads(payload)
     assert meta["resourceSpecs"] == []
+    assert [action["display_label"] for action in meta["object_actions"]] == [
+        localized("Analyze", "分析"),
+        localized("Approve", "同意"),
+        localized("Reject", "拒绝"),
+    ]
+    assert meta["object_actions"][0]["agent_prompt"] == localized(
+        "Analyze approval details for TIC20260427000005",
+        "分析 TIC20260427000005 的审批详情",
+    )
+    assert meta["object_actions"][1]["agent_prompt"] == localized(
+        "Approve TIC20260427000005",
+        "批准 TIC20260427000005",
+    )
+    assert meta["object_actions"][2]["agent_prompt_template"] == localized(
+        "Reject TIC20260427000005, reason: {{reason}}",
+        "拒绝 TIC20260427000005，原因：{{reason}}",
+    )
 
 
 def test_detail_prefers_current_selection_name_over_memory(monkeypatch) -> None:

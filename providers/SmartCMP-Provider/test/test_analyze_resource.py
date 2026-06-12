@@ -46,6 +46,29 @@ def extract_payload(output: str):
     return json.loads(match.group(1))
 
 
+def localized(default: str, zh_cn: str) -> dict[str, object]:
+    return {
+        "default": default,
+        "translations": {
+            "en-US": default,
+            "zh-CN": zh_cn,
+        },
+    }
+
+
+def test_main_returns_clean_error_when_no_resource_target():
+    module = load_module()
+
+    stdout = io.StringIO()
+    with redirect_stdout(stdout):
+        exit_code = module.main([])
+
+    output = stdout.getvalue()
+    assert exit_code == 1
+    assert "[ERROR] Provide an exact resource name or select a resource from the latest resource table." in output
+    assert "Traceback" not in output
+
+
 def make_directory_meta():
     return [
         {
@@ -151,7 +174,8 @@ def test_main_resolves_resource_name_from_directory_metadata(monkeypatch):
 
     assert exit_code == 0
     assert captured["ids"] == ["res-hidden-2"]
-    assert "[1] e2e-newrole-linux3-0501 | compliant | confidence=high" in output
+    assert "| # | Resource | Compliance | Confidence |" in output
+    assert "| 1 | e2e-newrole-linux3-0501 | compliant | high |" in output
     assert payload["requestedResources"] == [
         {
             "name": "e2e-newrole-linux3-0501",
@@ -161,6 +185,33 @@ def test_main_resolves_resource_name_from_directory_metadata(monkeypatch):
     ]
     assert payload["resolvedResources"][0]["name"] == "e2e-newrole-linux3-0501"
     assert payload["requestedResourceIds"] == ["res-hidden-2"]
+    assert payload["results"][0]["object_type"] == "smartcmp_resource"
+    assert payload["results"][0]["object_id"] == "res-hidden-2"
+    assert payload["results"][0]["object_name"] == "e2e-newrole-linux3-0501"
+    assert payload["results"][0]["object_actions"] == [
+        {
+            "action_id": "view_detail",
+            "kind": "agent_prompt",
+            "display_label": localized("View details", "查看详情"),
+            "agent_prompt": localized(
+                "Show resource details for res-hidden-2",
+                "查看 res-hidden-2 的资源详情",
+            ),
+            "effect": "read",
+            "tone": "default",
+        },
+        {
+            "action_id": "analyze",
+            "kind": "agent_prompt",
+            "display_label": localized("Analyze", "分析"),
+            "agent_prompt": localized(
+                "Analyze resource res-hidden-2",
+                "分析资源 res-hidden-2",
+            ),
+            "effect": "read",
+            "tone": "default",
+        },
+    ]
 
 
 def test_main_resolves_resource_index_from_directory_metadata(monkeypatch):
@@ -257,8 +308,9 @@ def test_main_direct_name_lookup_rejects_ambiguous_exact_matches(monkeypatch):
 
     assert exit_code == 1
     assert "Multiple SmartCMP resources exactly matched name 'duplicate-vm'" in output
-    assert "[1] duplicate-vm | status: started" in output
-    assert "[2] duplicate-vm | status: stopped" in output
+    assert "| # | Name | Status |" in output
+    assert "| 1 | duplicate-vm | started |" in output
+    assert "| 2 | duplicate-vm | stopped |" in output
     assert "res-hidden" not in output
 
 
@@ -293,6 +345,51 @@ def test_main_accepts_resource_ids_flag_for_compatibility(monkeypatch):
     assert payload["requestedResourceIds"] == ["res-1"]
 
 
+def test_result_object_actions_include_open_url_when_config_is_available(monkeypatch):
+    module = load_module()
+
+    result = {
+        "resourceId": "res-1",
+        "resourceName": "ubuntu-01",
+        "summary": {
+            "overallCompliance": "compliant",
+            "confidence": "high",
+        },
+    }
+    enriched = module.attach_resource_object_metadata(
+        result,
+        1,
+        base_url="https://cmp.example.com/platform-api",
+    )
+
+    assert enriched["object_actions"] == [
+        {
+            "action_id": "view_detail",
+            "kind": "agent_prompt",
+            "display_label": localized("View details", "查看详情"),
+            "agent_prompt": localized("Show resource details for res-1", "查看 res-1 的资源详情"),
+            "effect": "read",
+            "tone": "default",
+        },
+        {
+            "action_id": "open_detail",
+            "kind": "open_url",
+            "display_label": localized("Open", "打开"),
+            "href": "https://cmp.example.com/#/main/virtual-machines/res-1/details",
+            "effect": "navigate",
+            "tone": "default",
+        },
+        {
+            "action_id": "analyze",
+            "kind": "agent_prompt",
+            "display_label": localized("Analyze", "分析"),
+            "agent_prompt": localized("Analyze resource res-1", "分析资源 res-1"),
+            "effect": "read",
+            "tone": "default",
+        },
+    ]
+
+
 def test_rendered_summary_does_not_fallback_to_resource_id_when_name_missing():
     module = load_module()
     output = module.render_output(
@@ -313,7 +410,8 @@ def test_rendered_summary_does_not_fallback_to_resource_id_when_name_missing():
     )
     visible_summary = output.split("##RESOURCE_COMPLIANCE_START##", 1)[0]
 
-    assert "[1] unknown resource | needs_review | confidence=low" in visible_summary
+    assert "| # | Resource | Compliance | Confidence |" in visible_summary
+    assert "| 1 | unknown resource | needs_review | low |" in visible_summary
     assert "res-hidden-1" not in visible_summary
 
 

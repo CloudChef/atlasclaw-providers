@@ -124,7 +124,7 @@ Use this skill when the user wants answers grounded in a configured Markdown vau
 6. If the top results are too narrow or ambiguous, search again with clearer keywords first. Add `path_filter` only when the path is explicit or came from prior search evidence.
 7. Call `markdown_vault_get` on the most relevant path and line range when surrounding context matters.
 8. Answer with a natural-language synthesis: start with the conclusion or support judgment, then give the minimal supporting details and citations. If the evidence text already contains headings or bullet fields, paraphrase and compress them instead of copying the block.
-9. Final answers must not contain the literal `Source:` label. Cite evidence in prose, for example `来源：path.md` or an inline parenthetical citation, and cite each path at most once.
+9. Final answers must not contain the literal `Source:` label. Cite evidence in prose, for example `from path.md` or an inline parenthetical citation, and cite each path at most once.
 
 ## Evidence Rules
 

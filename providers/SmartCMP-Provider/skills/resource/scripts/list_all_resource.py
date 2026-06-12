@@ -13,7 +13,7 @@ Environment:
   SIZE            Optional page size
 
 Output:
-  - Numbered list of resource names plus status (user-visible)
+  - Standard Markdown table of resources plus status (user-visible)
   - ##RESOURCE_DIRECTORY_META_START## ... ##RESOURCE_DIRECTORY_META_END##
       JSON array with normalized list metadata
 """
@@ -34,7 +34,7 @@ SHARED_SCRIPTS_DIR = SCRIPT_DIR.parents[1] / "shared" / "scripts"
 if str(SHARED_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SHARED_SCRIPTS_DIR))
 
-from _common import require_config  # noqa: E402
+from _common import build_resource_object_actions, require_config  # noqa: E402
 
 
 VALID_SCOPES = {"all_resources", "virtual_machines"}
@@ -145,11 +145,28 @@ def display_status(item: dict) -> str:
     )
 
 
-def meta_item(index: int, item: dict, scope: str) -> dict:
+def meta_item(index: int, item: dict, scope: str, *, base_url: str = "") -> dict:
+    href_category = "virtual-machines" if scope == "virtual_machines" else "cloud-resource"
+    resource_id = str(item.get("id", ""))
+    name = display_name(item)
+    # Resource rows expose actions through sidecar metadata rather than
+    # Markdown links. Core can render buttons when it understands the protocol,
+    # while plain Markdown consumers still receive a readable resource table.
+    object_actions = build_resource_object_actions(
+        base_url,
+        resource_id,
+        category=href_category,
+        resource_name=name,
+        include_detail_action=True,
+    )
     return {
         "index": index,
+        "object_type": "virtual_machine" if scope == "virtual_machines" else "cloud_resource",
+        "object_id": resource_id,
+        "object_name": name,
+        "object_actions": object_actions,
         "id": item.get("id", ""),
-        "name": display_name(item),
+        "name": name,
         "scope": scope,
         "resourceType": item.get("resourceType", ""),
         "componentType": item.get("componentType", ""),
@@ -159,8 +176,48 @@ def meta_item(index: int, item: dict, scope: str) -> dict:
     }
 
 
+def escape_markdown_cell(value: object) -> str:
+    """Render one value safely inside a Markdown table cell."""
+    rendered = str(value or "").replace("\n", " ").replace("\r", " ").strip()
+    rendered = " ".join(rendered.split())
+    return rendered.replace("|", "\\|")
+
+
 def summary_label(scope: str) -> str:
     return "virtual machine(s)" if scope == "virtual_machines" else "resource(s)"
+
+
+def render_resource_table(items: list[dict], *, scope: str) -> str:
+    """Render SmartCMP resource list output as a standard Markdown table."""
+    headers = ["#", "Name", "Status"]
+    if scope == "virtual_machines":
+        headers.append("OS")
+    else:
+        headers.extend(["Resource Type", "Component Type"])
+
+    lines = [
+        f"Found {len(items)} {summary_label(scope)}:",
+        "",
+        "| " + " | ".join(headers) + " |",
+        "| " + " | ".join("---" for _ in headers) + " |",
+    ]
+    for index, item in enumerate(items, start=1):
+        row = [
+            index,
+            display_name(item),
+            display_status(item),
+        ]
+        if scope == "virtual_machines":
+            row.append(extract_os(item) or "N/A")
+        else:
+            row.extend(
+                [
+                    item.get("resourceType") or "N/A",
+                    item.get("componentType") or "N/A",
+                ]
+            )
+        lines.append("| " + " | ".join(escape_markdown_cell(value) for value in row) + " |")
+    return "\n".join(lines)
 
 
 def main(argv=None) -> int:
@@ -202,12 +259,13 @@ def main(argv=None) -> int:
             print("No resources found.")
         return 0
 
-    print(f"Found {len(items)} {summary_label(scope)}:\n")
-    for index, item in enumerate(items, start=1):
-        print(f"  [{index}] {display_name(item)} | status: {display_status(item)}")
+    print(render_resource_table(items, scope=scope))
     print()
 
-    meta = [meta_item(index, item, scope) for index, item in enumerate(items, start=1)]
+    meta = [
+        meta_item(index, item, scope, base_url=base_url)
+        for index, item in enumerate(items, start=1)
+    ]
     print("##RESOURCE_DIRECTORY_META_START##", file=sys.stderr)
     print(json.dumps(meta, ensure_ascii=False, separators=(",", ":")), file=sys.stderr)
     print("##RESOURCE_DIRECTORY_META_END##", file=sys.stderr)

@@ -23,6 +23,7 @@ from _alarm_common import (
     get_json,
     normalize_timestamp,
 )
+from _common import build_object_prompt_action
 
 
 def positive_int(value: str) -> int:
@@ -59,11 +60,41 @@ def normalize_entity_ids(value: Any) -> list[str]:
     return [str(value)]
 
 
+def _alert_object_name(alert: Mapping[str, Any]) -> str:
+    """Pick a stable, human-visible alert object label."""
+    for key in ("alarmPolicyName", "alarmActivityName", "resourceExternalName", "entityInstanceName", "id"):
+        value = alert.get(key)
+        if value:
+            return str(value)
+    return "unknown-alert"
+
+
+def build_alert_object_actions(alert_id: str) -> list[dict[str, object]]:
+    """Build explicit UI actions for one SmartCMP alert row."""
+    normalized_alert_id = str(alert_id or "").strip()
+    if not normalized_alert_id:
+        return []
+    action = build_object_prompt_action(
+        "view_detail",
+        label_en="View details",
+        label_zh="查看详情",
+        prompt_en=f"Analyze alert {normalized_alert_id}",
+        prompt_zh=f"分析告警 {normalized_alert_id}",
+    )
+    return [action] if action else []
+
+
 def build_alert_meta(alert: Mapping[str, Any], index: int) -> dict[str, Any]:
     """Project SmartCMP alert data into stable English metadata keys."""
+    alert_id = str(alert.get("id", "") or "")
+    object_name = _alert_object_name(alert)
     return {
         "index": index,
-        "alertId": alert.get("id", ""),
+        "object_type": "alarm_alert",
+        "object_id": alert_id,
+        "object_name": object_name,
+        "object_actions": build_alert_object_actions(alert_id),
+        "alertId": alert_id,
         "alarmActivityId": alert.get("alarmActivityId", ""),
         "alarmActivityName": alert.get("alarmActivityName", ""),
         "alarmPolicyId": alert.get("alarmPolicyId", ""),
@@ -124,6 +155,34 @@ def format_alert_line(meta: Mapping[str, Any]) -> str:
     )
 
 
+def escape_markdown_cell(value: object) -> str:
+    """Render one value safely inside a Markdown table cell."""
+    rendered = str(value or "").replace("\n", " ").replace("\r", " ").strip()
+    rendered = " ".join(rendered.split())
+    return rendered.replace("|", "\\|")
+
+
+def render_alert_table(items: list[Mapping[str, Any]], total: int) -> str:
+    """Render SmartCMP alert list output as a standard Markdown table."""
+    headers = ["#", "Policy", "Status", "Level", "Resource"]
+    lines = [
+        f"Found {total} alert(s):",
+        "",
+        "| " + " | ".join(headers) + " |",
+        "| " + " | ".join("---" for _ in headers) + " |",
+    ]
+    for item in items:
+        row = [
+            item.get("index", ""),
+            item.get("alarmPolicyName") or item.get("alarmActivityName") or item.get("alertId") or "unknown",
+            item.get("status", ""),
+            item.get("level", ""),
+            select_resource_name(item),
+        ]
+        lines.append("| " + " | ".join(escape_markdown_cell(value) for value in row) + " |")
+    return "\n".join(lines)
+
+
 def extract_total(payload: Any, items: Iterable[Any]) -> int:
     """Extract the total count when available, otherwise fall back to item count."""
     if isinstance(payload, Mapping):
@@ -148,10 +207,7 @@ def main(argv: list[str] | None = None) -> int:
     total = extract_total(payload, meta)
 
     if meta:
-        print(f"Found {total} alert(s).")
-        print()
-        for item in meta:
-            print(format_alert_line(item))
+        print(render_alert_table(meta, total))
     else:
         print("No alerts found.")
 

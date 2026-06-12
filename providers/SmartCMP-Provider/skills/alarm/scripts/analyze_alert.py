@@ -20,6 +20,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from _alarm_common import get_connection, get_json
+from _common import build_object_prompt_action
 
 
 def _load_local_analysis_module():
@@ -294,10 +295,64 @@ def emit_summary(payload: dict[str, Any]) -> None:
     print(summary)
 
 
+def build_alert_analysis_object_actions(payload: dict[str, Any]) -> list[dict[str, object]]:
+    """Build explicit UI actions for one SmartCMP alert analysis result."""
+    alert_id = str((payload.get("alert_ids") or [""])[0] or "").strip()
+    suggested_operation = payload.get("suggested_status_operation") or {}
+    operation = str(suggested_operation.get("operation") or "").strip().lower()
+    if not alert_id or not suggested_operation.get("should_operate") or not operation:
+        return []
+
+    labels = {
+        "mute": ("Mute", "静音", "warning"),
+        "resolve": ("Resolve", "解决", "success"),
+        "reopen": ("Reopen", "重新打开", "warning"),
+    }
+    label_en, label_zh, tone = labels.get(operation, (operation.title(), operation, "warning"))
+    action = build_object_prompt_action(
+        operation,
+        label_en=label_en,
+        label_zh=label_zh,
+        prompt_en=f"{label_en} alert {alert_id}",
+        prompt_zh=f"{label_zh}告警 {alert_id}",
+        confirmation_en=f"Confirm {label_en.lower()} alert {alert_id}?",
+        confirmation_zh=f"确认{label_zh}告警 {alert_id}？",
+        effect="mutate",
+        tone=tone,
+        requires_confirmation=True,
+    )
+    return [action] if action else []
+
+
+def attach_alert_analysis_object_metadata(payload: dict[str, Any]) -> dict[str, Any]:
+    """Attach object identity and action metadata to an alert analysis payload copy."""
+    enriched = dict(payload)
+    facts = payload.get("facts") if isinstance(payload.get("facts"), list) else []
+    fact = facts[0] if facts and isinstance(facts[0], dict) else {}
+    alert_id = str((payload.get("alert_ids") or [fact.get("alert_id", "")])[0] or "").strip()
+    resource = fact.get("resource") if isinstance(fact.get("resource"), dict) else {}
+    rule = fact.get("rule") if isinstance(fact.get("rule"), dict) else {}
+    object_name = str(
+        resource.get("display_name")
+        or resource.get("observed_name")
+        or rule.get("name")
+        or alert_id
+    ).strip()
+    enriched.update(
+        {
+            "object_type": "alarm_alert",
+            "object_id": alert_id,
+            "object_name": object_name,
+            "object_actions": build_alert_analysis_object_actions(payload),
+        }
+    )
+    return enriched
+
+
 def emit_analysis_block(payload: dict[str, Any]) -> None:
     """Print the structured alarm analysis payload."""
     print("##ALARM_ANALYSIS_START##")
-    print(json.dumps(payload, ensure_ascii=True, indent=2))
+    print(json.dumps(attach_alert_analysis_object_metadata(payload), ensure_ascii=True, indent=2))
     print("##ALARM_ANALYSIS_END##")
 
 

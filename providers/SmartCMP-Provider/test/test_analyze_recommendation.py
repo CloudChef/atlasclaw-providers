@@ -21,6 +21,16 @@ import analyze_recommendation as analyzer  # noqa: E402
 from requests import RequestException
 
 
+def localized(default: str, zh_cn: str) -> dict[str, object]:
+    return {
+        "default": default,
+        "translations": {
+            "en-US": default,
+            "zh-CN": zh_cn,
+        },
+    }
+
+
 def _make_resource_records() -> list[dict]:
     return [
         {
@@ -244,7 +254,94 @@ def test_render_analysis_outputs_human_summary_and_structured_block():
         "\n##COST_ANALYSIS_END##",
         1,
     )[0]
-    assert json.loads(meta_text) == payload
+    rendered_payload = json.loads(meta_text)
+    assert rendered_payload == {
+        **payload,
+        "object_type": "cost_optimization_recommendation",
+        "object_id": "vio-1",
+        "object_name": "vm-prod-01",
+        "object_actions": [],
+    }
+
+
+def test_render_analysis_exposes_resource_open_and_execute_actions():
+    payload = {
+        "violationId": "vio-1",
+        "facts": {
+            "policyName": "Idle VM",
+            "resourceId": "res-1",
+            "resourceName": "vm-prod-01",
+            "resourceType": "VirtualMachine",
+            "monthlySaving": 80.25,
+        },
+        "assessment": {
+            "optimizationTheme": "idle_shutdown",
+            "executionReadiness": "ready",
+        },
+        "recommendations": [],
+        "suggestedNextStep": "execute_fix",
+    }
+
+    output = analyzer.render_analysis(payload, base_url="https://cmp.example.com/platform-api")
+    meta_text = output.split("##COST_ANALYSIS_START##\n", 1)[1].split(
+        "\n##COST_ANALYSIS_END##",
+        1,
+    )[0]
+    rendered_payload = json.loads(meta_text)
+
+    assert rendered_payload["object_actions"] == [
+        {
+            "action_id": "open_resource",
+            "kind": "open_url",
+            "display_label": localized("Open resource", "打开资源"),
+            "href": "https://cmp.example.com/#/main/virtual-machines/res-1/details",
+            "effect": "navigate",
+            "tone": "default",
+        },
+        {
+            "action_id": "execute",
+            "kind": "agent_prompt",
+            "display_label": localized("Execute", "执行"),
+            "agent_prompt": localized(
+                "Execute cost optimization recommendation vio-1",
+                "执行成本优化建议 vio-1",
+            ),
+            "effect": "mutate",
+            "tone": "warning",
+            "requires_confirmation": True,
+            "confirmation_message": localized(
+                "Confirm executing cost optimization recommendation vio-1?",
+                "确认执行成本优化建议 vio-1？",
+            ),
+        },
+    ]
+
+
+def test_render_analysis_omits_resource_open_when_route_is_unknown():
+    payload = {
+        "violationId": "vio-1",
+        "facts": {
+            "policyName": "Idle resource",
+            "resourceId": "res-1",
+            "resourceName": "resource-01",
+            "monthlySaving": 80.25,
+        },
+        "assessment": {
+            "optimizationTheme": "manual_review",
+            "executionReadiness": "manual_review",
+        },
+        "recommendations": [],
+        "suggestedNextStep": "manual_review",
+    }
+
+    output = analyzer.render_analysis(payload, base_url="https://cmp.example.com/platform-api")
+    meta_text = output.split("##COST_ANALYSIS_START##\n", 1)[1].split(
+        "\n##COST_ANALYSIS_END##",
+        1,
+    )[0]
+    rendered_payload = json.loads(meta_text)
+
+    assert rendered_payload["object_actions"] == []
 
 
 def test_build_analysis_payload_flags_missing_repair_action():

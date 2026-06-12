@@ -25,7 +25,7 @@ triggers:
   - 补丁检查
 
 use_when:
-  - User wants to analyze one or more resources by resource name or selected list index for compliance or security risk
+  - User wants to analyze one or more resources by resource name or selected table `#` item for compliance or security risk
   - User wants to check whether a resource version is outdated, unsupported, or risky
   - Webhook payload includes resource IDs that need review as an internal compatibility path
 
@@ -40,7 +40,7 @@ related:
   - resource
 
 tool_analyze_name: "smartcmp_analyze_resource_compliance"
-tool_analyze_description: "Analyze one or more SmartCMP resources by exact resource name or by a selected numbered list item for compliance, security risk, lifecycle, and configuration posture. Prefer resource_name or resource_index with recent smartcmp_list_all_resource metadata; resource IDs are internal compatibility inputs only and should not be requested from or shown to users."
+tool_analyze_description: "Analyze one or more SmartCMP resources by exact resource name or by a selected table `#` item for compliance, security risk, lifecycle, and configuration posture. Prefer resource_name or resource_index with recent smartcmp_list_all_resource metadata; resource IDs are internal compatibility inputs only and should not be requested from or shown to users."
 tool_analyze_entrypoint: "scripts/analyze_resource.py"
 tool_analyze_groups:
   - cmp
@@ -59,11 +59,11 @@ tool_analyze_parameters: |
       },
       "resource_index": {
         "type": "integer",
-        "description": "Visible list index from the latest smartcmp_list_all_resource result, for example 1 or 2."
+        "description": "Visible table # value from the latest smartcmp_list_all_resource result, for example 1 or 2."
       },
       "resource_directory_json": {
         "type": "string",
-        "description": "Hidden JSON metadata from the latest smartcmp_list_all_resource result or Current Workflow Context. Pass this when resolving a visible list index or validating a listed resource name."
+        "description": "Hidden JSON metadata from the latest smartcmp_list_all_resource result or Current Workflow Context. Pass this when resolving a visible table # value or validating a listed resource name."
       },
       "trigger_source": {
         "type": "string",
@@ -97,7 +97,7 @@ internet validation.
 
 | Script | Description | Location |
 |--------|-------------|----------|
-| `analyze_resource.py` | Analyze one or more resources by name, selected list index, or internal compatibility ID | `scripts/` |
+| `analyze_resource.py` | Analyze one or more resources by name, selected table `#`, or internal compatibility ID | `scripts/` |
 
 ## Examples
 
@@ -109,8 +109,8 @@ python scripts/analyze_resource.py --payload-json '{"resourceIds":["id-1"],"trig
 
 ## Notes
 
-- User and Agent interaction should be name-first: use `resource_name` or a visible `resource_index` from the latest resource list.
-- Use recent `smartcmp_list_all_resource` metadata to resolve list indexes and validate selected names.
+- User and Agent interaction should be name-first: use `resource_name` or a visible `resource_index` from the latest resource table.
+- Use recent `smartcmp_list_all_resource` metadata to resolve table `#` values and validate selected names.
 - Never ask users for SmartCMP UUIDs and never show UUIDs in the final user-facing reply.
 - Supports webhook-style resource IDs as an internal compatibility path.
 - Emits human-readable output plus `##RESOURCE_COMPLIANCE_START##` metadata.

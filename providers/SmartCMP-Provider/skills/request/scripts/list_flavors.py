@@ -28,11 +28,11 @@ import argparse
 import requests
 
 try:
-    from _common import require_config
+    from _common import render_markdown_table, require_config
 except ImportError:
     import os
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared', 'scripts'))
-    from _common import require_config
+    from _common import render_markdown_table, require_config
 
 
 def parse_args(argv=None):
@@ -125,9 +125,13 @@ def main(argv=None) -> int:
         print("No flavors found.")
         return 0
 
-    print(f"Found {len(flavors)} flavor(s):\n")
-    for i, flavor in enumerate(flavors, start=1):
-        print(f"  {i}) {format_flavor_summary(flavor)}")
+    print(
+        render_markdown_table(
+            f"Found {len(flavors)} flavor(s):",
+            ["#", "Flavor"],
+            [[index, format_flavor_summary(flavor)] for index, flavor in enumerate(flavors, start=1)],
+        )
+    )
 
     print()
     print("##FLAVOR_META_START##")

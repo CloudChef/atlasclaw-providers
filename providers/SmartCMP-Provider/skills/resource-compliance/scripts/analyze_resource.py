@@ -42,6 +42,7 @@ common_module = _load_module_from_path(
     os.path.join(SHARED_SCRIPT_DIR, "_common.py"),
 )
 require_config = common_module.require_config
+build_resource_object_actions = common_module.build_resource_object_actions
 
 list_resource_module = _load_module_from_path(
     "resource_compliance_list_resource_local",
@@ -264,7 +265,7 @@ def resolve_resource_targets(
         return resolve_from_name_search(resource_names)
 
     raise ResourceResolutionError(
-        "Provide an exact resource name or select a resource from the latest numbered list."
+        "Provide an exact resource name or select a resource from the latest resource table."
     )
 
 
@@ -288,7 +289,7 @@ def resolve_from_directory(*, resource_names, resource_index, directory_items):
         if selected is None:
             raise ResourceResolutionError(
                 f"No listed resource matched index {resource_index}. "
-                f"Available resources: {format_resource_choices(directory_items)}"
+                f"Available resources:\n{format_resource_choices(directory_items)}"
             )
         selected_items = [selected]
 
@@ -305,12 +306,12 @@ def resolve_from_directory(*, resource_names, resource_index, directory_items):
             if not exact_matches:
                 raise ResourceResolutionError(
                     f"No listed resource exactly matched name '{name}'. "
-                    f"Available resources: {format_resource_choices(directory_items)}"
+                    f"Available resources:\n{format_resource_choices(directory_items)}"
                 )
             if len(exact_matches) > 1 and resource_index is None:
                 raise ResourceResolutionError(
                     f"Multiple listed resources exactly matched name '{name}'. "
-                    f"Choose one by list index: {format_resource_choices(exact_matches)}"
+                    f"Choose one by table #:\n{format_resource_choices(exact_matches)}"
                 )
 
         if selected_items:
@@ -352,7 +353,7 @@ def resolve_from_name_search(resource_names):
             if choices:
                 raise ResourceResolutionError(
                     f"No SmartCMP resource exactly matched name '{name}'. "
-                    f"Closest visible matches: {choices}"
+                    f"Closest visible matches:\n{choices}"
                 )
             raise ResourceResolutionError(
                 f"No SmartCMP resource exactly matched name '{name}'."
@@ -360,7 +361,7 @@ def resolve_from_name_search(resource_names):
         if len(exact_matches) > 1:
             raise ResourceResolutionError(
                 f"Multiple SmartCMP resources exactly matched name '{name}'. "
-                f"Choose one by list index: {format_resource_choices(exact_matches)}"
+                f"Choose one by table #:\n{format_resource_choices(exact_matches)}"
             )
         resolved_items.append(exact_matches[0])
 
@@ -438,15 +439,35 @@ def display_status(item):
     ).strip()
 
 
+def escape_markdown_cell(value):
+    """Render a resource choice value safely inside a Markdown table cell."""
+    rendered = str(value or "").replace("\n", " ").replace("\r", " ").strip()
+    rendered = " ".join(rendered.split())
+    return rendered.replace("|", "\\|")
+
+
 def format_resource_choices(items):
-    """Render name/status choices for clarification without exposing resource IDs."""
-    choices = []
+    """Render name/status choices as a Markdown table without exposing resource IDs."""
+    rows = []
     for fallback_index, item in enumerate(items, start=1):
         if not isinstance(item, dict):
             continue
         index = _safe_int(item.get("index")) or fallback_index
-        choices.append(f"[{index}] {display_name(item)} | status: {display_status(item)}")
-    return "; ".join(choices)
+        rows.append(
+            "| "
+            + " | ".join(
+                escape_markdown_cell(value)
+                for value in (index, display_name(item), display_status(item))
+            )
+            + " |"
+        )
+    if not rows:
+        return ""
+    return "\n".join([
+        "| # | Name | Status |",
+        "| --- | --- | --- |",
+        *rows,
+    ])
 
 
 def load_resources(resource_ids):
@@ -457,6 +478,38 @@ def load_resources(resource_ids):
         headers=headers,
         request_fn=request_json,
     )
+
+
+def resolve_action_context():
+    """Resolve the SmartCMP base URL used to build object actions."""
+    try:
+        base_url, _, _, _instance = require_config()
+    except (Exception, SystemExit):
+        return ""
+    return base_url
+
+
+def attach_resource_object_metadata(result, index, *, base_url=""):
+    """Attach object identity and explicit resource actions to one analysis result."""
+    resource_id = str(result.get("resourceId") or "").strip()
+    resource_name = str(result.get("resourceName") or "").strip()
+    object_name = resource_name or resource_id
+    result.update(
+        {
+            "index": index,
+            "object_type": "smartcmp_resource",
+            "object_id": resource_id,
+            "object_name": object_name,
+            "object_actions": build_resource_object_actions(
+                base_url,
+                resource_id,
+                resource_name=object_name,
+                include_detail_action=True,
+                include_analysis_action=True,
+            ),
+        }
+    )
+    return result
 
 
 def external_checker(product, version):
@@ -662,14 +715,28 @@ def render_output(payload):
     lines = [f"Analyzed {payload['analyzedCount']} resource(s)."]
     if payload["failedCount"]:
         lines.append(f"Failed to fully analyze {payload['failedCount']} resource(s).")
-    lines.append("")
+    lines.extend(
+        [
+            "",
+            "| # | Resource | Compliance | Confidence |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
 
     for index, item in enumerate(payload["results"], start=1):
         resource_label = item.get("resourceName") or "unknown resource"
         lines.append(
-            f"[{index}] {resource_label} | "
-            f"{item['summary']['overallCompliance']} | "
-            f"confidence={item['summary']['confidence']}"
+            "| "
+            + " | ".join(
+                escape_markdown_cell(value)
+                for value in (
+                    index,
+                    resource_label,
+                    item["summary"]["overallCompliance"],
+                    item["summary"]["confidence"],
+                )
+            )
+            + " |"
         )
 
     lines.extend(
@@ -716,12 +783,19 @@ def main(argv=None) -> int:
         print(f"[ERROR] {exc}")
         return 1
 
+    action_base_url = resolve_action_context()
     results = []
     analyzed_count = 0
     failed_count = 0
-    for record in resource_records:
+    for index, record in enumerate(resource_records, start=1):
         if record.get("fetchStatus") != "ok":
-            results.append(build_failed_result(record))
+            results.append(
+                attach_resource_object_metadata(
+                    build_failed_result(record),
+                    index,
+                    base_url=action_base_url,
+                )
+            )
             failed_count += 1
             continue
 
@@ -739,7 +813,13 @@ def main(argv=None) -> int:
         )
         if record.get("errors"):
             result["uncertainties"].extend(record["errors"])
-        results.append(result)
+        results.append(
+            attach_resource_object_metadata(
+                result,
+                index,
+                base_url=action_base_url,
+            )
+        )
         analyzed_count += 1
 
     payload = {

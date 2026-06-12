@@ -107,7 +107,9 @@ def test_main_fetches_resource_views_with_patch_first(monkeypatch):
     payload = extract_payload(output)
 
     assert exit_code == 0
-    assert "Found 2 resource(s)." in output
+    assert "Found 2 resource(s):" in output
+    assert "| # | Name | Resource ID | Fetch Status |" in output
+    assert "| 1 | db-01 | res-1 | ok |" in output
     assert len(payload) == 2
     assert payload[0]["resourceId"] == "res-1"
     assert payload[0]["sourceEndpoint"] == "/nodes/res-1/view"

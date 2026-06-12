@@ -248,7 +248,12 @@ This section is not for request building.
     catalog = payload["catalogs"][0]
     spec = catalog["instructions"]["resourceSpecs"][0]
 
-    assert "Found 1 published catalog(s)." in stdout
+    assert "Found 1 published catalog(s):" in stdout
+    assert "| # | Name | Service Category | Source Key |" in stdout
+    assert (
+        "| 1 | Load Balancer | CLOUD_COMPONENT_SERVICE | "
+        "resource.iaas.network.load_balancer.alicloud_slb |"
+    ) in stdout
     assert catalog["node"] == "alicloud_slb"
     assert catalog["type"] == "resource.iaas.network.load_balancer.alicloud_slb"
     assert catalog["componentType"] == "resource.iaas.network.load_balancer.alicloud_slb"
@@ -353,7 +358,9 @@ topology_template:
     catalog = payload["catalogs"][0]
     generic_request = catalog["instructions"]["genericRequest"]
 
-    assert "Found 1 published catalog(s)." in stdout
+    assert "Found 1 published catalog(s):" in stdout
+    assert "| # | Name | Service Category | Source Key |" in stdout
+    assert "| 1 | Ticket | GENERIC_SERVICE |  |" in stdout
     assert catalog["serviceCategory"] == "GENERIC_SERVICE"
     assert "node" not in catalog
     assert "type" not in catalog

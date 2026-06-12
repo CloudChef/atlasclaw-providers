@@ -27,7 +27,7 @@ from typing import Any
 import requests
 
 try:
-    from _common import require_config
+    from _common import build_approval_object_actions, require_config
 except ImportError:
     import os
 
@@ -41,7 +41,7 @@ except ImportError:
             "scripts",
         ),
     )
-    from _common import require_config
+    from _common import build_approval_object_actions, require_config
 
 from _approval_validation import APPROVAL_ID_FORMAT_HINT, is_request_id, request_id_from_item
 from _approval_specs import (
@@ -53,7 +53,7 @@ from _approval_specs import (
 )
 
 
-BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()
+BASE_URL, AUTH_TOKEN, HEADERS, _INSTANCE = require_config()
 
 
 def _parse_args() -> tuple[str, int]:
@@ -400,6 +400,18 @@ def main() -> None:
 
     meta = {
         "requestId": request_id,
+        "object_type": "approval_request",
+        "object_id": request_id,
+        "object_name": name,
+        # Detail responses have already shown the request context, so they may
+        # expose analysis and decision actions in addition to opening SmartCMP.
+        # The actual approve/reject side effects still go through agent prompts
+        # and the dedicated scripts that validate user-facing Request IDs.
+        "object_actions": build_approval_object_actions(
+            BASE_URL,
+            matched,
+            include_detail_actions=True,
+        ),
         "name": name,
         "catalogId": catalog_id,
         "catalogName": catalog,
@@ -415,6 +427,8 @@ def main() -> None:
         "resourceSpecs": resource_specs,
         "requestParams": request_params,
     }
+    # Keep structured data out of the visible answer. AtlasClaw reads this block
+    # to render generic actions and preserve exact SmartCMP identifiers.
     print("##APPROVAL_DETAIL_META_START##", file=sys.stderr)
     print(json.dumps(meta, ensure_ascii=False), file=sys.stderr)
     print("##APPROVAL_DETAIL_META_END##", file=sys.stderr)

@@ -28,11 +28,11 @@ import sys
 import requests
 
 try:
-    from _common import require_config
+    from _common import render_markdown_table, require_config
 except ImportError:
     import os
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shared", "scripts"))
-    from _common import require_config
+    from _common import render_markdown_table, require_config
 
 
 def parse_args(argv=None):
@@ -183,11 +183,14 @@ def main(argv=None) -> int:
         print("No resource pools found.")
         return 0
 
-    print(f"Found {len(bundles)} resource pool(s):\n")
-    for index, item in enumerate(bundles, start=1):
-        print(f"  {index}) {_display_name(item)} (id={item.get('id', '')})")
-
     meta = [_meta_item(index, item) for index, item in enumerate(bundles, start=1)]
+    print(
+        render_markdown_table(
+            f"Found {len(bundles)} resource pool(s):",
+            ["#", "Name", "ID"],
+            [[item["index"], item["name"], item.get("id") or ""] for item in meta],
+        )
+    )
     print()
     print("##RESOURCE_BUNDLE_META_START##")
     print(json.dumps(meta, ensure_ascii=False))

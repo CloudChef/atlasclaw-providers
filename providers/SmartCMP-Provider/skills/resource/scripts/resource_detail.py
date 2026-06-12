@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Copyright 2026  Qianyun, Inc., www.cloudchef.io, All rights reserved.
 
-"""Refresh and render one SmartCMP resource or cloud host by resource ID."""
+"""Refresh and render one SmartCMP resource or cloud host by ID or exact name."""
 from __future__ import annotations
 
 import argparse
@@ -19,15 +19,195 @@ SHARED_SCRIPTS_DIR = SCRIPT_DIR.parents[1] / "shared" / "scripts"
 if str(SHARED_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SHARED_SCRIPTS_DIR))
 
-from _common import require_config  # noqa: E402
+from _common import build_resource_object_actions, require_config  # noqa: E402
+
+
+RESOURCE_NAME_SEARCH_SIZE = 100
+RESOURCE_NAME_SEARCH_MAX_PAGES = 20
+
+
+class ResourceResolutionError(ValueError):
+    """User-facing resource target resolution error that avoids exposing internal IDs."""
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Refresh and render one SmartCMP resource or cloud host."
     )
-    parser.add_argument("resource_id", help="SmartCMP resource ID.")
+    parser.add_argument("resource_id", nargs="?", help="SmartCMP resource ID.")
+    parser.add_argument(
+        "--resource-id",
+        dest="resource_id_option",
+        default="",
+        help="SmartCMP resource ID for callers that pass named CLI options.",
+    )
+    parser.add_argument(
+        "--resource-name",
+        default="",
+        help="Exact visible SmartCMP cloud host name to resolve before inspection.",
+    )
     return parser.parse_args(argv)
+
+
+def _build_virtual_machine_search_url(base_url: str, *, query_value: str, page: int) -> str:
+    encoded_query_value = quote(query_value or "", safe="")
+    return (
+        f"{base_url}/nodes/search"
+        f"?query&page={page}&size={RESOURCE_NAME_SEARCH_SIZE}&catalogGroupIds=&sort=createdDate%2Cdesc"
+        f"&queryValue={encoded_query_value}&category=iaas.machine.virtual_machine"
+        f"&componentType=&monitorEnabled=&cloudEntryType=&isAgentInstalled=&os="
+        f"&groupIds=&isImported=&relation=AND&fullMatch=true"
+    )
+
+
+def _extract_items(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        for key in ("content", "data", "items", "result"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+            nested_items = _extract_items(value)
+            if nested_items:
+                return nested_items
+    return []
+
+
+def _extract_total_count(payload: Any) -> int | None:
+    if not isinstance(payload, dict):
+        return None
+    for key in ("totalElements", "total", "totalCount", "count"):
+        value = payload.get(key)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            pass
+    for key in ("data", "result"):
+        value = payload.get(key)
+        nested_total = _extract_total_count(value)
+        if nested_total is not None:
+            return nested_total
+    return None
+
+
+def _display_name(item: dict[str, Any]) -> str:
+    return str(
+        item.get("name")
+        or item.get("nameZh")
+        or item.get("displayName")
+        or item.get("label")
+        or item.get("instanceName")
+        or "unknown resource"
+    ).strip()
+
+
+def _display_status(item: dict[str, Any]) -> str:
+    return str(
+        item.get("status")
+        or item.get("powerState")
+        or item.get("state")
+        or item.get("phase")
+        or "unknown"
+    ).strip()
+
+
+def _escape_markdown_cell(value: object) -> str:
+    rendered = str(value or "").replace("\n", " ").replace("\r", " ").strip()
+    rendered = " ".join(rendered.split())
+    return rendered.replace("|", "\\|")
+
+
+def _format_resource_choices(items: Iterable[dict[str, Any]]) -> str:
+    rows = []
+    for index, item in enumerate(items, start=1):
+        rows.append(
+            "| "
+            + " | ".join(
+                _escape_markdown_cell(value)
+                for value in (index, _display_name(item), _display_status(item))
+            )
+            + " |"
+        )
+    if not rows:
+        return ""
+    return "\n".join([
+        "| # | Name | Status |",
+        "| --- | --- | --- |",
+        *rows,
+    ])
+
+
+def _resolve_unique_resource_id_by_name(
+    resource_name: str,
+    *,
+    base_url: str,
+    headers: dict[str, Any],
+) -> str:
+    normalized_name = resource_name.strip()
+    if not normalized_name:
+        raise ResourceResolutionError("Provide a non-empty resource name.")
+
+    items: list[dict[str, Any]] = []
+    total_count: int | None = None
+    for page in range(1, RESOURCE_NAME_SEARCH_MAX_PAGES + 1):
+        url = _build_virtual_machine_search_url(base_url, query_value=normalized_name, page=page)
+        try:
+            response = requests.get(url, headers=headers, verify=False, timeout=30)
+            response.raise_for_status()
+            payload = response.json()
+        except json.JSONDecodeError as exc:
+            raise ResourceResolutionError(
+                f"Resource search returned invalid JSON. Status={response.status_code}, "
+                f"Body={response.text[:200]}"
+            ) from exc
+        except requests.RequestException as exc:
+            response = getattr(exc, "response", None)
+            response_body = ""
+            if response is not None and getattr(response, "text", ""):
+                response_body = f" Response body: {response.text[:400]}"
+            raise ResourceResolutionError(f"Resource search failed: {exc}.{response_body}") from exc
+
+        page_items = _extract_items(payload)
+        items.extend(page_items)
+        if total_count is None:
+            total_count = _extract_total_count(payload)
+        if total_count is not None:
+            if len(items) >= total_count or not page_items:
+                break
+            continue
+        if len(page_items) < RESOURCE_NAME_SEARCH_SIZE:
+            break
+    else:
+        raise ResourceResolutionError(
+            f"Too many virtual machines matched name '{normalized_name}'. Refine the resource name."
+        )
+
+    name_key = normalized_name.casefold()
+    exact_matches = [
+        item
+        for item in items
+        if _display_name(item).casefold() == name_key and str(item.get("id") or "").strip()
+    ]
+
+    if not exact_matches:
+        choices = _format_resource_choices(items)
+        if choices:
+            raise ResourceResolutionError(
+                f"No virtual machine exactly matched name '{normalized_name}'. "
+                f"Closest visible matches:\n{choices}"
+            )
+        raise ResourceResolutionError(
+            f"No virtual machine exactly matched name '{normalized_name}'."
+        )
+
+    if len(exact_matches) > 1:
+        raise ResourceResolutionError(
+            f"Multiple virtual machines exactly matched name '{normalized_name}'. "
+            f"Choose one by table #:\n{_format_resource_choices(exact_matches)}"
+        )
+
+    return str(exact_matches[0].get("id") or "").strip()
 
 
 def unwrap_payload(payload: Any) -> dict[str, Any]:
@@ -429,7 +609,23 @@ def render_human_summary(view: dict[str, Any]) -> str:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     base_url, _auth_token, headers, _instance = require_config()
-    encoded_id = quote(args.resource_id, safe="")
+    resource_id = str(args.resource_id or args.resource_id_option or "").strip()
+    resource_name = str(args.resource_name or "").strip()
+    if not resource_id and resource_name:
+        try:
+            resource_id = _resolve_unique_resource_id_by_name(
+                resource_name,
+                base_url=base_url,
+                headers=headers,
+            )
+        except ResourceResolutionError as exc:
+            print(f"[ERROR] {exc}")
+            return 1
+    if not resource_id:
+        print("[ERROR] Provide either resource_id or resource_name.")
+        return 1
+
+    encoded_id = quote(resource_id, safe="")
     url = f"{base_url}/nodes/{encoded_id}/view"
 
     try:
@@ -454,8 +650,28 @@ def main(argv: list[str] | None = None) -> int:
 
     resource = unwrap_payload(payload)
     properties = collect_properties(resource)
-    view = build_view_model(args.resource_id, resource, properties)
+    view = build_view_model(resource_id, resource, properties)
     print(render_human_summary(view))
+    meta = {
+        "object_type": "virtual_machine",
+        "object_id": view["resourceId"],
+        "object_name": view["name"],
+        # Detail pages can offer follow-up analysis and operation discovery.
+        # They are still declared as generic object actions so the renderer does
+        # not need SmartCMP-specific branching.
+        "object_actions": build_resource_object_actions(
+            base_url,
+            view["resourceId"],
+            resource_name=view["name"],
+            include_analysis_action=True,
+            include_operations_action=True,
+        ),
+        "resourceId": view["resourceId"],
+        "name": view["name"],
+    }
+    print("##RESOURCE_DETAIL_META_START##", file=sys.stderr)
+    print(json.dumps(meta, ensure_ascii=False, separators=(",", ":")), file=sys.stderr)
+    print("##RESOURCE_DETAIL_META_END##", file=sys.stderr)
     return 0
 
 

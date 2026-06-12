@@ -33,7 +33,7 @@ SHARED_SCRIPTS_DIR = SCRIPT_DIR.parents[1] / "shared" / "scripts"
 if str(SHARED_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SHARED_SCRIPTS_DIR))
 
-from _common import require_config  # noqa: E402
+from _common import render_markdown_table, require_config  # noqa: E402
 
 
 BASE_URL, _AUTH_TOKEN, HEADERS, _ = require_config()
@@ -89,11 +89,6 @@ if not items:
     print("No resource pools found.")
     sys.exit(0)
 
-print(f"Found {len(items)} resource pool(s):\n")
-for index, item in enumerate(items, start=1):
-    print(f"  [{index}] {_display_name(item)}")
-print()
-
 meta = [
     {
         "index": index,
@@ -104,6 +99,23 @@ meta = [
     }
     for index, item in enumerate(items, start=1)
 ]
+print(
+    render_markdown_table(
+        f"Found {len(items)} resource pool(s):",
+        ["#", "Name", "Business Group", "Cloud Entry Type"],
+        [
+            [
+                item["index"],
+                item["name"],
+                item.get("businessGroupId") or "",
+                item.get("cloudEntryTypeId") or "",
+            ]
+            for item in meta
+        ],
+    )
+)
+print()
+
 print("##RESOURCE_POOL_DIRECTORY_META_START##", file=sys.stderr)
 print(json.dumps(meta, ensure_ascii=False, separators=(",", ":")), file=sys.stderr)
 print("##RESOURCE_POOL_DIRECTORY_META_END##", file=sys.stderr)

@@ -39,7 +39,7 @@ such as `dummy-id-placeholder`.
 
 ```
 ACTION: python scripts/list_pending.py
-SHOW:   numbered list of pending items
+SHOW:   Markdown table of pending items
 PARSE:  ##APPROVAL_META_START## silently → cache {index, requestId, name, requester}
 ASK:    "Would you like to approve or reject any of these?"
 STOP → wait for user selection

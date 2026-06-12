@@ -12,7 +12,7 @@ import requests
 from requests import RequestException
 
 try:
-    from _common import require_config
+    from _common import render_markdown_table, require_config
 except ImportError:
     import os
 
@@ -20,7 +20,7 @@ except ImportError:
         0,
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shared", "scripts"),
     )
-    from _common import require_config
+    from _common import render_markdown_table, require_config
 
 
 def parse_args(argv=None):
@@ -436,8 +436,7 @@ def load_resource_records(resource_ids, *, base_url, headers, request_fn=request
 
 
 def render_output(items):
-    lines = [f"Found {len(items)} resource(s).", ""]
-
+    rows = []
     for index, item in enumerate(items, start=1):
         summary = item.get("summary", {})
         resource = item.get("resource", {})
@@ -448,7 +447,15 @@ def render_output(items):
             or "unknown-resource"
         )
         status = item.get("fetchStatus", "unknown")
-        lines.append(f"[{index}] {name} | {item.get('resourceId', '')} | {status}")
+        rows.append([index, name, item.get("resourceId", ""), status])
+
+    lines = [
+        render_markdown_table(
+            f"Found {len(items)} resource(s):",
+            ["#", "Name", "Resource ID", "Fetch Status"],
+            rows,
+        )
+    ]
 
     lines.extend(
         [
@@ -498,13 +505,22 @@ def main(argv=None) -> int:
             print(f"[ERROR] {exc}")
             return 1
 
-        print(f"Found {total} resource(s), showing {len(items)} (page {args.page}):\n")
-        for i, item in enumerate(items, start=1):
-            name = item.get("name", "N/A")
-            rid = item.get("id", "N/A")
-            rtype = item.get("resourceType", "N/A")
-            status = item.get("status", "N/A")
-            print(f"  [{i}] {name} | {rid} | {rtype} | {status}")
+        print(
+            render_markdown_table(
+                f"Found {total} resource(s), showing {len(items)} (page {args.page}):",
+                ["#", "Name", "Resource ID", "Resource Type", "Status"],
+                [
+                    [
+                        index,
+                        item.get("name", "N/A"),
+                        item.get("id", "N/A"),
+                        item.get("resourceType", "N/A"),
+                        item.get("status", "N/A"),
+                    ]
+                    for index, item in enumerate(items, start=1)
+                ],
+            )
+        )
         print()
         print("##RESOURCE_META_START##")
         print(json.dumps(items, ensure_ascii=False))

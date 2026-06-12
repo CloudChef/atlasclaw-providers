@@ -65,7 +65,7 @@ triggers:
 use_when:
   - User wants a standalone list of SmartCMP cloud resources with current status
   - User wants a standalone list of SmartCMP cloud hosts or virtual machines with current status
-  - User wants to inspect one cloud host by resource ID and analyze its current properties
+  - User wants to inspect one cloud host by exact visible resource name or resource ID and analyze its current properties
   - User wants to search resources or virtual machines by keyword through the CMP UI list endpoint
   - User wants to see which resource operations the current SmartCMP user can execute on a resource
   - User wants to execute an enabled no-parameter operation on an existing SmartCMP cloud resource or virtual machine
@@ -78,6 +78,7 @@ avoid_when:
 examples:
   - "List my virtual machines"
   - "Show all cloud resources"
+  - "Show details for virtual machine mysqlLinux2"
   - "Show details for virtual machine <resource-id>"
   - "List executable operations for vm-a"
   - "Stop vm-a"
@@ -92,7 +93,7 @@ related:
   - request
 
 tool_list_name: "smartcmp_list_all_resource"
-tool_list_description: "List SmartCMP resources or virtual machines from the standalone CMP UI list endpoint and show each item's current status. Use `scope=all_resources` for 查看所有资源 and `scope=virtual_machines` for 查看所有云主机. `query_value` is optional. If the user only asked to browse resources, return the numbered list. If the user asked for a resource operation, use the list result as target-resolution evidence and continue to confirmation or clarification."
+tool_list_description: "List SmartCMP resources or virtual machines from the standalone CMP UI list endpoint and show each item's current status. Use `scope=all_resources` for 查看所有资源 and `scope=virtual_machines` for 查看所有云主机. `query_value` is optional. If the user only asked to browse resources, return the standard Markdown table. If the user asked for a resource operation, use the list result as target-resolution evidence and continue to confirmation or clarification."
 tool_list_entrypoint: "scripts/list_all_resource.py"
 tool_list_groups:
   - cmp
@@ -126,7 +127,7 @@ tool_list_parameters: |
     }
   }
 tool_detail_name: "smartcmp_resource_detail"
-tool_detail_description: "Summarize one SmartCMP cloud host by resource ID using `PATCH /nodes/{id}/view` until the CMP view API bug is fixed. Use this for 查看云主机详情 or 分析云主机属性."
+tool_detail_description: "Summarize one SmartCMP cloud host by exact visible resource name or resource ID. Prefer `resource_name` when the user provides a host name such as `Linux-test-mysqlds`; the tool resolves one exact unique virtual-machine match internally, then uses `PATCH /nodes/{id}/view` until the CMP view API bug is fixed. Use this for 查看云主机详情 or 分析云主机属性."
 tool_detail_entrypoint: "scripts/resource_detail.py"
 tool_detail_groups:
   - cmp
@@ -143,13 +144,17 @@ tool_detail_parameters: |
     "properties": {
       "resource_id": {
         "type": "string",
-        "description": "SmartCMP resource ID for the cloud host to inspect."
+        "description": "SmartCMP resource ID for the cloud host to inspect when it is already resolved from metadata or a detail URL."
+      },
+      "resource_name": {
+        "type": "string",
+        "description": "Exact visible SmartCMP cloud host name to inspect. Use this when the user asks for details by name and no resource ID is already known."
       }
     },
-    "required": ["resource_id"]
+    "required": []
   }
 tool_operations_name: "smartcmp_list_resource_operations"
-tool_operations_description: "List enabled no-parameter SmartCMP resource operations executable by the current user through `GET /nodes/{category}/{resource_id}/resource-actions`. Accepts a SmartCMP detail URL such as `#/main/virtual-machines/<id>/details` or a raw resource UUID. Do not use resource type definition or built-in action endpoints as fallback. If the user only asked what operations are available, return the numbered operation list. If the user asked to execute an operation, use this result as permission/operation validation evidence and continue to confirmation or clarification."
+tool_operations_description: "List enabled no-parameter SmartCMP resource operations executable by the current user through `GET /nodes/{category}/{resource_id}/resource-actions`. Accepts a SmartCMP detail URL such as `#/main/virtual-machines/<id>/details` or a raw resource UUID. Do not use resource type definition or built-in action endpoints as fallback. If the user only asked what operations are available, return the Markdown operation table. If the user asked to execute an operation, use this result as permission/operation validation evidence and continue to confirmation or clarification."
 tool_operations_entrypoint: "scripts/list_resource_operations.py"
 tool_operations_groups:
   - cmp
@@ -230,7 +235,8 @@ Provide one skill for resource browsing, per-host property inspection, and day2 
 ## Scope Rules
 
 - Use `smartcmp_list_all_resource` when the user asks for 云资源 or 云主机 lists.
-- Use `smartcmp_resource_detail` when the user asks for one cloud host detail or property analysis by resource ID.
+- Use `smartcmp_resource_detail` when the user asks for one cloud host detail or property analysis by exact visible resource name or resource ID.
+- If the user provides an exact visible cloud-host name for detail, call `smartcmp_resource_detail` with `resource_name` directly. Do not call `smartcmp_list_all_resource` first just to resolve or display the name.
 - Use `smartcmp_list_resource_operations` when the user asks what operations the current user can execute on a resource.
 - Use `smartcmp_operate_resource` when the user wants to execute an enabled no-parameter operation on an existing cloud resource.
 - Treat "我的" and "所有" the same for now because the provided UI URLs do not expose a separate owner-only filter; rely on SmartCMP access control and the current user's visible scope.
@@ -242,10 +248,10 @@ An operation intent means the user wants to change an existing resource state, f
 When operation intent is present, a resource lookup is only a target-resolution step. Do not stop at the `smartcmp_list_all_resource` visible list output, and do not answer only with `Found N ...`. Use the returned metadata to continue to operation resolution, confirmation, or a clarification question.
 
 1. Resolve the target resource.
-   - If the user references a recent numbered list item, such as `1`, `第 1 台`, or `the first one`, use the matching item from the latest `smartcmp_list_all_resource` metadata.
+   - If the user references a recent table `#` item, such as `1`, `第 1 台`, or `the first one`, use the matching item from the latest `smartcmp_list_all_resource` metadata.
    - If the user provides action + index + name, such as `stop 1 vm-a`, treat the index as the selection and the name as a safety check. If they match, use that resource UUID. If they conflict, ask the user to clarify.
-   - If the user provides only a display name, call `smartcmp_list_all_resource` with `query_value`, then map an exact unique match to its UUID. If multiple resources remain plausible, ask the user to choose by numbered item.
-   - Never pass a display name, list index, or natural-language phrase as `resource_id` to `smartcmp_resource_detail` or as `resource_ids` to `smartcmp_operate_resource`.
+   - If the user provides only a display name, call `smartcmp_list_all_resource` with `query_value`, then map an exact unique match to its UUID. If multiple resources remain plausible, ask the user to choose by table `#`.
+   - Never pass a display name, list index, or natural-language phrase as `resource_id` to `smartcmp_resource_detail` or as `resource_ids` to `smartcmp_operate_resource`; use `resource_name` for name-based detail inspection and concrete UUIDs for operations.
 2. Resolve the operation.
    - Use `start`, `stop`, `开机`, and `关机` aliases directly.
    - Use exact operation IDs such as `restart`, `refresh`, or `create_snapshot` directly.
@@ -260,9 +266,10 @@ When operation intent is present, a resource lookup is only a target-resolution 
 ## Critical Rules
 
 - Do not switch to resource-compliance analysis unless the user explicitly asks for compliance, supportability, lifecycle, or security risk.
+- Do not use `smartcmp_list_all_resource` when the user asks for detail of one exact cloud-host name; call `smartcmp_resource_detail` with `resource_name` and let the tool resolve the unique match internally.
 - Do not use the list endpoint when the user already provided a concrete resource ID for host detail analysis.
 - `smartcmp_resource_detail` uses `PATCH /nodes/{id}/view` to fetch the host evidence view until the CMP view API bug is fixed. Do not use older resource/detail APIs as fallback in this interactive detail skill.
-- Keep list-mode output to a numbered list of resource names plus current status.
+- Keep list-mode output as a standard Markdown table. Include a `#` column for stable item references, a resource name column, and status; do not print object links in visible table cells.
 - For host detail, present only grouped key facts. Do not dump raw properties, top-level keys, source endpoints, or every key/value returned by the API.
 - `smartcmp_list_resource_operations` must only use `GET /nodes/{category}/{id}/resource-actions` with the current user context. Do not use `/resource-types/.../support-actions`, `/resource-types/.../resource-actions`, `/nodes/build-in-actions`, or other definition-level endpoints as executable-operation fallback.
 - Only show enabled no-parameter operations as executable choices. Operations that are disabled, web-only, have `inputsForm`, or require non-empty `parameters` are outside this tool's execution scope.
@@ -270,7 +277,7 @@ When operation intent is present, a resource lookup is only a target-resolution 
 - **Before calling the operation tool, confirm with the user:** show the target resource name + operation ID/name, ask `Confirm this operation?`, and STOP. Only call the tool after user confirms.
 - After a resource operation succeeds, respond with only the action, resource ID(s), submitted status, message, and verification hint. Do not print raw request payloads or raw response details.
 - Resolve every target to a concrete SmartCMP resource UUID before calling `smartcmp_operate_resource`.
-- When the user only provides a resource name, first use `smartcmp_list_all_resource` to find the resource and map the chosen item to its `id`.
+- When the user only provides a resource name for a state-changing operation, use `smartcmp_list_all_resource` to find the resource and map the chosen item to its `id`; for detail inspection by name, use `smartcmp_resource_detail.resource_name` instead.
 - Use the visible resource status from the list output to avoid redundant actions. If a resource is already `started` and the user asks to start it again, explain that no power change is needed.
 - Do not guess between multiple resources that share the same display name. Ask the user to pick the correct one.
 - Do not use this skill for provisioning new resources. For destructive or delete-like operations, show the exact operation and target and require explicit confirmation before execution.
@@ -307,7 +314,7 @@ Never show:
 
 | Script | Description |
 |--------|-------------|
-| `scripts/list_all_resource.py` | Call the standalone resource list endpoint and emit a numbered resource directory with visible status |
+| `scripts/list_all_resource.py` | Call the standalone resource list endpoint and emit a Markdown resource table with visible status |
 | `scripts/resource_detail.py` | Fetch one cloud host view and emit a compact grouped detail summary |
 | `scripts/list_resource_operations.py` | List enabled no-parameter operations executable by the current SmartCMP user for one resource |
 | `scripts/operate_resource.py` | Submit SmartCMP no-parameter resource operations for one or more resource IDs |

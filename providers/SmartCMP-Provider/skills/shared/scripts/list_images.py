@@ -13,10 +13,10 @@ import sys
 import requests
 
 try:
-    from _common import require_config
+    from _common import render_markdown_table, require_config
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from _common import require_config
+    from _common import render_markdown_table, require_config
 
 
 def _extract_items(payload):
@@ -103,9 +103,13 @@ def main(argv=None) -> int:
     response.raise_for_status()
 
     items = [_normalize_item(item, index) for index, item in enumerate(_extract_items(response.json()), start=1) if isinstance(item, dict)]
-    print(f"Found {len(items)} image(s):")
-    for item in items:
-        print(f"  [{item['index']}] {item['name']}")
+    print(
+        render_markdown_table(
+            f"Found {len(items)} image(s):",
+            ["#", "Name"],
+            [[item["index"], item["name"]] for item in items],
+        )
+    )
 
     print("##IMAGE_META_START##", file=sys.stderr)
     print(json.dumps(items, ensure_ascii=False, separators=(",", ":")), file=sys.stderr)

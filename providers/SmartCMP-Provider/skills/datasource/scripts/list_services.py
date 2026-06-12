@@ -38,14 +38,14 @@ import yaml
 
 # Import shared utilities (handles URL normalization, SSL warnings)
 try:
-    from _common import require_config
+    from _common import render_markdown_table, require_config
 except ImportError:
     import os
     sys.path.insert(
         0,
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shared", "scripts"),
     )
-    from _common import require_config
+    from _common import render_markdown_table, require_config
 
 BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()
 
@@ -476,10 +476,22 @@ for i, c in enumerate(items):
             entry[key] = derived_resource_type[key]
     meta.append(entry)
 
-# ── User-visible output (brief summary only) ─────────────────────────────
-# Only print a short summary to stdout. The LLM will format the catalog list
-# for the user based on the metadata, applying auto-selection when appropriate.
-print(f"Found {total} published catalog(s).")
+# ── User-visible output ──────────────────────────────────────────────────
+print(
+    render_markdown_table(
+        f"Found {total} published catalog(s):",
+        ["#", "Name", "Service Category", "Source Key"],
+        [
+            [
+                item["index"],
+                item.get("name") or "",
+                item.get("serviceCategory") or "",
+                item.get("sourceKey") or "",
+            ]
+            for item in meta
+        ],
+    )
+)
 
 _envelope = json.dumps({
     "internal_request_trace_id": _trace_id,

@@ -26,11 +26,11 @@ import argparse
 import requests
 
 try:
-    from _common import require_config
+    from _common import render_markdown_table, require_config
 except ImportError:
     import os
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared', 'scripts'))
-    from _common import require_config
+    from _common import render_markdown_table, require_config
 
 
 def parse_args(argv=None):
@@ -90,11 +90,13 @@ def main(argv=None) -> int:
         print("No available business groups found.")
         return 0
 
-    print(f"Found {len(bgs)} available business group(s):\n")
-    for i, bg in enumerate(bgs, start=1):
-        bg_id = bg.get("id", "")
-        bg_name = bg.get("name", "")
-        print(f"  {i}) {bg_name} (id={bg_id})")
+    print(
+        render_markdown_table(
+            f"Found {len(bgs)} available business group(s):",
+            ["#", "Name", "ID"],
+            [[index, bg.get("name", ""), bg.get("id", "")] for index, bg in enumerate(bgs, start=1)],
+        )
+    )
 
     print()
     print("##BG_META_START##")

@@ -48,6 +48,16 @@ def extract_meta(output: str):
     return json.loads(match.group(1))
 
 
+def localized(default: str, zh_cn: str) -> dict[str, object]:
+    return {
+        "default": default,
+        "translations": {
+            "en-US": default,
+            "zh-CN": zh_cn,
+        },
+    }
+
+
 def test_main_prints_numbered_summary_and_meta_block(monkeypatch):
     module = load_module()
     captured = {}
@@ -104,8 +114,9 @@ def test_main_prints_numbered_summary_and_meta_block(monkeypatch):
 
     output = stdout.getvalue()
     assert exit_code == 0
-    assert "Found 2 alert(s)." in output
-    assert "[1] CPU High" in output
+    assert "Found 2 alert(s):" in output
+    assert "| # | Policy | Status | Level | Resource |" in output
+    assert "| 1 | CPU High | ALERT_FIRING | 3 | worker-01 |" in output
     assert "worker-01" in output
     assert captured["path"] == "/alarm-alert"
     assert captured["params"]["status"] == ["ALERT_FIRING"]
@@ -114,6 +125,19 @@ def test_main_prints_numbered_summary_and_meta_block(monkeypatch):
     meta = extract_meta(output)
     assert len(meta) == 2
     assert meta[0]["index"] == 1
+    assert meta[0]["object_type"] == "alarm_alert"
+    assert meta[0]["object_id"] == "alert-1"
+    assert meta[0]["object_name"] == "CPU High"
+    assert meta[0]["object_actions"] == [
+        {
+            "action_id": "view_detail",
+            "kind": "agent_prompt",
+            "display_label": localized("View details", "查看详情"),
+            "agent_prompt": localized("Analyze alert alert-1", "分析告警 alert-1"),
+            "effect": "read",
+            "tone": "default",
+        }
+    ]
     assert meta[0]["alertId"] == "alert-1"
     assert meta[0]["alarmPolicyId"] == "policy-1"
     assert meta[0]["status"] == "ALERT_FIRING"
