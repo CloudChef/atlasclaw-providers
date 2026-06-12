@@ -27,6 +27,8 @@ from _common import render_markdown_table, require_config  # noqa: E402
 DEFAULT_RESOURCE_CATEGORY = "virtual-machines"
 RESOURCE_OPERATIONS_META_START = "##RESOURCE_OPERATIONS_META_START##"
 RESOURCE_OPERATIONS_META_END = "##RESOURCE_OPERATIONS_META_END##"
+FORM_INPUT_KEYS = ("inputsForm", "inputForm", "input_form", "inputs_form")
+NESTED_FORM_INPUT_KEYS = ("form", "inputsForm", "inputForm", "input_form", "inputs_form")
 
 
 def parse_resource_reference(
@@ -93,6 +95,26 @@ def parameters_are_empty(value: Any) -> bool:
     return False
 
 
+def form_input_is_present(value: Any) -> bool:
+    """Return whether a SmartCMP form declaration means the operation needs user input."""
+    return value is not None and value != ""
+
+
+def operation_has_form_input(operation: dict[str, Any]) -> bool:
+    """Return whether an operation exposes any known form-input metadata."""
+    for key in FORM_INPUT_KEYS:
+        if key in operation and form_input_is_present(operation[key]):
+            return True
+
+    inputs = operation.get("inputs")
+    if isinstance(inputs, dict):
+        return any(
+            key in inputs and form_input_is_present(inputs[key]) for key in NESTED_FORM_INPUT_KEYS
+        )
+
+    return False
+
+
 def operation_rejection_reason(operation: dict[str, Any]) -> str:
     """Explain why an operation is outside this tool's executable no-parameter scope."""
     if not normalize_operation_id(str(operation.get("id") or "")):
@@ -105,7 +127,7 @@ def operation_rejection_reason(operation: dict[str, Any]) -> str:
         )
     if operation.get("webOperation") is True:
         return "Operation must be executed in the SmartCMP web UI."
-    if operation.get("inputsForm") not in (None, "", {}, []):
+    if operation_has_form_input(operation):
         return "Operation requires form input, which is not supported by this tool."
     if not parameters_are_empty(operation.get("parameters")):
         return "Operation requires parameters, which is not supported by this tool."

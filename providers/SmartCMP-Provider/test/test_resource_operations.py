@@ -94,6 +94,20 @@ def test_operation_filter_keeps_only_current_user_executable_no_parameter_action
     assert "requires parameters" in module.operation_rejection_reason(operations[4])
 
 
+def test_operation_filter_rejects_common_form_input_metadata_aliases():
+    module = load_module()
+    operations = [
+        {"id": "resize", "enabled": True, "inputForm": {}},
+        {"id": "change_config", "enabled": True, "inputForm": "{}"},
+        {"id": "change_network", "enabled": True, "input_form": {"fields": []}},
+        {"id": "change_lifecycle", "enabled": True, "inputs": {"form": "{}"}},
+    ]
+
+    assert not any(module.operation_is_executable(operation) for operation in operations)
+    for operation in operations:
+        assert "form input" in module.operation_rejection_reason(operation)
+
+
 def test_main_queries_resource_scoped_user_operations_and_emits_metadata(monkeypatch):
     module = load_module()
     calls = {}
