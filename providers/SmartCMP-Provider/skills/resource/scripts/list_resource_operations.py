@@ -21,13 +21,12 @@ SHARED_SCRIPTS_DIR = SCRIPT_DIR.parents[1] / "shared" / "scripts"
 if str(SHARED_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SHARED_SCRIPTS_DIR))
 
-from _common import require_config  # noqa: E402
+from _common import render_markdown_table, require_config  # noqa: E402
 
 
 DEFAULT_RESOURCE_CATEGORY = "virtual-machines"
 RESOURCE_OPERATIONS_META_START = "##RESOURCE_OPERATIONS_META_START##"
 RESOURCE_OPERATIONS_META_END = "##RESOURCE_OPERATIONS_META_END##"
-PARAMETERIZED_OPERATION_IDS = {"resize"}
 
 
 def parse_resource_reference(
@@ -96,11 +95,8 @@ def parameters_are_empty(value: Any) -> bool:
 
 def operation_rejection_reason(operation: dict[str, Any]) -> str:
     """Explain why an operation is outside this tool's executable no-parameter scope."""
-    operation_id = normalize_operation_id(str(operation.get("id") or ""))
-    if not operation_id:
+    if not normalize_operation_id(str(operation.get("id") or "")):
         return "Operation has no ID."
-    if operation_id in PARAMETERIZED_OPERATION_IDS:
-        return "Operation requires parameters, which is not supported by this tool."
     if operation.get("enabled") is not True:
         return str(
             operation.get("disabledMsgZh")
@@ -221,6 +217,7 @@ def render_operation_list(
         lines.append("No executable no-parameter operations were returned for the current user.")
         return "\n".join(lines)
 
+    rows = []
     for index, operation in enumerate(operations, start=1):
         item = normalize_operation(index, operation)
         suffixes = []
@@ -230,8 +227,8 @@ def render_operation_list(
             suffixes.append("batch")
         if item["supportScheduledTask"]:
             suffixes.append("scheduled")
-        suffix = f" | {'; '.join(suffixes)}" if suffixes else ""
-        lines.append(f"  [{index}] {item['displayName']} ({item['id']}){suffix}")
+        rows.append([index, item["displayName"], item["id"], "; ".join(suffixes)])
+    lines.append(render_markdown_table("", ["#", "Operation", "ID", "Flags"], rows).lstrip())
 
     return "\n".join(lines)
 
