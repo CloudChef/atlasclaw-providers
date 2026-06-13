@@ -392,9 +392,8 @@ def main() -> None:
     print(f"Updated At: {_format_timestamp(updated_date)}")
     print(f"Wait Hours: {wait_hours}")
     print(f"Cost Estimate: {cost_estimate}")
-    print("Resource Specs:")
-    for spec in resource_specs:
-        print(f"- {spec}")
+    if resource_specs:
+        print(f"Resource Specs: {', '.join(resource_specs)}")
     if description:
         print(f"Description: {description}")
 

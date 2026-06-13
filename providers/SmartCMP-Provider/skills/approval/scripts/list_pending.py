@@ -468,7 +468,6 @@ def render_pending_table(
     *,
     total: int,
     now_ms: int,
-    flavor_names_by_id: Optional[dict[str, str]] = None,
 ) -> str:
     """Render pending approvals as a compact Markdown table.
 
@@ -479,11 +478,10 @@ def render_pending_table(
     lines = [
         f"Pending approvals - total {total} (sorted by updated time desc)",
         "",
-        "| # | Request ID | Name | Catalog | Applicant | Updated At | Wait(h) | Priority | Step | Approver | Specs |",
-        "| --- | --- | --- | --- | --- | --- | ---: | --- | --- | --- | --- |",
+        "| # | Request ID | Name | Catalog | Applicant | Updated At | Approver |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for index, item in enumerate(items, start=1):
-        specs = ", ".join(extract_resource_specs(item, flavor_names_by_id=flavor_names_by_id))
         row = [
             index,
             _request_id(item) or "N/A",
@@ -491,11 +489,7 @@ def render_pending_table(
             truncate_cell(item.get("catalogName") or item.get("resourceType") or item.get("type") or "uncategorized_request", limit=24),
             truncate_cell(item.get("applicant") or item.get("requesterName") or item.get("createdByName") or "N/A", limit=18),
             format_timestamp(item.get("updatedDate") or ""),
-            calculate_wait_hours(item.get("createdDate"), now_ms=now_ms),
-            item["_priority"]["label"],
-            truncate_cell(get_approval_step_name(item), limit=18),
             truncate_cell(get_approver_info(item), limit=18),
-            truncate_cell(specs, limit=42),
         ]
         lines.append("| " + " | ".join(escape_markdown_cell(value) for value in row) + " |")
     return "\n".join(lines)
@@ -537,16 +531,8 @@ def main(argv: list[str]) -> int:
             items,
             total=total,
             now_ms=now_ms,
-            flavor_names_by_id=flavor_names_by_id,
         )
     )
-    print("")
-
-    high_count = sum(1 for item in items if item["_priority"]["score"] >= 80)
-    mid_count = sum(1 for item in items if 60 <= item["_priority"]["score"] < 80)
-    low_count = sum(1 for item in items if item["_priority"]["score"] < 60)
-
-    print(f"  Priority distribution: high {high_count} | medium {mid_count} | low {low_count}")
     print("")
 
     meta = build_meta(
@@ -557,8 +543,8 @@ def main(argv: list[str]) -> int:
     )
 
     # Keep machine-readable metadata on stderr. The agent consumes it silently to
-    # resolve row numbers, object IDs, and actions; the user only sees the table
-    # and the priority summary.
+    # resolve row numbers, object IDs, and actions; the user only sees the compact
+    # approval table.
     print("##APPROVAL_META_START##", file=sys.stderr)
     print(
         json.dumps(

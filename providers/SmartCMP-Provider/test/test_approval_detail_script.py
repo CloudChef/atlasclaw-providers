@@ -213,7 +213,7 @@ def test_detail_returns_empty_resource_specs_when_request_has_no_specs(monkeypat
         module.main()
 
     rendered = stdout.getvalue()
-    assert "Resource Specs:" in rendered
+    assert "Resource Specs:" not in rendered
     assert "no_detailed_specs" not in rendered
 
     payload = stderr.getvalue().split("##APPROVAL_DETAIL_META_START##\n", 1)[1].split(
@@ -285,7 +285,7 @@ def test_detail_prefers_current_selection_name_over_memory(monkeypatch) -> None:
         module.main()
 
     rendered = stdout.getvalue()
-    assert "- Small" in rendered
+    assert "Resource Specs: Small" in rendered
     assert "memory=2048" not in rendered
 
     payload = stderr.getvalue().split("##APPROVAL_DETAIL_META_START##\n", 1)[1].split(
@@ -348,7 +348,7 @@ def test_detail_prefers_flavor_name_from_compute_profile_id(monkeypatch) -> None
         module.main()
 
     rendered = stdout.getvalue()
-    assert "- Medium" in rendered
+    assert "Resource Specs: Medium" in rendered
     assert "- Small" not in rendered
     assert "memory=2048" not in rendered
 

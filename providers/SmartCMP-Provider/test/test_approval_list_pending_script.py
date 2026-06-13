@@ -370,7 +370,11 @@ def test_main_renders_newest_first_table_and_hides_internal_meta(monkeypatch) ->
 
     rendered = stdout.getvalue()
     internal = stderr.getvalue()
-    assert "| # | Request ID | Name |" in rendered
+    assert "| # | Request ID | Name | Catalog | Applicant | Updated At | Approver |" in rendered
+    assert "Wait(h)" not in rendered
+    assert "Priority" not in rendered
+    assert "Step" not in rendered
+    assert "Specs" not in rendered
     assert rendered.index("RES20260427000004") < rendered.index("RES20260426000003")
     assert "new-internal-request-uuid" not in rendered
     assert "new-approval-uuid" not in rendered
