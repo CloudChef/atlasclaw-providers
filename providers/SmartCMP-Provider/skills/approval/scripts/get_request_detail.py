@@ -21,8 +21,6 @@ from __future__ import annotations
 import json
 import sys
 import time
-from datetime import datetime
-from typing import Any
 
 import requests
 
@@ -43,14 +41,11 @@ except ImportError:
     )
     from _common import build_approval_object_actions, require_config
 
-from _approval_validation import APPROVAL_ID_FORMAT_HINT, is_request_id, request_id_from_item
-from _approval_specs import (
-    extract_compute_profile_ids,
-    extract_flavor_lookup_ids,
-    extract_flavor_name_map,
-    extract_named_resource_specs,
-    unwrap_value,
+from _approval_context import (
+    format_timestamp,
+    load_pending_approval_context,
 )
+from _approval_validation import APPROVAL_ID_FORMAT_HINT, is_request_id
 
 
 BASE_URL, AUTH_TOKEN, HEADERS, _INSTANCE = require_config()
@@ -79,254 +74,6 @@ def _parse_args() -> tuple[str, int]:
     return identifier, max(days, 1)
 
 
-def _format_timestamp(ts: Any) -> str:
-    if isinstance(ts, (int, float)) and ts > 0:
-        try:
-            return datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d %H:%M")
-        except Exception:
-            pass
-    return str(ts) if ts else ""
-
-
-def _calculate_wait_hours(created_ts: Any, now_ms: int) -> float:
-    if isinstance(created_ts, (int, float)) and created_ts > 0:
-        return round((now_ms - created_ts) / 3600000, 1)
-    return 0.0
-
-
-def _unwrap_value(value: Any) -> Any:
-    return unwrap_value(value)
-
-
-def _extract_from_dict(data: dict[str, Any], specs: list[str], prefix: str = "") -> None:
-    del prefix
-
-    def _append(key: str, value: Any) -> None:
-        normalized = _unwrap_value(value)
-        if normalized not in (None, ""):
-            specs.append(f"{key}={normalized}")
-
-    for key in ("cpu", "vcpu", "cpuCount", "cpu_count"):
-        if key in data:
-            value = _unwrap_value(data[key])
-            if value:
-                specs.append(f"cpu_cores={value}")
-                break
-    for key in ("memory", "ram", "memorySize", "memory_size"):
-        if key in data:
-            value = _unwrap_value(data[key])
-            if value:
-                specs.append(f"memory={value}")
-                break
-    for key in ("disk", "storage", "diskSize", "disk_size"):
-        if key in data:
-            _append("storage", data[key])
-            break
-    if "asset_tag" in data:
-        _append("asset_tag", data["asset_tag"])
-    for key in ("infra_type", "resourceType", "cloudEntryType"):
-        if key in data:
-            value = _unwrap_value(data[key])
-            if value and value != "vsphere":
-                specs.append(f"resource_type={value}")
-                break
-
-
-def _fetch_flavor_names_by_id() -> dict[str, str]:
-    try:
-        resp = requests.get(
-            f"{BASE_URL}/flavors",
-            headers=HEADERS,
-            params={"page": 1, "size": 500, "query": "", "queryValue": "", "sort": "createdDate,desc"},
-            verify=False,
-            timeout=30,
-        )
-        resp.raise_for_status()
-        return extract_flavor_name_map(resp.json())
-    except requests.exceptions.RequestException:
-        return {}
-
-
-def _request_params_from_item(item: dict[str, Any]) -> dict[str, Any]:
-    activity = item.get("currentActivity") or {}
-    params = activity.get("requestParams") or {}
-    return params if isinstance(params, dict) else {}
-
-
-def _first_text(*values: Any) -> str:
-    for value in values:
-        normalized = _unwrap_value(value)
-        if isinstance(normalized, (str, int, float)):
-            text = str(normalized).strip()
-            if text:
-                return text
-    return ""
-
-
-def _extract_catalog_id(item: dict[str, Any]) -> str:
-    catalog = item.get("catalog") or {}
-    params = _request_params_from_item(item)
-    return _first_text(
-        item.get("catalogId"),
-        item.get("catalogID"),
-        item.get("catalog_id"),
-        catalog.get("id") if isinstance(catalog, dict) else "",
-        params.get("catalogId"),
-        params.get("catalog_id"),
-    )
-
-
-def _item_needs_flavor_lookup(item: dict[str, Any]) -> bool:
-    return bool(extract_flavor_lookup_ids(_request_params_from_item(item)))
-
-
-def _extract_resource_specs(
-    item: dict[str, Any],
-    *,
-    flavor_names_by_id: dict[str, str] | None = None,
-) -> list[str]:
-    params = _request_params_from_item(item)
-    named_specs = extract_named_resource_specs(params)
-    if named_specs:
-        return named_specs[:8]
-    flavor_names_by_id = flavor_names_by_id or {}
-    compute_profile_ids = extract_compute_profile_ids(params)
-    flavor_names = [
-        flavor_names_by_id[profile_id]
-        for profile_id in compute_profile_ids
-        if profile_id in flavor_names_by_id
-    ]
-    if compute_profile_ids:
-        return flavor_names[:8]
-
-    specs: list[str] = []
-    for key, value in params.items():
-        if key.startswith("_ra_Compute_") or key.startswith("_ra_"):
-            continue
-        if isinstance(value, dict):
-            _extract_from_dict(value, specs)
-
-    resource_specs = params.get("resourceSpecs") or {}
-    if isinstance(resource_specs, dict):
-        for node_name, node_spec in resource_specs.items():
-            if isinstance(node_spec, dict):
-                _extract_from_dict(node_spec, specs, prefix=str(node_name))
-
-    ext_params = params.get("extensibleParameters") or {}
-    if isinstance(ext_params, dict):
-        for node_name, node_spec in ext_params.items():
-            if isinstance(node_spec, dict):
-                _extract_from_dict(node_spec, specs, prefix=str(node_name))
-
-    compute_profile = params.get("_ra_Compute_compute_profile_id")
-    if compute_profile:
-        specs.append(f"compute_profile={compute_profile}")
-
-    for key in ("quantity", "count", "instanceCount", "serverCount"):
-        if key in params and params[key]:
-            specs.append(f"quantity={params[key]}")
-            break
-
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for spec in specs:
-        if spec in seen:
-            continue
-        seen.add(spec)
-        deduped.append(spec)
-    return deduped[:8]
-
-
-def _extract_cost_info(item: dict[str, Any]) -> str:
-    charge = item.get("chargePredictResult")
-    if isinstance(charge, dict):
-        total = charge.get("totalCost") or charge.get("cost") or charge.get("amount")
-        if total not in (None, ""):
-            return f"¥{total}"
-    if charge:
-        return str(charge)
-    return "not_estimated"
-
-
-def _get_approval_step_name(item: dict[str, Any]) -> str:
-    activity = item.get("currentActivity") or {}
-    step = activity.get("processStep") or {}
-    return str(step.get("name") or "step_unavailable")
-
-
-def _get_approver_info(item: dict[str, Any]) -> str:
-    activity = item.get("currentActivity") or {}
-    approvers: list[str] = []
-    approval_requests = activity.get("approvalRequests") or []
-    for approval_request in approval_requests[:3]:
-        approver = approval_request.get("approver") or {}
-        name = approver.get("name") or approver.get("loginId") or ""
-        if name:
-            approvers.append(str(name))
-    if approvers:
-        return ", ".join(approvers)
-
-    assignments = activity.get("assignments") or []
-    for assignment in assignments[:3]:
-        approver = assignment.get("approver") or {}
-        name = approver.get("name") or approver.get("loginId") or ""
-        if name:
-            approvers.append(str(name))
-    return ", ".join(approvers) if approvers else "approver_unavailable"
-
-
-def _extract_items(payload: Any) -> list[dict[str, Any]]:
-    if isinstance(payload, list):
-        return [item for item in payload if isinstance(item, dict)]
-    if not isinstance(payload, dict):
-        return []
-    for key in ("content", "data", "items", "result"):
-        value = payload.get(key)
-        if isinstance(value, list):
-            return [item for item in value if isinstance(item, dict)]
-    return []
-
-
-def _matches_identifier(item: dict[str, Any], identifier: str) -> bool:
-    normalized = identifier.strip().lower()
-    return bool(normalized and _request_id(item).lower() == normalized)
-
-
-def _request_id(item: dict[str, Any]) -> str:
-    """Return the SmartCMP user-facing request number, not an internal UUID."""
-    return request_id_from_item(item)
-
-
-def _query_pending_items(days: int) -> list[dict[str, Any]]:
-    now_ms = int(time.time() * 1000)
-    start_of_today = now_ms - (now_ms % 86400000)
-    start_at_min = start_of_today - (days * 86400000)
-    start_at_max = now_ms
-    url = f"{BASE_URL}/generic-request/current-activity-approval"
-    headers = HEADERS
-    all_items: list[dict[str, Any]] = []
-    for page in range(1, 6):
-        params = {
-            "page": page,
-            "size": 50,
-            "stage": "pending",
-            "sort": "updatedDate,desc",
-            "startAtMin": start_at_min,
-            "startAtMax": start_at_max,
-            "rangeField": "updatedDate",
-            "states": "",
-        }
-        response = requests.get(url, headers=headers, params=params, verify=False, timeout=30)
-        response.raise_for_status()
-        items = _extract_items(response.json())
-        if not items:
-            break
-        all_items.extend(items)
-        if len(items) < 50:
-            break
-    return all_items
-
-
 def main() -> None:
     identifier, days = _parse_args()
     if not is_request_id(identifier):
@@ -334,74 +81,53 @@ def main() -> None:
         print(APPROVAL_ID_FORMAT_HINT)
         sys.exit(1)
 
-    max_attempts = 5
-    retry_interval = 3
-    matched = None
-
-    for attempt in range(1, max_attempts + 1):
-        try:
-            items = _query_pending_items(days)
-        except requests.exceptions.RequestException as error:
-            if attempt == max_attempts:
-                print(f"[ERROR] Request failed: {error}")
-                sys.exit(1)
-            time.sleep(retry_interval)
-            continue
-
-        matched = next((item for item in items if _matches_identifier(item, identifier)), None)
-        if matched is not None:
-            break
-
-        if attempt < max_attempts:
-            print(f"[DEBUG] Attempt {attempt}/{max_attempts}: identifier {identifier} not found in pending list, retrying in {retry_interval}s...")
-            time.sleep(retry_interval)
-
-    if matched is None:
-        print(f"[ERROR] No pending SmartCMP approval matched identifier: {identifier} (after {max_attempts} attempts)")
+    try:
+        context = load_pending_approval_context(
+            BASE_URL,
+            HEADERS,
+            identifier,
+            days,
+            request_get=requests.get,
+            time_fn=time.time,
+        )
+    except requests.exceptions.RequestException as error:
+        print(f"[ERROR] Request failed: {error}")
         sys.exit(1)
 
-    now_ms = int(time.time() * 1000)
-    name = matched.get("name") or matched.get("requestName") or "N/A"
-    request_id = _request_id(matched)
-    catalog = matched.get("catalogName") or matched.get("resourceType") or matched.get("type") or "uncategorized_request"
-    applicant = matched.get("applicant") or matched.get("requesterName") or matched.get("createdByName") or "N/A"
-    email = matched.get("email") or ""
-    description = matched.get("description") or matched.get("justification") or ""
-    created_date = matched.get("createdDate") or ""
-    updated_date = matched.get("updatedDate") or ""
-    wait_hours = _calculate_wait_hours(created_date, now_ms)
-    flavor_names_by_id = _fetch_flavor_names_by_id() if _item_needs_flavor_lookup(matched) else {}
-    resource_specs = _extract_resource_specs(matched, flavor_names_by_id=flavor_names_by_id)
-    cost_estimate = _extract_cost_info(matched)
-    approval_step = _get_approval_step_name(matched)
-    current_approver = _get_approver_info(matched)
-    catalog_id = _extract_catalog_id(matched)
-    request_params = _request_params_from_item(matched)
+    if context is None:
+        print(f"[ERROR] No pending SmartCMP approval matched identifier: {identifier} (after 5 attempts)")
+        sys.exit(1)
+
+    matched = context.item
+    detail_meta = context.meta
+    request_id = detail_meta["requestId"]
 
     print("===============================================================")
     print(f"  CMP Request Detail: {request_id or identifier}")
     print("===============================================================")
     if request_id:
         print(f"Request ID: {request_id}")
-    print(f"Name: {name}")
-    print(f"Catalog: {catalog}")
-    print(f"Applicant: {applicant}" + (f" ({email})" if email else ""))
-    print(f"Approval Step: {approval_step}")
-    print(f"Current Approver: {current_approver}")
-    print(f"Created At: {_format_timestamp(created_date)}")
-    print(f"Updated At: {_format_timestamp(updated_date)}")
-    print(f"Wait Hours: {wait_hours}")
-    print(f"Cost Estimate: {cost_estimate}")
+    print(f"Name: {detail_meta['name']}")
+    print(f"Catalog: {detail_meta['catalogName']}")
+    email_suffix = f" ({detail_meta['email']})" if detail_meta["email"] else ""
+    print(f"Applicant: {detail_meta['applicant']}{email_suffix}")
+    print(f"Approval Step: {detail_meta['approvalStep']}")
+    print(f"Current Approver: {detail_meta['currentApprover']}")
+    print(f"Created At: {format_timestamp(detail_meta['createdDate'])}")
+    print(f"Updated At: {format_timestamp(detail_meta['updatedDate'])}")
+    print(f"Wait Hours: {detail_meta['waitHours']}")
+    print(f"Cost Estimate: {detail_meta['costEstimate']}")
+    resource_specs = detail_meta["resourceSpecs"]
     if resource_specs:
         print(f"Resource Specs: {', '.join(resource_specs)}")
-    if description:
-        print(f"Description: {description}")
+    if detail_meta["description"]:
+        print(f"Description: {detail_meta['description']}")
 
-    meta = {
-        "requestId": request_id,
+    meta = dict(detail_meta)
+    meta.update({
         "object_type": "approval_request",
         "object_id": request_id,
-        "object_name": name,
+        "object_name": detail_meta["name"],
         # Detail responses have already shown the request context, so they may
         # expose analysis and decision actions in addition to opening SmartCMP.
         # The actual approve/reject side effects still go through agent prompts
@@ -411,21 +137,7 @@ def main() -> None:
             matched,
             include_detail_actions=True,
         ),
-        "name": name,
-        "catalogId": catalog_id,
-        "catalogName": catalog,
-        "applicant": applicant,
-        "email": email,
-        "description": description,
-        "createdDate": created_date,
-        "updatedDate": updated_date,
-        "waitHours": wait_hours,
-        "approvalStep": approval_step,
-        "currentApprover": current_approver,
-        "costEstimate": cost_estimate,
-        "resourceSpecs": resource_specs,
-        "requestParams": request_params,
-    }
+    })
     # Keep structured data out of the visible answer. AtlasClaw reads this block
     # to render generic actions and preserve exact SmartCMP identifiers.
     print("##APPROVAL_DETAIL_META_START##", file=sys.stderr)

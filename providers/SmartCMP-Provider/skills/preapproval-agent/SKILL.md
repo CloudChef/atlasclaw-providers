@@ -55,6 +55,34 @@ tool_catalog_parameters: |
     "required": ["catalog_id"]
   }
 
+tool_analyze_name: "smartcmp_preapproval_analyze_request"
+tool_analyze_description: "Run the shared read-only SmartCMP pre-approval analysis for one pending Request ID. This is the common evaluator used before the preapproval agent decides whether to call a mutating approval action."
+tool_analyze_entrypoint: "../approval/scripts/analyze_request.py"
+tool_analyze_groups:
+  - cmp
+  - approval
+tool_analyze_capability_class: "provider:smartcmp"
+tool_analyze_priority: 123
+tool_analyze_result_mode: "llm"
+tool_analyze_cli_positional:
+  - identifier
+tool_analyze_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "identifier": {
+        "type": "string",
+        "description": "SmartCMP Request ID to analyze before any preapproval decision."
+      },
+      "days": {
+        "type": "integer",
+        "description": "Lookback window in days when searching pending approvals",
+        "default": 90
+      }
+    },
+    "required": ["identifier"]
+  }
+
 tool_approve_name: "smartcmp_preapproval_approve"
 tool_approve_description: "Approve one or more pending SmartCMP Request IDs for the preapproval agent. Use user-facing IDs such as RES20260505000010, TIC20260502000003, or CHG20260413000011; the shared approval script resolves them to currentActivity.id internally."
 tool_approve_entrypoint: "../approval/scripts/approve.py"
@@ -147,7 +175,7 @@ Autonomous backend agent for approval pre-review. **Not a human confirmation flo
 
 When triggered by a webhook:
 1. Fetch and analyze approval request details
-2. Evaluate request reasonableness against decision rubric
+2. Evaluate request reasonableness with the shared pre-approval analysis contract
 3. Execute approve/reject via existing approval skills
 4. Return structured decision summary
 
@@ -192,6 +220,7 @@ This agent does NOT access the platform directly. It orchestrates:
 |-------|---------|
 | `smartcmp_preapproval_get_request_detail` | Fetch pending approval details |
 | `smartcmp_preapproval_get_catalog_detail` | Fetch the service catalog/card Markdown by `catalogId` |
+| `smartcmp_preapproval_analyze_request` | Run the shared read-only pre-approval evaluator |
 | `smartcmp_preapproval_approve` | Execute approval with reason |
 | `smartcmp_preapproval_reject` | Execute rejection with reason |
 
@@ -212,8 +241,8 @@ This agent does NOT access the platform directly. It orchestrates:
    ├── Cost estimate
    └── Approval history
          ↓
-4. Evaluate Against Rubric
-   └── Apply 7-factor decision criteria
+4. Evaluate Against Shared Analysis
+   └── smartcmp_preapproval_analyze_request → apply catalog policy and default rubric
          ↓
 5. Choose Outcome
    ├── approve
@@ -223,10 +252,16 @@ This agent does NOT access the platform directly. It orchestrates:
 6. Execute Decision
    ├── approve → smartcmp_preapproval_approve <request_id> --reason "<comment>"
    ├── reject  → smartcmp_preapproval_reject <request_id> --reason "<comment>"
-   └── manual  → reject with clear reason
+   └── manual  → stop without mutating SmartCMP and return manual-review guidance
          ↓
 7. Return Structured Result
 ```
+
+## Shared Analysis Contract
+
+Use `smartcmp_preapproval_analyze_request` as the common evaluator before any automated decision. The same script powers user-facing read-only analysis, so approval reasoning does not drift between the manual UI flow and the backend preapproval agent.
+
+The analysis result is advisory. This agent is the only component in this workflow that may subsequently call `smartcmp_preapproval_approve` or `smartcmp_preapproval_reject`, and it must do so only after validating the analysis output and request context.
 
 ## Catalog Policy Override
 
@@ -236,7 +271,7 @@ If the catalog Markdown contains `# Pre Approval Instructions`, that section is 
 
 Only use the built-in Decision Rubric when the catalog/card was fetched successfully and no pre-approval section exists.
 
-If the catalog/card cannot be fetched, fail closed and do not approve. This avoids approving a request whose card-level policy could not be inspected.
+If the catalog/card cannot be fetched, fail closed and do not approve. If catalog pre-approval instructions exist but cannot be deterministically evaluated by the shared analyzer, require manual review instead of speculative approval.
 
 ## Decision Rubric
 
@@ -309,7 +344,7 @@ For rejections, include `improvement_suggestions`.
 | Detail retrieval fails | Return failure, do NOT approve |
 | Approval execution fails | Return provider error as-is |
 | Rejection execution fails | Return provider error as-is |
-| Ambiguous/expensive/high-risk | Reject with guidance |
+| Ambiguous/expensive/high-risk | Return manual-review guidance without mutating SmartCMP |
 
 ## References
 

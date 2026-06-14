@@ -18,6 +18,7 @@ SCRIPT_PATH = (
     / "scripts"
     / "get_request_detail.py"
 )
+APPROVAL_CONTEXT_PATH = SCRIPT_PATH.parent / "_approval_context.py"
 
 
 class _FakeResponse:
@@ -53,6 +54,24 @@ def _load_module(monkeypatch):
         spec = importlib.util.spec_from_file_location("smartcmp_get_request_detail_script", SCRIPT_PATH)
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        if inserted:
+            sys.path.remove(scripts_dir)
+
+
+def _load_approval_context_module():
+    scripts_dir = str(APPROVAL_CONTEXT_PATH.parent)
+    inserted = False
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+        inserted = True
+    try:
+        spec = importlib.util.spec_from_file_location("smartcmp_approval_context_script", APPROVAL_CONTEXT_PATH)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
         spec.loader.exec_module(module)
         return module
     finally:
@@ -145,12 +164,12 @@ def test_detail_uses_language_neutral_labels_and_extensible_resource_specs(monke
     ]
     assert meta["object_actions"][0]["href"] == expected_href
     assert meta["object_actions"][1]["agent_prompt"] == localized(
-        "Analyze approval details for RES20260427000004",
-        "分析 RES20260427000004 的审批详情",
+        "Run read-only approval analysis for RES20260427000004",
+        "只读分析审批请求 RES20260427000004",
     )
     assert meta["object_actions"][2]["agent_prompt"] == localized(
-        "Approve RES20260427000004",
-        "批准 RES20260427000004",
+        "Approve RES20260427000004; the user confirmed this approval in the UI.",
+        "批准 RES20260427000004，用户已在界面确认执行。",
     )
     assert meta["object_actions"][2]["confirmation_message"] == localized(
         "Confirm approving RES20260427000004?",
@@ -158,12 +177,15 @@ def test_detail_uses_language_neutral_labels_and_extensible_resource_specs(monke
     )
     assert meta["object_actions"][2]["requires_confirmation"] is True
     assert meta["object_actions"][3]["agent_prompt_template"] == localized(
-        "Reject RES20260427000004, reason: {{reason}}",
-        "拒绝 RES20260427000004，原因：{{reason}}",
+        (
+            "Reject RES20260427000004, reason: {{reason}}; "
+            "the user confirmed this rejection in the UI."
+        ),
+        "拒绝 RES20260427000004，原因：{{reason}}，用户已在界面确认执行。",
     )
     assert meta["object_actions"][3]["confirmation_message"] == localized(
-        "Confirm rejecting RES20260427000004?",
-        "确认拒绝 RES20260427000004？",
+        "Provide a rejection reason for RES20260427000004.",
+        "请填写拒绝 RES20260427000004 的原因。",
     )
     assert meta["object_actions"][3]["inputs"][0]["name"] == "reason"
     assert meta["object_actions"][3]["inputs"][0]["display_label"] == localized(
@@ -228,16 +250,19 @@ def test_detail_returns_empty_resource_specs_when_request_has_no_specs(monkeypat
         localized("Reject", "拒绝"),
     ]
     assert meta["object_actions"][0]["agent_prompt"] == localized(
-        "Analyze approval details for TIC20260427000005",
-        "分析 TIC20260427000005 的审批详情",
+        "Run read-only approval analysis for TIC20260427000005",
+        "只读分析审批请求 TIC20260427000005",
     )
     assert meta["object_actions"][1]["agent_prompt"] == localized(
-        "Approve TIC20260427000005",
-        "批准 TIC20260427000005",
+        "Approve TIC20260427000005; the user confirmed this approval in the UI.",
+        "批准 TIC20260427000005，用户已在界面确认执行。",
     )
     assert meta["object_actions"][2]["agent_prompt_template"] == localized(
-        "Reject TIC20260427000005, reason: {{reason}}",
-        "拒绝 TIC20260427000005，原因：{{reason}}",
+        (
+            "Reject TIC20260427000005, reason: {{reason}}; "
+            "the user confirmed this rejection in the UI."
+        ),
+        "拒绝 TIC20260427000005，原因：{{reason}}，用户已在界面确认执行。",
     )
 
 
@@ -415,7 +440,7 @@ def test_detail_returns_empty_specs_when_compute_profile_name_cannot_be_resolved
 
 
 def test_detail_maps_top_level_compute_profile_id_to_flavor_name(monkeypatch) -> None:
-    module = _load_module(monkeypatch)
+    context_module = _load_approval_context_module()
     item = {
         "currentActivity": {
             "requestParams": {
@@ -424,7 +449,7 @@ def test_detail_maps_top_level_compute_profile_id_to_flavor_name(monkeypatch) ->
         }
     }
 
-    assert module._extract_resource_specs(
+    assert context_module.extract_resource_specs(
         item,
         flavor_names_by_id={"profile-1": "Small"},
     ) == ["Small"]

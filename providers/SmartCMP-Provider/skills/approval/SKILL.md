@@ -9,6 +9,7 @@ triggers:
   - pending approvals
   - list approvals
   - approval detail
+  - approval analysis
   - approve request
   - reject request
   - approval
@@ -16,6 +17,8 @@ triggers:
   - 待审批
   - 查看待审批
   - 查看审批详情
+  - 分析审批
+  - 审批分析
   - 审批通过
   - 审批拒绝
   - 同意
@@ -27,6 +30,7 @@ triggers:
 use_when:
   - User wants to view pending approval items
   - User wants to inspect one pending SmartCMP approval item in detail
+  - User wants read-only analysis or review guidance for one pending SmartCMP approval item
   - User needs to approve or reject service requests
   - User asks about their approval queue or approval workflow tasks
   - User asks for the detail of a pending approval task by ticket/workflow/request/task/process identifier
@@ -43,6 +47,8 @@ examples:
   - "Show me the detail of TIC20260316000001"
   - "查看TIC20260316000001的详情"
   - "看下这个工单的审批详情"
+  - "Analyze approval request RES20260505000010"
+  - "只读分析审批请求 RES20260505000010"
   - "Approve request #12345"
   - "Approve CHG20260413000011"
   - "Agree RES20260505000010"
@@ -98,6 +104,7 @@ tool_detail_avoid_when:
   - "User asks to 批准, 同意, 通过, or 审批通过, including '批准 <Request ID>', '同意 <Request ID>', '通过 <Request ID>', '批准 1', or '同意 1' (use smartcmp_approve)"
   - "User asks to reject, deny, refuse, or reject request, including 'reject <Request ID>', 'deny <Request ID>', 'refuse <Request ID>', or 'reject 1' (use smartcmp_reject)"
   - "User asks to 拒绝 or 驳回, including '拒绝 <Request ID>', '驳回 <Request ID>', or '拒绝 1' (use smartcmp_reject)"
+  - "User asks to analyze, evaluate, review, or assess approval details, including 'analyze approval request <Request ID>' or '只读分析审批请求 <Request ID>' (use smartcmp_analyze_approval_request)"
   - "User asks for their own submitted request status or whether it has been approved (use smartcmp_get_request_status)"
   - "User is in the middle of submitting a NEW resource request (use smartcmp_submit_request instead)"
   - "User is providing parameters (name, password, specs) for a new request"
@@ -116,6 +123,59 @@ tool_detail_parameters: |
       "identifier": {
         "type": "string",
         "description": "The single lookup identifier. Use the SmartCMP user-facing Request ID only, such as RES20260505000010, TIC20260502000003, or CHG20260413000011."
+      },
+      "days": {
+        "type": "integer",
+        "description": "Lookback window in days when searching pending approvals",
+        "default": 90
+      }
+    },
+    "required": ["identifier"]
+  }
+tool_analyze_name: "smartcmp_analyze_approval_request"
+tool_analyze_description: "Read-only analysis for one pending SmartCMP approval request. Use when the user asks to analyze/evaluate/review an approval request or clicks an approval analysis action. This tool produces guidance without changing provider state and returns object_actions for the user to choose the next action."
+tool_analyze_entrypoint: "scripts/analyze_request.py"
+tool_analyze_aliases:
+  - "analyze approval"
+  - "review approval"
+  - "approval analysis"
+  - "分析审批"
+  - "审批分析"
+  - "只读分析审批请求"
+tool_analyze_keywords:
+  - "analyze"
+  - "analysis"
+  - "evaluate"
+  - "review"
+  - "assess"
+  - "read-only analysis"
+  - "分析"
+  - "审批分析"
+  - "分析审批"
+  - "只读分析"
+tool_analyze_use_when:
+  - "User asks to analyze/evaluate/review/assess a pending approval Request ID in read-only mode"
+  - "User clicks the approval detail Analyze action, whose prompt says to run read-only approval analysis"
+  - "User asks to 分析/评估/审查 a pending approval Request ID, including '只读分析审批请求 <Request ID>'"
+tool_analyze_avoid_when:
+  - "User only asks to view/show/check detail without analysis intent (use smartcmp_get_request_detail)"
+  - "User asks to approve/agree/pass/同意/批准/通过 (use smartcmp_approve)"
+  - "User asks to reject/deny/refuse/拒绝/驳回 (use smartcmp_reject)"
+tool_analyze_groups:
+  - cmp
+  - approval
+tool_analyze_capability_class: "provider:smartcmp"
+tool_analyze_priority: 112
+tool_analyze_result_mode: "tool_only_ok"
+tool_analyze_cli_positional:
+  - identifier
+tool_analyze_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "identifier": {
+        "type": "string",
+        "description": "The SmartCMP user-facing Request ID to analyze, such as RES20260505000010, TIC20260502000003, or CHG20260413000011."
       },
       "days": {
         "type": "integer",
@@ -153,6 +213,7 @@ tool_approve_use_when:
   - "User asks to 批准/同意/通过 a row from the latest pending approval list, e.g. '批准 1', '同意 1', or '通过第1个'"
 tool_approve_avoid_when:
   - "User only asks to view/show/inspect/check request detail without an approval action verb (use smartcmp_get_request_detail)"
+  - "User asks for read-only approval analysis, including 'Run read-only approval analysis for <Request ID>' or '只读分析审批请求 <Request ID>' (use smartcmp_analyze_approval_request)"
   - "User asks whether their own submitted request has already been approved (use smartcmp_get_request_status)"
 tool_approve_groups:
   - cmp
@@ -202,6 +263,7 @@ tool_reject_use_when:
   - "User asks to 拒绝/驳回 a Request ID or row, e.g. '拒绝 CHG20260413000011', '驳回 RES20260505000010', or '拒绝 1'"
 tool_reject_avoid_when:
   - "User only asks to view/show/inspect/check request detail without a rejection action verb (use smartcmp_get_request_detail)"
+  - "User asks for read-only approval analysis, including 'Run read-only approval analysis for <Request ID>' or '只读分析审批请求 <Request ID>' (use smartcmp_analyze_approval_request)"
   - "User asks whether their own submitted request was rejected (use smartcmp_get_request_status)"
 tool_reject_groups:
   - cmp
@@ -244,12 +306,14 @@ Manage approval workflows for service catalog requests:
 
 Use this skill when user intent is any of:
 - View pending approvals / list approvals / check what needs approval
+- Analyze one pending approval in read-only mode
 - Approve a request / approve all / batch approve
 - Reject a request / deny request / batch reject
 
 | Intent | Keywords |
 |--------|----------|
 | View pending | "show pending approvals", "list approvals", "what needs approval" |
+| Analyze | "analyze approval request", "review approval", "只读分析审批请求", "审批分析" |
 | Approve | "approve request", "agree request", "pass request", "approve #1", "agree 1", "同意 1", "批准 1", "通过 1", "approve all", "batch approve" |
 | Reject | "reject request", "deny request", "refuse request", "reject #1", "deny 1", "拒绝 1", "驳回 1", "batch reject" |
 
@@ -263,6 +327,8 @@ Action commands always win over detail lookup.
 | 批准/同意/通过/审批通过 + Request ID or row number | `smartcmp_approve` |
 | reject/deny/refuse + Request ID or row number | `smartcmp_reject` |
 | 拒绝/驳回 + Request ID or row number | `smartcmp_reject` |
+| analyze/evaluate/review + Request ID | `smartcmp_analyze_approval_request` |
+| 分析/评估/审查/只读分析 + Request ID | `smartcmp_analyze_approval_request` |
 | view/show/inspect/check detail + Request ID | `smartcmp_get_request_detail` |
 | 查看/看下/详情 + Request ID | `smartcmp_get_request_detail` |
 
@@ -273,6 +339,8 @@ Examples:
 - `批准 CHG20260413000011` MUST call `smartcmp_approve`.
 - `reject CHG20260413000011` MUST call `smartcmp_reject`.
 - `deny RES20260505000010` MUST call `smartcmp_reject`.
+- `analyze approval request RES20260505000010` MUST call `smartcmp_analyze_approval_request`.
+- `只读分析审批请求 RES20260505000010` MUST call `smartcmp_analyze_approval_request`.
 - `查看 CHG20260413000011 的详情` MUST call `smartcmp_get_request_detail`.
 - `show detail of CHG20260413000011` MUST call `smartcmp_get_request_detail`.
 
@@ -281,6 +349,7 @@ Examples:
 | Script | Description | Location |
 |--------|-------------|----------|
 | `list_pending.py` | List pending approval items with priority | `scripts/` |
+| `analyze_request.py` | Analyze one pending approval without executing a decision | `scripts/` |
 | `approve.py` | Approve one or more requests | `scripts/` |
 | `reject.py` | Reject one or more requests | `scripts/` |
 

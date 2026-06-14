@@ -532,8 +532,8 @@ def build_approval_object_actions(
                     "kind": "agent_prompt",
                     "display_label": _display_label("Analyze", "分析"),
                     "agent_prompt": _agent_prompt(
-                        f"Analyze approval details for {request_id}",
-                        f"分析 {request_id} 的审批详情",
+                        f"Run read-only approval analysis for {request_id}",
+                        f"只读分析审批请求 {request_id}",
                     ),
                     "effect": "read",
                     "tone": "default",
@@ -543,8 +543,8 @@ def build_approval_object_actions(
                     "kind": "agent_prompt",
                     "display_label": _display_label("Approve", "同意"),
                     "agent_prompt": _agent_prompt(
-                        f"Approve {request_id}",
-                        f"批准 {request_id}",
+                        f"Approve {request_id}; the user confirmed this approval in the UI.",
+                        f"批准 {request_id}，用户已在界面确认执行。",
                     ),
                     "confirmation_message": _confirmation_message(
                         f"Confirm approving {request_id}?",
@@ -559,12 +559,15 @@ def build_approval_object_actions(
                     "kind": "agent_prompt",
                     "display_label": _display_label("Reject", "拒绝"),
                     "agent_prompt_template": _agent_prompt(
-                        f"Reject {request_id}, reason: {{{{reason}}}}",
-                        f"拒绝 {request_id}，原因：{{{{reason}}}}",
+                        (
+                            f"Reject {request_id}, reason: {{{{reason}}}}; "
+                            "the user confirmed this rejection in the UI."
+                        ),
+                        f"拒绝 {request_id}，原因：{{{{reason}}}}，用户已在界面确认执行。",
                     ),
                     "confirmation_message": _confirmation_message(
-                        f"Confirm rejecting {request_id}?",
-                        f"确认拒绝 {request_id}？",
+                        f"Provide a rejection reason for {request_id}.",
+                        f"请填写拒绝 {request_id} 的原因。",
                     ),
                     "effect": "mutate",
                     "tone": "danger",
