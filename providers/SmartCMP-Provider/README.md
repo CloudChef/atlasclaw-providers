@@ -1,6 +1,6 @@
 # SmartCMP Provider
 
-SmartCMP Provider is a service provider module for AtlasClaw, integrating with SmartCMP cloud management platform. It supports cloud resource provisioning, approval workflow management, alarm alert handling, data source queries, and resource compliance analysis.
+SmartCMP Provider is a service provider module for AtlasClaw, integrating with SmartCMP cloud management platform. It supports cloud resource provisioning, approval workflow management, alarm alert handling, data source queries, form schema design, and resource compliance analysis.
 
 ## Features
 
@@ -13,6 +13,7 @@ SmartCMP Provider is a service provider module for AtlasClaw, integrating with S
 - **Intelligent Agents** - Automated pre-approval and request decomposition capabilities
 - **Cost Optimization** - Review optimization recommendations, analyze savings, execute SmartCMP-native fixes, and track remediation progress
 - **Resource Compliance** - Resolve resources by exact name or visible list index, reuse the shared normalized resource view, and analyze lifecycle, patch, security, and configuration posture
+- **Form Designer** - Generate, read, normalize, and refine SmartCMP Angular form schemas without saving changes to CMP
 
 ## Quick Start
 
@@ -429,6 +430,32 @@ Representative output fields:
 - External validation is best-effort and degrades conservatively when unavailable
 - No remediation APIs are called by this skill
 
+### form-designer - SmartCMP Form Schema Design
+
+Generate new SmartCMP Angular form schemas or refine existing schemas from
+SmartCMP form edit URLs. This skill is read-only with respect to CMP
+persistence: it may call `GET /forms/{id}` to read source schema, but it never
+saves, updates, publishes, submits, or deletes CMP data.
+
+**Workflow:**
+1. For existing forms, read the form URL with `read_form.py`
+2. Generate or modify the schema JSON according to the user's requirements
+3. Normalize the schema with `design_form.py`
+4. Return the final schema JSON and a short change summary for manual copy/review
+
+**Examples:**
+```bash
+# Read an existing form schema
+python skills/form-designer/scripts/read_form.py \
+  'https://cmp.example/#/main/service-model/forms/edit/42607f38-2c63-4649-a8de-efa031db4544'
+
+# Normalize a new or modified schema draft
+python skills/form-designer/scripts/design_form.py \
+  --mode new \
+  --schema-json '{"type":"object","properties":{}}' \
+  --change-summary 'Generated a new form schema.'
+```
+
 ## Directory Structure
 
 ```
@@ -449,6 +476,10 @@ SmartCMP-Provider/
 │   ├── datasource/                  # Data source query skill
 │   │   ├── scripts/                 # Datasource-owned standalone business-group directory helper
 │   │   ├── references/
+│   │   └── SKILL.md
+│   ├── form-designer/               # SmartCMP Angular form schema design skill
+│   │   ├── references/
+│   │   ├── scripts/
 │   │   └── SKILL.md
 │   ├── preapproval-agent/           # Pre-approval agent
 │   │   ├── references/
@@ -500,6 +531,7 @@ scripts are located in `datasource/scripts/`:
 6. **Resource Compliance** - `resource-compliance` reuses the shared normalized resource view from `list_resource.py`, then attempts live external validation for lifecycle and support checks
 7. **Localized Responses** - Scripts should return stable fields and metadata. Agents are responsible for explaining results in the current user's message language.
 8. **No Raw Day2 Dumps** - Resource operations should not print raw request payloads or raw SmartCMP response details after a successful submission.
+9. **Form Designer Is Read-Only** - `form-designer` outputs schema JSON for manual review/copy only. It must not save or update CMP forms.
 
 ## Related Documentation
 

@@ -35,6 +35,11 @@ keywords:
   - resource compliance
   - lifecycle analysis
   - security posture
+  - form schema
+  - form designer
+  - Angular form
+  - 表单
+  - 表单设计
   - infrastructure
   - cmp
   - CMP
@@ -50,6 +55,7 @@ capabilities:
   - Review cost optimization recommendations and savings opportunities
   - Execute and track native day2 remediation for cost optimization findings
   - Fetch resource details by ID, reuse the shared normalized resource view, and analyze lifecycle, patch, security, and configuration risk
+  - Generate, read, normalize, and refine SmartCMP Angular form schema JSON without saving forms to CMP
 
 use_when:
   - User wants to request a VM, database, application environment, or other service catalog item
@@ -63,6 +69,7 @@ use_when:
   - User wants to review cost optimization recommendations, savings opportunities, or remediation progress
   - User wants to execute a native day2 fix for a cost finding
   - User wants to analyze one or more existing resources by exact name or visible list index for compliance or security risk
+  - User wants to create, inspect, normalize, or improve a SmartCMP Angular form schema
 
 avoid_when:
   - User wants generic issue tracking outside cloud service requests (use Jira provider)
@@ -305,6 +312,7 @@ CMP_URL=https://cmp.example.com
 | `request-decomposition-agent` | Agent | Transform natural-language requirements into request drafts | NL parsing, multi-skill orchestration |
 | `cost-optimization` | Optimization | Analyze savings opportunities and execute platform-native fixes | `list_recommendations`, `analyze_recommendation`, `execute_optimization`, `track_execution` |
 | `resource-compliance` | Analysis | Resolve resources by exact name or visible list index, normalize `type + properties`, and run componentType-driven cloud/software/OS compliance analysis | `list_resource`, `analyze_resource` |
+| `form-designer` | Form Design | Generate, read, normalize, and refine SmartCMP Angular form schema JSON without saving CMP forms | `read_form`, `design_form` |
 
 ### Core Skills
 
@@ -444,6 +452,18 @@ Representative output fields:
   "type": "resource.software.app.tomcat",
   "analysisTargets": ["software:tomcat"]
 }
+```
+
+#### form-designer
+
+Generate or improve SmartCMP Angular form schema JSON. Existing form URLs are
+read with `GET /forms/{id}` from the selected SmartCMP instance, and final
+schemas are returned to AtlasClaw only. This skill does not submit service
+requests and does not save, publish, update, or delete forms in CMP.
+
+```bash
+python skills/form-designer/scripts/read_form.py 'https://cmp.example/#/main/service-model/forms/edit/<uuid>'
+python skills/form-designer/scripts/design_form.py --mode new --schema-json '{"type":"object","properties":{}}'
 ```
 
 ### Agent Skills
