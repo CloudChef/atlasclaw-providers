@@ -12,7 +12,12 @@ triggers:
   - improve form
   - SmartCMP form
   - Angular form
+  - form JSON
   - 表单 schema
+  - 表单json
+  - 创建表单json
+  - 服务目录创建表单
+  - 生成JSON文本
   - 生成表单
   - 修改表单
   - 完善表单
@@ -126,9 +131,15 @@ changes to CMP.
    complete SmartCMP Angular schema JSON object.
 2. Preserve the language requested by the user. Generate bilingual
    `i18nTitle` or `i18nPlaceholder` only when the user asks for bilingual output.
-3. Call `smartcmp_design_form_schema` with `mode=new` and the draft
+3. Do not call `session_status` or browse datasource tools when the user already
+   gave enough information to build the form JSON. This skill's job in chat is
+   to generate the JSON text for the user to copy.
+4. Do not call `smartcmp_read_form_schema` for new forms. That tool is only for
+   modifying an existing form URL. A missing existing form schema is not a
+   blocker for new form JSON generation.
+5. Call `smartcmp_design_form_schema` with `mode=new` and the draft
    `schema_json`.
-4. Return the normalized schema JSON and a short change summary.
+6. Return the normalized schema JSON and a short change summary.
 
 ### Modify Existing Form
 
@@ -137,6 +148,21 @@ changes to CMP.
 3. Call `smartcmp_design_form_schema` with `mode=modify`, the modified
    `schema_json`, the source `form_url`, and a short `change_summary`.
 4. Return the normalized schema JSON and the short change summary.
+
+## Final response contract
+
+Final response must include the normalized schema JSON text returned by
+`smartcmp_design_form_schema` in a fenced `json` code block.
+Do not replace the JSON with a summary, table, or usage notes. A short sentence
+before or after the code block is fine, but the JSON itself is the deliverable.
+Return the root schema object directly: it must start with keys such as `type`,
+`properties`, `required`, `fieldsets`, and `widget`. Do not wrap it in `{ "schema": ... }`,
+`{ "model": ..., "schema": ... }`, or any other envelope when the user needs JSON
+for the SmartCMP form designer.
+
+If the tool output contains a `Schema JSON:` block, copy that normalized JSON
+block into the final answer. Do not answer with only "created successfully",
+"content overview", field tables, or dynamic-logic explanations.
 
 ## Schema Rules
 
@@ -147,6 +173,35 @@ changes to CMP.
   `config.visibility.allowInApproval` unless the user explicitly provided a
   different visibility rule.
 - Preserve `hidden`, `condition`, `fieldsets`, `selectDatas`, `value`, `items`,
-  and unknown schema keys.
+  and unknown schema keys, except on mock auto-sync submission fields where
+  `hidden` and `condition` prevent execution and must be removed.
 - Use warnings for ambiguous or unsupported structures instead of inventing CMP
   workflow behavior.
+
+## Service catalog context sync
+
+For service-catalog request-page context, hidden submit fields, or dynamic
+JavaScript that builds JSON-string values from fields such as `业务组`, `所有者`,
+`应用系统`, or `名称`, read `references/CATALOG_CONTEXT_SYNC.md` before generating
+the schema.
+
+Critical contract summary:
+
+- Use the maintained `references/catalog-context-expression.js` template.
+- Generate complete executable JavaScript, never an abbreviated `...` snippet.
+- Put dynamic source metadata under `config.value` with `source: "mock"` and
+  `method: "mock"`.
+- Submit JSON strings with `JSON.stringify(out)`, not JavaScript objects,
+  arrays, or hand-built pseudo JSON.
+- Keep the hidden submit field rendered as a string field so the expression can
+  execute; hide it via title flags and the template's DOM/CSS helper.
+- For fixed display outputs, use only these `FIELD_SPECS.keys` paths:
+  `业务组 -> catalogServiceRequest.exts.businessGroup.name`,
+  `所有者 -> catalogServiceRequest.exts.owner.name`,
+  `应用系统 -> catalogServiceRequest.exts.project.name`, and `名称 -> name`.
+- Do not submit control IDs or aliases such as `businessGroup`, `BusinessGroup`,
+  `businessGroupId`, `owner`, `owners`, `Owners`, `projectId`, `projects`,
+  `Projects`, `Name`, or `requestName` for these display outputs.
+- If the request only combines fixed labels from the table above, generate the
+  form directly; do not block on catalog lookup failure, existing form schema,
+  field IDs, field keys, or schema versions.
