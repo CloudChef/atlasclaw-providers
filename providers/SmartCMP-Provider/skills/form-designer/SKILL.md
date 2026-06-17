@@ -12,11 +12,25 @@ triggers:
   - improve form
   - SmartCMP form
   - Angular form
+  - JavaScript form logic
+  - dynamic form interaction
+  - business group code
+  - application code
+  - owner login id
+  - Key-Value Tags
+  - Cloud Resource Tags
+  - attachments
   - 表单 schema
   - 生成表单
   - 修改表单
   - 完善表单
   - 设计表单
+  - 表单 JavaScript
+  - 动态表单
+  - 业务组代码
+  - 应用代码
+  - 负责人
+  - 附件
 
 use_when:
   - User wants to create a new SmartCMP Angular form schema from natural language or a field list
@@ -65,7 +79,7 @@ tool_read_parameters: |
   }
 
 tool_design_name: "smartcmp_design_form_schema"
-tool_design_description: "Normalize and return a SmartCMP Angular form schema JSON draft generated or modified by the LLM. For new forms, pass the generated schema_json. For existing forms, first call smartcmp_read_form_schema, then pass the modified schema_json. This tool never writes to CMP."
+tool_design_description: "Normalize and return a SmartCMP Angular form schema JSON draft generated or modified by the LLM. For new forms, pass the generated schema_json. For existing forms, pass either the complete modified schema_json or form_url plus catalog_fields_json for deterministic catalog field insertion. This tool never writes to CMP."
 tool_design_entrypoint: "scripts/design_form.py"
 tool_design_groups:
   - cmp
@@ -78,6 +92,7 @@ tool_design_cli_flag_overrides:
   schema_json: "--schema-json"
   form_url: "--form-url"
   change_summary: "--change-summary"
+  catalog_fields_json: "--catalog-fields-json"
 tool_design_parameters: |
   {
     "type": "object",
@@ -98,6 +113,10 @@ tool_design_parameters: |
       "change_summary": {
         "type": "string",
         "description": "Short user-facing description of what changed or what was generated."
+      },
+      "catalog_fields_json": {
+        "type": "string",
+        "description": "Optional JSON array of on-demand SmartCMP catalog field insertions, for example [{\"field\":\"businessGroup.code\"}, {\"field\":\"application.code\"}]. Prefer omitting fieldKey for SmartCMP standard fields when backend processing must recognize the UI key."
       }
     },
     "required": ["mode"]
@@ -133,10 +152,29 @@ changes to CMP.
 ### Modify Existing Form
 
 1. Call `smartcmp_read_form_schema` with the SmartCMP form edit URL.
-2. Modify the returned schema JSON according to the user's request.
-3. Call `smartcmp_design_form_schema` with `mode=modify`, the modified
+2. If the user only asks to add supported catalog context fields, call
+   `smartcmp_design_form_schema` with `mode=modify`, the source `form_url`,
+   `catalog_fields_json`, and a short `change_summary`; omit `schema_json` so
+   the tool reads the source schema and inserts those fields deterministically.
+3. For other schema edits, modify the complete schema JSON from the tool result
+   metadata. Never pass truncated, summarized, or ellipsized JSON as
+   `schema_json`.
+4. Call `smartcmp_design_form_schema` with `mode=modify`, the complete modified
    `schema_json`, the source `form_url`, and a short `change_summary`.
-4. Return the normalized schema JSON and the short change summary.
+5. Return the normalized schema JSON and the short change summary.
+
+## Output Contract
+
+- Final user-visible output must include the complete normalized schema as a
+  fenced JSON block. Do not replace the schema JSON with only tables, summaries,
+  or field descriptions.
+- If `smartcmp_design_form_schema` returns a successful `Schema JSON` block,
+  treat that tool output as authoritative. Do not replace a successful design
+  result with a provider authentication error unless the tool output itself
+  reports authentication failure, HTTP 401, or HTTP 403. New-form design is a
+  local schema-authoring operation.
+- A concise change summary may precede the JSON. Warnings may follow the summary
+  when the script reports assumptions or risky JavaScript patterns.
 
 ## Schema Rules
 
@@ -150,3 +188,60 @@ changes to CMP.
   and unknown schema keys.
 - Use warnings for ambiguous or unsupported structures instead of inventing CMP
   workflow behavior.
+
+## Catalog Context Fields
+
+- Standard service-catalog fields are not added to every form. Add known
+  catalog fields only when the user asks for catalog context such as business
+  group code, application code, owners, attachments, or tags.
+- For supported catalog context fields, pass them through
+  `catalog_fields_json` and do not also hand-write duplicate catalog fields in
+  `schema_json`. Prefer SmartCMP UI keys such as `businessGroup`, `projects`,
+  `owners`, `attachments`, `keyValueTag`, and `cloudResourceTag` when backend
+  standard-field handling must recognize the field. If a custom `fieldKey` is
+  supplied for a catalog field, the design tool keeps it and emits a warning
+  because CMP backend standard-field handling may not recognize that custom key.
+  User-defined non-catalog fields should stay in `schema_json` and may use the
+  user's own field keys without this warning.
+- In modify mode, prefer `form_url` plus `catalog_fields_json` with no
+  `schema_json` when the requested change is only adding supported catalog
+  context fields. This preserves existing JavaScript and unknown keys without
+  requiring the LLM to copy a long schema.
+- Known meanings:
+  - `businessGroup.id`, `businessGroup.name`, `businessGroup.code`: business
+    group context from the catalog route; generated schema id is
+    `businessGroup`.
+  - `application.id`, `application.name`, `application.code`: application
+    context; generated schema id is the UI source key `projects`.
+  - `owners`, `owners.id`, `owners.name`, `owners.userName`,
+    `owners.userLoginId`: owner list and owner identity fields; generated
+    schema id is `owners`.
+  - `name`, `description`, `number`, `executeTime`: standard request/catalog
+    name, description, number/count, and execution time fields.
+  - `attachments`: attachment list.
+  - `keyValueTag`: SmartCMP Key-Value Tags.
+  - `cloudResourceTag`: SmartCMP Cloud Resource Tags.
+  - The analyzed Linux VM catalog stores bottom Key-Value Tags resource data
+    under `Compute.tags_copy`.
+- Generated catalog fields should be marked with
+  `x-smartcmp.builtinCatalogField`.
+
+## JavaScript Field Logic
+
+- For dynamic form behavior, generate field-level JavaScript under
+  `config.value.expression`.
+- Use `model`, `sourceParams`, `schema`, and `cfg` for form context. DOM probing
+  is only a compatibility fallback for SmartCMP catalog context values.
+- The skill and scripts must not execute generated JavaScript.
+
+```json
+{
+  "config": {
+    "value": {
+      "source": "mock",
+      "method": "mock",
+      "expression": "function(model, sourceParams, schema, unused, cfg) { var bg = model.businessGroup || {}; var app = model.projects || {}; if (Array.isArray(app)) { app = app[0] || {}; } return [bg.code, app.code].filter(Boolean).join('-'); }"
+    }
+  }
+}
+```

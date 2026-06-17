@@ -7,7 +7,56 @@
 from __future__ import annotations
 
 import copy
+import importlib.util
+import sys
+from pathlib import Path
 from typing import Any
+
+try:
+    from _catalog_fields import resolve_catalog_field_alias
+except ModuleNotFoundError as exc:
+    if exc.name != "_catalog_fields":
+        raise
+
+    _CATALOG_FIELDS_PATH = Path(__file__).with_name("_catalog_fields.py")
+    _CATALOG_FIELDS_MODULE_NAME = "_smartcmp_form_designer_catalog_fields"
+    _CATALOG_FIELDS_SPEC = importlib.util.spec_from_file_location(
+        _CATALOG_FIELDS_MODULE_NAME,
+        _CATALOG_FIELDS_PATH,
+    )
+    if _CATALOG_FIELDS_SPEC is None or _CATALOG_FIELDS_SPEC.loader is None:
+        raise ImportError(f"Cannot load {_CATALOG_FIELDS_PATH}") from exc
+
+    _catalog_fields = importlib.util.module_from_spec(_CATALOG_FIELDS_SPEC)
+    _previous_catalog_fields = sys.modules.get(_CATALOG_FIELDS_MODULE_NAME)
+    sys.modules[_CATALOG_FIELDS_MODULE_NAME] = _catalog_fields
+    try:
+        _CATALOG_FIELDS_SPEC.loader.exec_module(_catalog_fields)
+    finally:
+        if _previous_catalog_fields is None:
+            sys.modules.pop(_CATALOG_FIELDS_MODULE_NAME, None)
+        else:
+            sys.modules[_CATALOG_FIELDS_MODULE_NAME] = _previous_catalog_fields
+    resolve_catalog_field_alias = _catalog_fields.resolve_catalog_field_alias
+
+try:
+    from _schema_scripts import expression_from_field, validate_javascript_expression
+except ModuleNotFoundError as exc:
+    if exc.name != "_schema_scripts":
+        raise
+
+    _SCHEMA_SCRIPTS_PATH = Path(__file__).with_name("_schema_scripts.py")
+    _SCHEMA_SCRIPTS_SPEC = importlib.util.spec_from_file_location(
+        "_schema_scripts",
+        _SCHEMA_SCRIPTS_PATH,
+    )
+    if _SCHEMA_SCRIPTS_SPEC is None or _SCHEMA_SCRIPTS_SPEC.loader is None:
+        raise ImportError(f"Cannot load {_SCHEMA_SCRIPTS_PATH}") from exc
+
+    _schema_scripts = importlib.util.module_from_spec(_SCHEMA_SCRIPTS_SPEC)
+    _SCHEMA_SCRIPTS_SPEC.loader.exec_module(_schema_scripts)
+    expression_from_field = _schema_scripts.expression_from_field
+    validate_javascript_expression = _schema_scripts.validate_javascript_expression
 
 
 class SchemaNormalizationError(ValueError):
@@ -66,8 +115,39 @@ def normalize_schema(schema: dict[str, Any]) -> tuple[dict[str, Any], list[str]]
             index,
             warnings,
         )
+    _deduplicate_top_level_indexes(properties, warnings)
 
     return normalized, warnings
+
+
+def _deduplicate_top_level_indexes(
+    properties: dict[str, Any],
+    warnings: list[str],
+) -> None:
+    """Resolve ambiguous top-level field ordering without dropping fields."""
+    seen_indexes: set[int] = set()
+    has_duplicate = False
+    for field in properties.values():
+        field_index = field.get("index") if isinstance(field, dict) else None
+        if not _is_valid_integer_index(field_index):
+            continue
+        if field_index in seen_indexes:
+            has_duplicate = True
+            break
+        seen_indexes.add(field_index)
+
+    if not has_duplicate:
+        return
+
+    for index, (field_key, field) in enumerate(properties.items()):
+        if not isinstance(field, dict):
+            continue
+        if field.get("index") != index:
+            field["index"] = index
+            warnings.append(
+                f"Reassigned index={index} for field {field_key!r} "
+                "to avoid duplicate top-level indexes."
+            )
 
 
 def _normalize_top_level_field(
@@ -85,7 +165,7 @@ def _normalize_top_level_field(
         field["id"] = field_key
         warnings.append(f"Added id for field {field_key!r}.")
 
-    if not isinstance(field.get("index"), int):
+    if not _is_valid_integer_index(field.get("index")):
         field["index"] = index
         warnings.append(f"Added numeric index for field {field_key!r}.")
 
@@ -96,11 +176,23 @@ def _normalize_top_level_field(
 
     _normalize_widget(field, field_key, warnings)
     _normalize_visibility(field, field_key, warnings)
+    warnings.extend(
+        validate_javascript_expression(
+            expression_from_field(field),
+            field_key=field_key,
+        )
+    )
+    _validate_builtin_catalog_metadata(field, field_key, warnings)
 
     if field.get("type") == "array":
         _normalize_array_field(field, field_key, warnings)
 
     return field
+
+
+def _is_valid_integer_index(value: Any) -> bool:
+    """Return whether a schema index is an integer, excluding bool aliases."""
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def _infer_type(field: dict[str, Any]) -> str:
@@ -196,6 +288,33 @@ def _normalize_visibility(field: dict[str, Any], field_key: str, warnings: list[
         warnings.append(f"Added allowInApproval=true for field {field_key!r}.")
 
 
+def _validate_builtin_catalog_metadata(
+    field: dict[str, Any],
+    field_key: str,
+    warnings: list[str],
+) -> None:
+    """Warn when top-level catalog metadata names an unsupported built-in field.
+
+    Missing, non-object, blank, or non-string metadata values are intentionally
+    ignored because they do not express a catalog field contract. The
+    normalizer preserves those shapes unchanged for manual review.
+    """
+    smartcmp_metadata = field.get("x-smartcmp")
+    if not isinstance(smartcmp_metadata, dict):
+        return
+
+    builtin_field = smartcmp_metadata.get("builtinCatalogField")
+    if not isinstance(builtin_field, str) or not builtin_field.strip():
+        return
+
+    if resolve_catalog_field_alias(builtin_field) is None:
+        warnings.append(
+            "Unknown SmartCMP catalog field "
+            f"{builtin_field!r} on field {field_key!r}; "
+            "preserved metadata for manual review."
+        )
+
+
 def _normalize_array_field(field: dict[str, Any], field_key: str, warnings: list[str]) -> None:
     items = field.get("items")
     if not isinstance(items, dict):
@@ -247,6 +366,12 @@ def _normalize_array_field(field: dict[str, Any], field_key: str, warnings: list
         else:
             _normalize_widget_alias(nested_value, f"{field_key}.{nested_key}", warnings)
         _promote_select_keys_from_widget(nested_value, f"{field_key}.{nested_key}", warnings)
+        warnings.extend(
+            validate_javascript_expression(
+                expression_from_field(nested_value),
+                field_key=f"{field_key}.{nested_key}",
+            )
+        )
 
     if "fieldsets" not in items:
         items["fieldsets"] = [
