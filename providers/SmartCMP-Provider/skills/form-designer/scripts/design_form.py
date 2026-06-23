@@ -66,6 +66,17 @@ except ModuleNotFoundError as exc:
     resolve_catalog_field_alias = _catalog_fields.resolve_catalog_field_alias
 
 try:
+    from _catalog_context_sync import apply_catalog_context_sync
+except ModuleNotFoundError as exc:
+    if exc.name != "_catalog_context_sync":
+        raise
+    _catalog_context_sync = _load_sibling_module(
+        "_catalog_context_sync.py",
+        "_smartcmp_form_designer_catalog_context_sync",
+    )
+    apply_catalog_context_sync = _catalog_context_sync.apply_catalog_context_sync
+
+try:
     from _form_fetch import fetch_form_definition, parse_form_edit_url
 except ModuleNotFoundError as exc:
     if exc.name != "_form_fetch":
@@ -306,12 +317,17 @@ def _validate_source_url(form_url: str) -> dict[str, str]:
 def main(argv: list[str] | None = None) -> int:
     """Run the SmartCMP form schema design tool."""
     parser = argparse.ArgumentParser(description="Normalize a SmartCMP Angular form schema draft.")
-    parser.add_argument("--mode", choices=("new", "modify"), required=True)
+    parser.add_argument("--mode", choices=("new", "modify", "regenerate"), required=True)
     parser.add_argument("--schema-json", default="", help="Complete form schema JSON draft.")
     parser.add_argument(
         "--catalog-fields-json",
         default="",
         help="Optional JSON array of SmartCMP catalog standard fields to insert.",
+    )
+    parser.add_argument(
+        "--catalog-context-sync-json",
+        default="",
+        help="Optional JSON object for SmartCMP catalog context sync field generation.",
     )
     parser.add_argument("--form-url", default="", help="Optional source form edit URL for modify mode.")
     parser.add_argument("--change-summary", default="", help="Short user-facing change summary.")
@@ -321,6 +337,12 @@ def main(argv: list[str] | None = None) -> int:
     source: dict[str, str] = {}
 
     try:
+        if args.mode == "regenerate" and not args.schema_json:
+            raise ValueError(
+                "schema_json is required for regenerate mode. Read the source form separately, "
+                "then pass the complete replacement schema_json generated from the user's requirements."
+            )
+
         if args.schema_json:
             schema = _load_schema(args.schema_json)
             # A provided source URL is provenance only for this path. Validate it,
@@ -343,6 +365,13 @@ def main(argv: list[str] | None = None) -> int:
             schema, warnings = _empty_schema_warning(args.mode)
 
         warnings.extend(_apply_catalog_fields(schema, args.catalog_fields_json))
+        context_warnings, context_summary = apply_catalog_context_sync(
+            schema,
+            args.catalog_context_sync_json,
+        )
+        warnings.extend(context_warnings)
+        if context_summary:
+            warnings.append(context_summary)
         schema, normalization_warnings = normalize_schema(schema)
         warnings.extend(normalization_warnings)
     except (
@@ -355,11 +384,12 @@ def main(argv: list[str] | None = None) -> int:
 
     summary = args.change_summary.strip()
     if not summary:
-        summary = (
-            "Generated a new SmartCMP form schema."
-            if args.mode == "new"
-            else "Prepared a normalized SmartCMP form schema."
-        )
+        if args.mode == "new":
+            summary = "Generated a new SmartCMP form schema."
+        elif args.mode == "regenerate":
+            summary = "Regenerated a replacement SmartCMP form schema."
+        else:
+            summary = "Prepared a normalized SmartCMP form schema."
 
     print("Change Summary:")
     print(summary)

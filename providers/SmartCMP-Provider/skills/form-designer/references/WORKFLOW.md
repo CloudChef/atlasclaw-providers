@@ -22,12 +22,18 @@ The source schema is read from `content.schema`. The response may contain other
 form metadata such as `name`, `description`, `enabled`, and `content.model`;
 those fields are source context only and must not be written back by this skill.
 
+When the user asks to change a form from a URL, use the source schema as
+reference material and generate a complete replacement schema with
+`design_form.py --mode regenerate`. Do not splice partial changes into the old
+JSON, and do not ask the LLM to hand-copy a long existing schema.
+
 ## Output
 
 User-visible output should contain:
 
 1. A short change summary.
-2. The final normalized `schema` JSON.
+2. The final normalized `schema` JSON. For URL-based changes, describe it as a
+   regenerated replacement schema for manual review and copying.
 
 Scripts may also emit machine-readable metadata blocks for warnings,
 assumptions, and source form identifiers. Agents should not expose internal
@@ -35,7 +41,8 @@ metadata unless it helps the user resolve a form design issue.
 
 ## Normalization Scope
 
-The normalizer may repair deterministic SmartCMP schema structure:
+The normalizer may repair deterministic SmartCMP schema structure for new,
+regenerated, or deterministic modify-mode schemas:
 
 - root `type: object`
 - root `properties`
@@ -64,18 +71,8 @@ requirements. Add them only when the user asks for that context.
 | Owner / 负责人 | `owners` | owner UI field; semantic aliases include `owners.id`, `owners.name`, `owners.userName`, `owners.userLoginId` |
 | name / description / number / execute time | `name`, `description`, `number`, `executeTime` | standard catalog name, description, number/count, and execution time |
 | attachments / 附件 | `attachments` | catalog attachment list |
-| Key-Value Tags | `keyValueTag` | UI field `keyValueTag`, resource data `Compute.tags_copy` |
+| Key-Value Tags | `keyValueTag` | catalog key-value tag list |
 | Cloud Resource Tags | `cloudResourceTag` | catalog cloud resource tag list |
-
-The Linux VM catalog route
-`#/main/catalog-ui/request/f3a4149b-cfbf-446a-a340-512a304014f2` uses
-`catalog.exts.field` and schema field `expansion.config.value.expression` to
-synchronize catalog context values such as `businessGroupName` and `userName`.
-
-Deterministic insertion templates support the displayable standard catalog field
-set observed from the Linux VM catalog: `businessGroup.*`,
-`application.*`/`projects.*`, `owners.*`, `name`, `description`, `number`,
-`executeTime`, `attachments`, `keyValueTag`, and `cloudResourceTag`.
 
 When a supported catalog context field is requested, use
 `catalog_fields_json` for insertion and omit duplicate hand-written fields from
@@ -85,3 +82,14 @@ inserted SmartCMP UI keys, for example `model.businessGroup` and
 the tool should warn because CMP backend standard-field handling may not
 recognize custom keys. User-defined fields belong in `schema_json` and can use
 their own field keys normally.
+
+This deterministic insertion path is the narrow case where `--mode modify` may
+still read and preserve the source schema. For broader structure changes from a
+URL, use `--mode regenerate` with a complete replacement schema.
+
+For fields that synchronize service-catalog header display values into one JSON
+string, use `catalog_context_sync_json`. That helper is intentionally narrow and
+supports only the standard header display outputs documented in `SKILL.md`
+(`业务组`, `应用系统`, `所有者`, and `名称`). Do not extend this workflow from a
+single observed catalog route; read the relevant form or catalog metadata when
+the requested context value is outside that fixed set.
