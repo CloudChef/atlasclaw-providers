@@ -190,6 +190,31 @@ def test_skilldeps_cookie_auth_prefers_request_cookie_over_config_cookie(monkeyp
     assert instance["auth_type"] == "cookie"
 
 
+def test_skilldeps_auth_type_chain_falls_back_to_cookie_when_provider_token_missing(monkeypatch):
+    monkeypatch.setenv("ATLASCLAW_COOKIES", "{}")
+    monkeypatch.setenv("ATLASCLAW_PROVIDER_INSTANCE", "default")
+    monkeypatch.setenv(
+        "ATLASCLAW_PROVIDER_CONFIG",
+        json.dumps(
+            {
+                "smartcmp": {
+                    "default": {
+                        "base_url": "https://cmp.example.com",
+                        "auth_type": ["provider_token", "cookie"],
+                        "cookie": "CloudChef-Authenticate=config-cookie-token",
+                    }
+                }
+            }
+        ),
+    )
+
+    base_url, auth_token, instance = common.get_cmp_config(exit_on_error=False)
+
+    assert base_url == "https://cmp.example.com/platform-api"
+    assert auth_token == "CloudChef-Authenticate=config-cookie-token"
+    assert instance["auth_type"] == ["provider_token", "cookie"]
+
+
 def test_skilldeps_uses_explicit_provider_instance(monkeypatch):
     monkeypatch.setenv("ATLASCLAW_COOKIES", "{}")
     monkeypatch.setenv("ATLASCLAW_PROVIDER_INSTANCE", "robot-admin")

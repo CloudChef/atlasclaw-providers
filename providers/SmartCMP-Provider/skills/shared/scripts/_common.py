@@ -784,9 +784,10 @@ def _get_config_from_skilldeps() -> tuple:
     explicit_auth_url = instance.get('auth_url', '')
     raw_auth_type = instance.get('auth_type', '')
     if isinstance(raw_auth_type, list):
-        auth_type = str(raw_auth_type[0] if raw_auth_type else '').strip()
+        auth_types = [str(item or '').strip() for item in raw_auth_type if str(item or '').strip()]
     else:
-        auth_type = str(raw_auth_type or '').strip()
+        auth_types = [str(raw_auth_type or '').strip()]
+    auth_type = auth_types[0] if auth_types else ''
 
     # Authentication priority for legacy unresolved configs:
     # 1. Request-scoped CloudChef-Authenticate cookie/token
@@ -802,19 +803,35 @@ def _get_config_from_skilldeps() -> tuple:
     password = instance.get('password', '')
 
     # Determine auth token
-    if auth_type == 'provider_token':
+    auth_token = ''
+    credential_allowed = False
+    if isinstance(raw_auth_type, list):
+        for auth_type in auth_types:
+            if auth_type == 'provider_token' and provider_token:
+                auth_token = provider_token
+                break
+            if auth_type == 'user_token' and user_token:
+                auth_token = user_token
+                break
+            if auth_type == 'cookie' and (cloudchef_token or config_cookie):
+                auth_token = cloudchef_token or config_cookie
+                break
+            if auth_type == 'credential' and username and password:
+                credential_allowed = True
+                break
+    elif auth_type == 'provider_token':
         auth_token = provider_token
     elif auth_type == 'user_token':
         auth_token = user_token
     elif auth_type == 'cookie':
         auth_token = cloudchef_token or config_cookie
     elif auth_type == 'credential':
-        auth_token = ''
+        credential_allowed = True
     else:
         auth_token = cloudchef_token or provider_token or user_token or config_cookie
 
     # If no token but have credentials, try auto-login
-    if not auth_token and username and password and base_url:
+    if not auth_token and (credential_allowed or not auth_type) and username and password and base_url:
         try:
             auth_url = _resolve_auth_url(base_url, explicit_auth_url)
             cookie_str = _auto_login(auth_url, username, password)
