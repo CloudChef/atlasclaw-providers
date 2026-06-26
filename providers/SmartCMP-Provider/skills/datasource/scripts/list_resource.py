@@ -12,7 +12,7 @@ import requests
 from requests import RequestException
 
 try:
-    from _common import render_markdown_table, require_config
+    from _common import request_timeout, render_markdown_table, require_config
 except ImportError:
     import os
 
@@ -20,7 +20,7 @@ except ImportError:
         0,
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shared", "scripts"),
     )
-    from _common import render_markdown_table, require_config
+    from _common import request_timeout, render_markdown_table, require_config
 
 
 def parse_args(argv=None):
@@ -41,7 +41,7 @@ def request_json(method, path, *, base_url, headers, payload=None, params=None):
         json=payload,
         params=params,
         verify=False,
-        timeout=30,
+        timeout=request_timeout(),
     )
     if response.status_code != 200:
         raise RuntimeError(f"HTTP {response.status_code}: {response.text}")

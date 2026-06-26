@@ -158,6 +158,7 @@ def test_request_json_uses_expected_request_shape(monkeypatch):
     assert captured["method"] == "GET"
     assert captured["url"] == "https://cmp.example.com/platform-api/alarm-alert"
     assert captured["params"] == {"page": 1}
+    assert captured["timeout"] == 60
     assert "json" not in captured
 
 

@@ -5,12 +5,23 @@
 
 from __future__ import annotations
 
+import os
+import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
 
 import requests
+
+try:
+    from _common import request_timeout
+except ImportError:
+    sys.path.insert(
+        0,
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shared", "scripts"),
+    )
+    from _common import request_timeout
 
 from _approval_specs import (
     extract_compute_profile_ids,
@@ -195,7 +206,7 @@ def fetch_flavor_names_by_id(
             headers=headers,
             params={"page": 1, "size": 500, "query": "", "queryValue": "", "sort": "createdDate,desc"},
             verify=False,
-            timeout=30,
+            timeout=request_timeout(),
         )
         resp.raise_for_status()
         return extract_flavor_name_map(resp.json())
@@ -229,7 +240,7 @@ def query_pending_items(
             "rangeField": "updatedDate",
             "states": "",
         }
-        response = request_get(url, headers=headers, params=params, verify=False, timeout=30)
+        response = request_get(url, headers=headers, params=params, verify=False, timeout=request_timeout())
         response.raise_for_status()
         items = _extract_items(response.json())
         if not items:

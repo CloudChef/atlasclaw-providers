@@ -72,7 +72,7 @@ Use the request parameter contract.
 
     def fake_get(url, headers=None, verify=None, timeout=None):
         assert url == "https://cmp.example.com/platform-api/catalogs/catalog-1"
-        assert timeout == 30
+        assert timeout == 60
         return _FakeResponse(
             {
                 "id": "catalog-1",

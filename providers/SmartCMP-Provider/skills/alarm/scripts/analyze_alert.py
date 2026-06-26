@@ -19,7 +19,7 @@ DATASOURCE_SCRIPT_DIR = SCRIPT_DIR.parent.parent / "datasource" / "scripts"
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from _alarm_common import get_connection, get_json
+from _alarm_common import default_timeout, get_connection, get_json
 from _common import build_object_prompt_action
 
 
@@ -82,7 +82,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def safe_get_json(path: str, *, params: dict[str, Any] | None = None, timeout: int = 30) -> Any:
+def safe_get_json(path: str, *, params: dict[str, Any] | None = None, timeout: int = default_timeout) -> Any:
     """Best-effort JSON fetch for optional context endpoints."""
     try:
         return get_json(path, params=params, timeout=timeout)

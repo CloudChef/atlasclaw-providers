@@ -37,7 +37,7 @@ from typing import Any, Optional
 import requests
 
 try:
-    from _common import build_approval_object_actions, require_config
+    from _common import request_timeout, build_approval_object_actions, require_config
 except ImportError:
     import os
 
@@ -45,7 +45,7 @@ except ImportError:
         0,
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shared", "scripts"),
     )
-    from _common import build_approval_object_actions, require_config
+    from _common import request_timeout, build_approval_object_actions, require_config
 
 from _approval_validation import request_id_from_item
 from _approval_specs import (
@@ -236,7 +236,7 @@ def fetch_flavor_names_by_id(base_url: str, headers: dict[str, str]) -> dict[str
             headers=headers,
             params={"page": 1, "size": 500, "query": "", "queryValue": "", "sort": "createdDate,desc"},
             verify=False,
-            timeout=30,
+            timeout=request_timeout(),
         )
         resp.raise_for_status()
         return extract_flavor_name_map(resp.json())
@@ -504,7 +504,7 @@ def main(argv: list[str]) -> int:
     params = build_pending_query_params(now_ms=now_ms, days=days)
 
     try:
-        resp = requests.get(url, headers=headers, params=params, verify=False, timeout=30)
+        resp = requests.get(url, headers=headers, params=params, verify=False, timeout=request_timeout())
         resp.raise_for_status()
         data = resp.json()
     except requests.exceptions.RequestException as exc:

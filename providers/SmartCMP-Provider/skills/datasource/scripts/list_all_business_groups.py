@@ -37,7 +37,7 @@ SHARED_SCRIPTS_DIR = SCRIPT_DIR.parents[1] / "shared" / "scripts"
 if str(SHARED_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SHARED_SCRIPTS_DIR))
 
-from _common import render_markdown_table, require_config  # noqa: E402
+from _common import request_timeout, render_markdown_table, require_config  # noqa: E402
 
 
 BASE_URL, _AUTH_TOKEN, HEADERS, _ = require_config()
@@ -75,7 +75,7 @@ url = (
 )
 
 try:
-    response = requests.get(url, headers=HEADERS, verify=False, timeout=30)
+    response = requests.get(url, headers=HEADERS, verify=False, timeout=request_timeout())
     response.raise_for_status()
     payload = response.json()
 except json.JSONDecodeError:

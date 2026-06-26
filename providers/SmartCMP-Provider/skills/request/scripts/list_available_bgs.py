@@ -26,11 +26,11 @@ import argparse
 import requests
 
 try:
-    from _common import render_markdown_table, require_config
+    from _common import request_timeout, render_markdown_table, require_config
 except ImportError:
     import os
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared', 'scripts'))
-    from _common import render_markdown_table, require_config
+    from _common import request_timeout, render_markdown_table, require_config
 
 
 def parse_args(argv=None):
@@ -51,7 +51,7 @@ def fetch_available_bgs(*, base_url, headers, catalog_id):
         List of business group objects
     """
     url = f"{base_url}/catalogs/{catalog_id}/available-bgs"
-    resp = requests.get(url, headers=headers, verify=False, timeout=30)
+    resp = requests.get(url, headers=headers, verify=False, timeout=request_timeout())
     if resp.status_code != 200:
         raise RuntimeError(f"HTTP {resp.status_code}: {resp.text}")
 

@@ -34,7 +34,7 @@ SHARED_SCRIPTS_DIR = SCRIPT_DIR.parents[1] / "shared" / "scripts"
 if str(SHARED_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SHARED_SCRIPTS_DIR))
 
-from _common import build_resource_object_actions, require_config  # noqa: E402
+from _common import request_timeout, build_resource_object_actions, require_config  # noqa: E402
 
 
 VALID_SCOPES = {"all_resources", "virtual_machines"}
@@ -238,7 +238,7 @@ def main(argv=None) -> int:
     )
 
     try:
-        response = requests.get(url, headers=headers, verify=False, timeout=30)
+        response = requests.get(url, headers=headers, verify=False, timeout=request_timeout())
         response.raise_for_status()
         payload = response.json()
     except json.JSONDecodeError:

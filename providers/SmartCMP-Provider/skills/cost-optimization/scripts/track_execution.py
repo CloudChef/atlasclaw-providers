@@ -14,7 +14,7 @@ import requests
 from requests import RequestException
 
 try:
-    from _common import require_config
+    from _common import request_timeout, require_config
 except ImportError:
     import os
 
@@ -22,7 +22,7 @@ except ImportError:
         0,
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shared", "scripts"),
     )
-    from _common import require_config
+    from _common import request_timeout, require_config
 
 try:
     from _cost_common import build_pageable_request, build_query_request, extract_list_payload, normalize_timestamp
@@ -245,7 +245,7 @@ def fetch_tracking_items(base_url: str, headers: dict, params: dict, endpoint: s
             headers=headers,
             params=params,
             verify=False,
-            timeout=30,
+            timeout=request_timeout(),
         )
     except RequestException as exc:
         return None, False, f"{endpoint} request failed: {exc}"

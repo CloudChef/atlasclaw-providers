@@ -101,7 +101,7 @@ def test_main_prints_numbered_summary_and_meta_block(monkeypatch):
         "totalElements": 2,
     }
 
-    def fake_get_json(path, *, params=None, timeout=30):
+    def fake_get_json(path, *, params=None, timeout=60):
         captured["path"] = path
         captured["params"] = params
         return payload

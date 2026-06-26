@@ -13,10 +13,10 @@ import sys
 import requests
 
 try:
-    from _common import render_markdown_table, require_config
+    from _common import request_timeout, render_markdown_table, require_config
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from _common import render_markdown_table, require_config
+    from _common import request_timeout, render_markdown_table, require_config
 
 
 def _extract_items(payload):
@@ -98,7 +98,7 @@ def main(argv=None) -> int:
         headers=headers,
         json=body,
         verify=False,
-        timeout=30,
+        timeout=request_timeout(),
     )
     response.raise_for_status()
 

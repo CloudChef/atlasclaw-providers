@@ -5,11 +5,22 @@
 
 from __future__ import annotations
 
+import os
+import sys
 from typing import Any
 
 import requests
 
 from _approval_validation import request_id_from_item
+
+try:
+    from _common import request_timeout
+except ImportError:
+    sys.path.insert(
+        0,
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shared", "scripts"),
+    )
+    from _common import request_timeout
 
 
 class ApprovalResolutionError(ValueError):
@@ -75,7 +86,7 @@ def _query_pending_items(*, base_url: str, headers: dict[str, str]) -> list[dict
             "sort": "updatedDate,desc",
             "states": "",
         }
-        response = requests.get(url, headers=headers, params=params, verify=False, timeout=30)
+        response = requests.get(url, headers=headers, params=params, verify=False, timeout=request_timeout())
         response.raise_for_status()
         items = _extract_items(response.json())
         if not items:

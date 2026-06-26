@@ -98,7 +98,7 @@ def test_main_emits_human_summary_and_analysis_block(monkeypatch):
     module = load_module()
     captured = {}
 
-    def fake_get_json(path, *, params=None, timeout=30):
+    def fake_get_json(path, *, params=None, timeout=60):
         captured[path] = params
         if path == "/alarm-alert/alert-1":
             return make_alert()
@@ -152,7 +152,7 @@ def test_main_emits_human_summary_and_analysis_block(monkeypatch):
 def test_main_degrades_when_optional_context_calls_fail(monkeypatch):
     module = load_module()
 
-    def fake_get_json(path, *, params=None, timeout=30):
+    def fake_get_json(path, *, params=None, timeout=60):
         if path == "/alarm-alert/alert-1":
             return make_alert()
         if path == "/alarm-policies/policy-1":
@@ -178,7 +178,7 @@ def test_main_degrades_when_optional_context_calls_fail(monkeypatch):
 def test_main_exposes_suggested_alarm_operation_action(monkeypatch):
     module = load_module()
 
-    def fake_get_json(path, *, params=None, timeout=30):
+    def fake_get_json(path, *, params=None, timeout=60):
         if path == "/alarm-alert/alert-1":
             alert = make_alert()
             alert["triggerCount"] = 8
@@ -224,7 +224,7 @@ def test_main_exposes_suggested_alarm_operation_action(monkeypatch):
 def test_main_enriches_resource_context_when_datasource_lookup_succeeds(monkeypatch):
     module = load_module()
 
-    def fake_get_json(path, *, params=None, timeout=30):
+    def fake_get_json(path, *, params=None, timeout=60):
         if path == "/alarm-alert/alert-1":
             return make_alert()
         if path == "/alarm-policies/policy-1":
@@ -290,7 +290,7 @@ def test_main_enriches_resource_context_when_datasource_lookup_succeeds(monkeypa
 def test_main_falls_back_to_resource_name_search_when_direct_ids_miss(monkeypatch):
     module = load_module()
 
-    def fake_get_json(path, *, params=None, timeout=30):
+    def fake_get_json(path, *, params=None, timeout=60):
         if path == "/alarm-alert/alert-1":
             alert = make_alert()
             alert["nodeInstanceId"] = ""
@@ -390,7 +390,7 @@ def test_main_returns_error_when_policy_reference_is_missing(monkeypatch):
     alert = make_alert()
     alert.pop("alarmPolicyId")
 
-    def fake_get_json(path, *, params=None, timeout=30):
+    def fake_get_json(path, *, params=None, timeout=60):
         if path == "/alarm-alert/alert-1":
             return alert
         raise AssertionError(f"Unexpected path: {path}")

@@ -21,7 +21,7 @@ SHARED_SCRIPTS_DIR = SCRIPT_DIR.parents[1] / "shared" / "scripts"
 if str(SHARED_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SHARED_SCRIPTS_DIR))
 
-from _common import render_markdown_table, require_config  # noqa: E402
+from _common import request_timeout, render_markdown_table, require_config  # noqa: E402
 
 
 DEFAULT_RESOURCE_CATEGORY = "virtual-machines"
@@ -175,7 +175,7 @@ def fetch_resource_operations(
     """
     url = build_resource_actions_url(base_url, category, resource_id)
     try:
-        response = requests.get(url, headers=headers, verify=False, timeout=30)
+        response = requests.get(url, headers=headers, verify=False, timeout=request_timeout())
     except requests.RequestException as exc:
         raise RuntimeError(f"SmartCMP resource operation list request failed: {exc}") from exc
 

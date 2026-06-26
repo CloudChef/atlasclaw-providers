@@ -43,6 +43,7 @@ common_module = _load_module_from_path(
 )
 require_config = common_module.require_config
 build_resource_object_actions = common_module.build_resource_object_actions
+request_timeout = common_module.request_timeout
 
 list_resource_module = _load_module_from_path(
     "resource_compliance_list_resource_local",
@@ -655,7 +656,7 @@ def fetch_text(url, accept="text/html"):
         ),
     }
     try:
-        response = requests.get(url, headers=headers, timeout=30)
+        response = requests.get(url, headers=headers, timeout=request_timeout())
         response.raise_for_status()
         return response.text
     except requests.RequestException:

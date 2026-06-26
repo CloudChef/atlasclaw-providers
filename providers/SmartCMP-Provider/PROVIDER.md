@@ -99,7 +99,7 @@ Cloud management platform provider for self-service resource requests, approvals
 | `username` | string | Option 4 | Username for auto-login authentication |
 | `password` | string | Option 4 | Password for auto-login authentication (plaintext or MD5 hash) |
 | `auth_url` | string | No | Explicit authentication URL override. Use for private deployments that should not follow host inference |
-| `timeout` | number | No | API request timeout in seconds (default: 30) |
+| `timeout` | number | No | API request timeout in seconds (default: 60) |
 
 > **Note:** Auth URL inference is exact-match only:
 > - `https://console.smartcmp.cloud/` → `https://account.smartcmp.cloud/bss-api/api/authentication`

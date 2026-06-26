@@ -16,7 +16,7 @@ import _common as common  # noqa: E402
 
 
 def _fake_auto_login(calls):
-    def _login(auth_url: str, username: str, password: str) -> str:
+    def _login(auth_url: str, username: str, password: str, timeout: int | None = None) -> str:
         calls.append({
             "auth_url": auth_url,
             "username": username,
@@ -108,6 +108,102 @@ def test_skilldeps_auth_url_override_takes_priority(monkeypatch):
     assert base_url == "https://democmp.smartcmp.cloud:1443/platform-api"
     assert auth_token == "test-token"
     assert instance["auth_url"] == "https://login.internal.example/platform-api/login"
+
+
+def test_skilldeps_credential_auth_uses_provider_timeout(monkeypatch):
+    calls = []
+
+    def fake_auto_login(auth_url: str, username: str, password: str, timeout: int | None = None) -> str:
+        calls.append(
+            {
+                "auth_url": auth_url,
+                "username": username,
+                "password": password,
+                "timeout": timeout,
+            }
+        )
+        return "CloudChef-Authenticate=test-token; session=abc"
+
+    monkeypatch.setattr(common, "_auto_login", fake_auto_login)
+    monkeypatch.setenv("ATLASCLAW_COOKIES", "{}")
+    monkeypatch.setenv(
+        "ATLASCLAW_PROVIDER_CONFIG",
+        json.dumps(
+            {
+                "smartcmp": {
+                    "prod": {
+                        "base_url": "https://cmp.example.com",
+                        "auth_type": "credential",
+                        "username": "admin",
+                        "password": "secret",
+                        "timeout": "75",
+                    }
+                }
+            }
+        ),
+    )
+
+    base_url, auth_token, instance = common._get_config_from_skilldeps()
+
+    assert calls == [
+        {
+            "auth_url": "https://cmp.example.com/platform-api/login",
+            "username": "admin",
+            "password": "secret",
+            "timeout": 75,
+        }
+    ]
+    assert base_url == "https://cmp.example.com/platform-api"
+    assert auth_token == "test-token"
+    assert instance["timeout"] == "75"
+
+
+def test_skilldeps_credential_auth_without_timeout_ignores_cmp_timeout(monkeypatch):
+    calls = []
+
+    def fake_auto_login(auth_url: str, username: str, password: str, timeout: int | None = None) -> str:
+        calls.append(
+            {
+                "auth_url": auth_url,
+                "username": username,
+                "password": password,
+                "timeout": timeout,
+            }
+        )
+        return "CloudChef-Authenticate=test-token; session=abc"
+
+    monkeypatch.setattr(common, "_auto_login", fake_auto_login)
+    monkeypatch.setenv("CMP_TIMEOUT", "45")
+    monkeypatch.setenv("ATLASCLAW_COOKIES", "{}")
+    monkeypatch.setenv(
+        "ATLASCLAW_PROVIDER_CONFIG",
+        json.dumps(
+            {
+                "smartcmp": {
+                    "prod": {
+                        "base_url": "https://cmp.example.com",
+                        "auth_type": "credential",
+                        "username": "admin",
+                        "password": "secret",
+                    }
+                }
+            }
+        ),
+    )
+
+    base_url, auth_token, instance = common._get_config_from_skilldeps()
+
+    assert calls == [
+        {
+            "auth_url": "https://cmp.example.com/platform-api/login",
+            "username": "admin",
+            "password": "secret",
+            "timeout": 60,
+        }
+    ]
+    assert base_url == "https://cmp.example.com/platform-api"
+    assert auth_token == "test-token"
+    assert "timeout" not in instance
 
 
 def test_skilldeps_provider_token_is_used_as_shared_token(monkeypatch):

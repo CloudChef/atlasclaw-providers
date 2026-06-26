@@ -12,7 +12,7 @@ import requests
 from requests import RequestException
 
 try:
-    from _common import require_config
+    from _common import request_timeout, require_config
 except ImportError:
     import os
 
@@ -20,7 +20,7 @@ except ImportError:
         0,
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shared", "scripts"),
     )
-    from _common import require_config
+    from _common import request_timeout, require_config
 
 
 def build_execution_result(violation_id: str, submitted: bool, message: str, response_body=None) -> dict:
@@ -81,7 +81,7 @@ def main() -> int:
             headers=headers,
             json={},
             verify=False,
-            timeout=30,
+            timeout=request_timeout(),
         )
     except RequestException as exc:
         print(f"[ERROR] SmartCMP day2 fix request failed: {exc}")

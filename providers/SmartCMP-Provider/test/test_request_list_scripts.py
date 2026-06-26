@@ -57,7 +57,16 @@ def _unexpected_http_call(*args, **kwargs):
     raise AssertionError("Unexpected HTTP call in test.")
 
 
-def run_script(monkeypatch, script_name: str, argv: list[str], *, fake_get=None, fake_post=None, scripts_dir=None):
+def run_script(
+    monkeypatch,
+    script_name: str,
+    argv: list[str],
+    *,
+    fake_get=None,
+    fake_post=None,
+    scripts_dir=None,
+    expect_exit: bool = False,
+):
     script_path = (scripts_dir or SCRIPTS_DIR) / script_name
     module_name = f"test_{script_path.stem}_module"
 
@@ -75,12 +84,20 @@ def run_script(monkeypatch, script_name: str, argv: list[str], *, fake_get=None,
 
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
+    exit_code = None
     try:
         with redirect_stdout(stdout), redirect_stderr(stderr):
-            spec.loader.exec_module(module)
+            try:
+                spec.loader.exec_module(module)
+            except SystemExit as exc:
+                if not expect_exit:
+                    raise
+                exit_code = exc.code
     finally:
         sys.modules.pop(module_name, None)
 
+    if expect_exit:
+        return exit_code, stdout.getvalue(), stderr.getvalue()
     return stdout.getvalue(), stderr.getvalue()
 
 
@@ -221,7 +238,7 @@ This section is not for request building.
 """.strip()
 
     def fake_get(url, headers=None, params=None, verify=None, timeout=None):
-        assert url == "https://cmp.example.com/platform-api/catalogs/published"
+        assert url == "https://cmp.example.com/platform-api/catalogs/published/simples"
         return FakeResponse(
             {
                 "content": [
@@ -289,6 +306,69 @@ This section is not for request building.
     assert spec["params"]["VpcId"]["when"] == "AddressType == intranet"
 
 
+def test_list_services_reports_read_timeout_without_traceback(monkeypatch):
+    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        assert url == "https://cmp.example.com/platform-api/catalogs/published/simples"
+        assert timeout == 60
+        raise requests.exceptions.ReadTimeout("read timed out")
+
+    exit_code, stdout, stderr = run_script(
+        monkeypatch,
+        "list_services.py",
+        [],
+        fake_get=fake_get,
+        scripts_dir=DATASOURCE_SCRIPTS_DIR,
+        expect_exit=True,
+    )
+
+    assert exit_code == 1
+    assert "[ERROR] SmartCMP catalog lookup timed out after 60 seconds." in stdout
+    assert "Traceback" not in stdout
+    assert "Traceback" not in stderr
+
+
+def test_list_services_tolerates_missing_instructions_from_older_cmp(monkeypatch):
+    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        assert url == "https://cmp.example.com/platform-api/catalogs/published/simples"
+        return FakeResponse(
+            {
+                "content": [
+                    {
+                        "id": "catalog-no-instructions",
+                        "nameZh": "Legacy Catalog",
+                        "sourceKey": "resource.iaas.machine.instance.abstract",
+                        "serviceCategory": "CLOUD_COMPONENT_SERVICE",
+                    },
+                    {
+                        "id": "catalog-null-instructions",
+                        "nameZh": "Null Instructions Catalog",
+                        "sourceKey": "resource.iaas.network.vpc",
+                        "serviceCategory": "CLOUD_COMPONENT_SERVICE",
+                        "instructions": None,
+                    },
+                ],
+                "totalElements": 2,
+            }
+        )
+
+    stdout, stderr = run_script(
+        monkeypatch,
+        "list_services.py",
+        [],
+        fake_get=fake_get,
+        scripts_dir=DATASOURCE_SCRIPTS_DIR,
+    )
+    payload = extract_meta(stderr, "CATALOG_META")
+
+    assert "Found 2 published catalog(s):" in stdout
+    assert "Legacy Catalog" in stdout
+    assert "Null Instructions Catalog" in stdout
+    assert payload["catalogs"][0]["id"] == "catalog-no-instructions"
+    assert payload["catalogs"][1]["id"] == "catalog-null-instructions"
+    assert "instructions" not in payload["catalogs"][0]
+    assert "instructions" not in payload["catalogs"][1]
+
+
 def test_list_services_preserves_generated_markdown_generic_request(monkeypatch):
     instructions = """
 # Request Parameter Instructions
@@ -323,7 +403,7 @@ Build a ticket request.
 """.strip()
 
     def fake_get(url, headers=None, params=None, verify=None, timeout=None):
-        assert url == "https://cmp.example.com/platform-api/catalogs/published"
+        assert url == "https://cmp.example.com/platform-api/catalogs/published/simples"
         return FakeResponse(
             {
                 "content": [
@@ -383,7 +463,7 @@ def test_list_services_ignores_old_json_instruction_payloads(monkeypatch):
     )
 
     def fake_get(url, headers=None, params=None, verify=None, timeout=None):
-        assert url == "https://cmp.example.com/platform-api/catalogs/published"
+        assert url == "https://cmp.example.com/platform-api/catalogs/published/simples"
         return FakeResponse(
             {
                 "content": [
@@ -433,7 +513,7 @@ resource_specs:
 """.strip()
 
     def fake_get(url, headers=None, params=None, verify=None, timeout=None):
-        assert url == "https://cmp.example.com/platform-api/catalogs/published"
+        assert url == "https://cmp.example.com/platform-api/catalogs/published/simples"
         return FakeResponse(
             {
                 "content": [
@@ -474,7 +554,7 @@ resource_specs:
 """.strip()
 
     def fake_get(url, headers=None, params=None, verify=None, timeout=None):
-        assert url == "https://cmp.example.com/platform-api/catalogs/published"
+        assert url == "https://cmp.example.com/platform-api/catalogs/published/simples"
         return FakeResponse(
             {
                 "content": [
@@ -515,7 +595,7 @@ node_templates:
 """.strip()
 
     def fake_get(url, headers=None, params=None, verify=None, timeout=None):
-        assert url == "https://cmp.example.com/platform-api/catalogs/published"
+        assert url == "https://cmp.example.com/platform-api/catalogs/published/simples"
         return FakeResponse(
             {
                 "content": [
@@ -569,7 +649,7 @@ node_templates:
 """.strip()
 
     def fake_get(url, headers=None, params=None, verify=None, timeout=None):
-        assert url == "https://cmp.example.com/platform-api/catalogs/published"
+        assert url == "https://cmp.example.com/platform-api/catalogs/published/simples"
         return FakeResponse(
             {
                 "content": [

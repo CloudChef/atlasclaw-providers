@@ -127,7 +127,7 @@ def test_resource_detail_uses_view_endpoint(monkeypatch):
     monkeypatch.setattr(module.requests, "patch", fake_patch)
 
     assert module.main(["res-1"]) == 0
-    assert calls == [("PATCH", "https://cmp.example/platform-api/nodes/res-1/view", {}, False, 30)]
+    assert calls == [("PATCH", "https://cmp.example/platform-api/nodes/res-1/view", {}, False, 60)]
 
 
 def test_resource_power_referenced_in_provider_docs():

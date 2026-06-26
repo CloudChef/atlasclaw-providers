@@ -12,6 +12,7 @@ import requests
 
 try:
     from _common import (
+        request_timeout,
         build_object_open_action,
         build_object_prompt_action,
         build_resource_page_href,
@@ -26,6 +27,7 @@ except ImportError:
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shared", "scripts"),
     )
     from _common import (  # type: ignore
+        request_timeout,
         build_object_open_action,
         build_object_prompt_action,
         build_resource_page_href,
@@ -278,7 +280,7 @@ def main() -> int:
         headers=headers,
         params=params,
         verify=False,
-        timeout=30,
+        timeout=request_timeout(),
     )
     if response.status_code != 200:
         print(f"[ERROR] HTTP {response.status_code}: {response.text}")
@@ -299,7 +301,7 @@ def main() -> int:
                     headers=headers,
                     params={"category": cat, "page": 0, "size": 100},
                     verify=False,
-                    timeout=30,
+                    timeout=request_timeout(),
                 )
                 if policies_resp.status_code == 200:
                     policies_data = policies_resp.json()

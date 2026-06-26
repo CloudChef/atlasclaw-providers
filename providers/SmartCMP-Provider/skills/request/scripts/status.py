@@ -26,7 +26,7 @@ from typing import Any
 import requests
 
 try:
-    from _common import require_config
+    from _common import request_timeout, require_config
 except ImportError:
     import os
 
@@ -34,7 +34,7 @@ except ImportError:
         0,
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shared", "scripts"),
     )
-    from _common import require_config
+    from _common import request_timeout, require_config
 
 
 MATCH_FIELDS = (
@@ -224,7 +224,7 @@ def classify_status(state: Any) -> tuple[str, bool | None]:
 
 def fetch_json(url: str, headers: dict[str, str], *, params: dict[str, Any] | None = None) -> tuple[dict[str, Any] | list[Any] | None, str]:
     try:
-        response = requests.get(url, headers=headers, params=params, verify=False, timeout=30)
+        response = requests.get(url, headers=headers, params=params, verify=False, timeout=request_timeout())
     except requests.exceptions.RequestException as exc:
         return None, type(exc).__name__
     if response.status_code != 200:

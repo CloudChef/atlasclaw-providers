@@ -30,6 +30,7 @@ def _load_module_from_path(module_name: str, file_path: str):
 
 try:
     from _common import (
+        request_timeout,
         build_object_open_action,
         build_object_prompt_action,
         build_resource_page_href,
@@ -42,6 +43,7 @@ except ImportError:
         SHARED_SCRIPT_DIR,
     )
     from _common import (  # type: ignore
+        request_timeout,
         build_object_open_action,
         build_object_prompt_action,
         build_resource_page_href,
@@ -539,7 +541,7 @@ def render_analysis(payload: dict, base_url: str = "", auth_token: str = "") -> 
 def safe_get_json(url: str, headers: dict, params: dict | None = None):
     """Return JSON from a GET request or None when enrichment is unavailable."""
     try:
-        response = requests.get(url, headers=headers, params=params, verify=False, timeout=30)
+        response = requests.get(url, headers=headers, params=params, verify=False, timeout=request_timeout())
     except RequestException:
         return None
 
@@ -587,7 +589,7 @@ def main() -> int:
         f"{base_url}/compliance-policies/violations/{args.id}",
         headers=headers,
         verify=False,
-        timeout=30,
+        timeout=request_timeout(),
     )
     if violation_response.status_code != 200:
         print(f"[ERROR] HTTP {violation_response.status_code}: {violation_response.text}")

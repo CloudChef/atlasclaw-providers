@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 import requests
 
 try:
-    from _common import normalize_ui_base_url
+    from _common import request_timeout, normalize_ui_base_url
 except ImportError:
     import os
     import sys
@@ -25,7 +25,7 @@ except ImportError:
         0,
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shared", "scripts"),
     )
-    from _common import normalize_ui_base_url
+    from _common import request_timeout, normalize_ui_base_url
 
 
 _FORM_EDIT_ROUTE = re.compile(
@@ -159,7 +159,7 @@ def fetch_form_definition(
         f"{base_url.rstrip('/')}/forms/{source.form_id}",
         headers=headers,
         verify=False,
-        timeout=30,
+        timeout=request_timeout(),
     )
     response.raise_for_status()
     payload = response.json()

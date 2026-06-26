@@ -44,6 +44,10 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # API path that should be appended if missing
 _API_PATH = "/platform-api"
+_config_source_key = "_atlasclaw_config_source"
+_config_source_skilldeps = "skilldeps"
+_config_source_env = "env"
+default_request_timeout = 60
 _APPROVAL_DETAIL_FROM_PARAMS = {"from": "normal", "fromPagePartUrl": "SR_MY_APPROVAL"}
 _APPROVAL_APPLICATION_TYPES = {
     "PROVISION_BP",
@@ -693,8 +697,39 @@ def _resolve_auth_url(cmp_url: str, explicit_auth_url: str = "") -> str:
     return _infer_auth_url(cmp_url)
 
 
+def _coerce_request_timeout(value: object) -> int:
+    """Return a positive request timeout in seconds, falling back to the provider default."""
+    try:
+        timeout = int(float(str(value).strip()))
+    except (TypeError, ValueError):
+        return default_request_timeout
+    return timeout if timeout > 0 else default_request_timeout
 
-def _auto_login(auth_url: str, username: str, password: str) -> str:
+
+def get_request_timeout(instance: dict | None = None) -> int:
+    """Resolve the SmartCMP HTTP timeout from provider config or local script environment.
+
+    Args:
+        instance: Provider instance configuration returned by ``require_config``.
+
+    Returns:
+        Positive timeout in seconds. Provider configuration takes precedence;
+        ``CMP_TIMEOUT`` is for direct local script execution; the default is 60 seconds.
+    """
+    if isinstance(instance, dict):
+        if instance.get("timeout") not in (None, ""):
+            return _coerce_request_timeout(instance.get("timeout"))
+        if instance.get(_config_source_key) == _config_source_skilldeps:
+            return default_request_timeout
+    return _coerce_request_timeout(os.environ.get("CMP_TIMEOUT", default_request_timeout))
+
+
+def request_timeout(instance: dict | None = None) -> int:
+    """Resolve the request timeout for scripts that use the imported provider config."""
+    return get_request_timeout(INSTANCE if instance is None else instance)
+
+
+def _auto_login(auth_url: str, username: str, password: str, timeout: int | None = None) -> str:
     """Auto-login to SmartCMP and get session cookie."""
     import hashlib
 
@@ -708,7 +743,7 @@ def _auto_login(auth_url: str, username: str, password: str) -> str:
             data={"username": username, "password": password},
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             verify=False,
-            timeout=30
+            timeout=timeout or default_request_timeout,
         )
 
         if resp.status_code != 200:
@@ -817,7 +852,7 @@ def _get_config_from_skilldeps() -> tuple:
     if not auth_token and username and password and base_url:
         try:
             auth_url = _resolve_auth_url(base_url, explicit_auth_url)
-            cookie_str = _auto_login(auth_url, username, password)
+            cookie_str = _auto_login(auth_url, username, password, timeout=get_request_timeout(instance))
             # Extract CloudChef-Authenticate JWT token from cookie string
             for part in cookie_str.split(';'):
                 part = part.strip()
@@ -859,7 +894,9 @@ def _select_smartcmp_instance(smartcmp_instances: dict) -> tuple[str, dict]:
     if requested_name:
         requested_instance = smartcmp_instances.get(requested_name)
         if isinstance(requested_instance, dict):
-            return requested_name, requested_instance
+            instance = dict(requested_instance)
+            instance[_config_source_key] = _config_source_skilldeps
+            return requested_name, instance
         raise ProviderConfigError(
             f"SmartCMP provider instance '{requested_name}' was explicitly selected but is not configured."
         )
@@ -867,7 +904,11 @@ def _select_smartcmp_instance(smartcmp_instances: dict) -> tuple[str, dict]:
     # Direct/local script execution without an explicit runtime instance keeps the existing default selection.
     instance_name = 'prod' if 'prod' in smartcmp_instances else list(smartcmp_instances.keys())[0]
     instance = smartcmp_instances.get(instance_name, {})
-    return instance_name, instance if isinstance(instance, dict) else {}
+    if not isinstance(instance, dict):
+        return instance_name, {}
+    selected = dict(instance)
+    selected[_config_source_key] = _config_source_skilldeps
+    return instance_name, selected
 
 
 def _get_config_from_env() -> tuple:
@@ -892,7 +933,7 @@ def _get_config_from_env() -> tuple:
     if token:
         base_url = normalize_url(raw_url)
         token_key = 'provider_token' if provider_token else 'user_token'
-        instance = {'base_url': raw_url, token_key: token}
+        instance = {'base_url': raw_url, token_key: token, _config_source_key: _config_source_env}
         return base_url, token, instance
 
     auth_url = _resolve_auth_url(raw_url, explicit_auth_url)
@@ -901,7 +942,7 @@ def _get_config_from_env() -> tuple:
     if not cookie:
         if username and password and auth_url:
             try:
-                cookie = _auto_login(auth_url, username, password)
+                cookie = _auto_login(auth_url, username, password, timeout=get_request_timeout())
             except RuntimeError:
                 pass
 
@@ -922,6 +963,7 @@ def _get_config_from_env() -> tuple:
     instance = {
         'base_url': raw_url,
         'cookie': cookie,
+        _config_source_key: _config_source_env,
     }
     if username:
         instance['username'] = username

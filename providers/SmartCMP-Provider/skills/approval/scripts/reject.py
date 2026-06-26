@@ -43,12 +43,13 @@ from _approval_validation import APPROVAL_ID_FORMAT_HINT, find_invalid_approval_
 def _load_config():
     """Load SmartCMP connection settings after local argument validation succeeds."""
     try:
-        from _common import require_config
+        from _common import request_timeout, require_config
     except ImportError:
         sys.path.insert(0, os.path.join(SCRIPT_DIR, "..", "..", "shared", "scripts"))
-        from _common import require_config
+        from _common import request_timeout, require_config
 
-    return require_config()
+    base_url, auth_token, headers, instance = require_config()
+    return base_url, auth_token, headers, instance, request_timeout
 
 # ── Parse arguments ───────────────────────────────────────────────────────────
 # Priority: Environment variables > Command line arguments
@@ -96,7 +97,7 @@ if invalid_ids:
     print(APPROVAL_ID_FORMAT_HINT)
     sys.exit(1)
 
-BASE_URL, AUTH_TOKEN, HEADERS, _ = _load_config()
+BASE_URL, AUTH_TOKEN, HEADERS, _, request_timeout = _load_config()
 
 try:
     action_ids = resolve_approval_action_ids(ids, base_url=BASE_URL, headers=HEADERS)
@@ -121,7 +122,7 @@ if reason:
 print()
 
 try:
-    resp = requests.post(url, headers=headers, params=params, json=body, verify=False, timeout=30)
+    resp = requests.post(url, headers=headers, params=params, json=body, verify=False, timeout=request_timeout())
     resp.raise_for_status()
 except requests.exceptions.RequestException as e:
     response = getattr(e, "response", None)

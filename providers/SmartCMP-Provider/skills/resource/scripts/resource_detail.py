@@ -19,7 +19,7 @@ SHARED_SCRIPTS_DIR = SCRIPT_DIR.parents[1] / "shared" / "scripts"
 if str(SHARED_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SHARED_SCRIPTS_DIR))
 
-from _common import build_resource_object_actions, require_config  # noqa: E402
+from _common import request_timeout, build_resource_object_actions, require_config  # noqa: E402
 
 
 RESOURCE_NAME_SEARCH_SIZE = 100
@@ -153,7 +153,7 @@ def _resolve_unique_resource_id_by_name(
     for page in range(1, RESOURCE_NAME_SEARCH_MAX_PAGES + 1):
         url = _build_virtual_machine_search_url(base_url, query_value=normalized_name, page=page)
         try:
-            response = requests.get(url, headers=headers, verify=False, timeout=30)
+            response = requests.get(url, headers=headers, verify=False, timeout=request_timeout())
             response.raise_for_status()
             payload = response.json()
         except json.JSONDecodeError as exc:
@@ -631,7 +631,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         # SmartCMP currently exposes this read-only view through PATCH. The
         # endpoint is expected to become GET after the CMP API bug is fixed.
-        response = requests.patch(url, headers=headers, verify=False, timeout=30)
+        response = requests.patch(url, headers=headers, verify=False, timeout=request_timeout())
         response.raise_for_status()
         payload = response.json()
     except json.JSONDecodeError:

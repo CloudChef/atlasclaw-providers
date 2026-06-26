@@ -13,10 +13,10 @@ import sys
 import requests
 
 try:
-    from _common import require_config
+    from _common import request_timeout, require_config
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from _common import require_config
+    from _common import request_timeout, require_config
 
 
 def _extract_items(payload):
@@ -67,7 +67,7 @@ def main(argv=None) -> int:
         headers=headers,
         params={"resourceType": source_key},
         verify=False,
-        timeout=30,
+        timeout=request_timeout(),
     )
     response.raise_for_status()
 

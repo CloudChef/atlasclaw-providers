@@ -35,11 +35,11 @@ import requests
 
 # Import shared utilities (handles URL normalization, SSL warnings)
 try:
-    from _common import require_config, create_headers
+    from _common import request_timeout, require_config, create_headers
 except ImportError:
     import os
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared', 'scripts'))
-    from _common import require_config, create_headers
+    from _common import request_timeout, require_config, create_headers
 
 BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()
 
@@ -259,7 +259,7 @@ def _fetch_request_snapshot(lookup_id: str) -> dict:
             f"{BASE_URL}/generic-request/{lookup_id}",
             headers=create_headers(AUTH_TOKEN),
             verify=False,
-            timeout=30,
+            timeout=request_timeout(),
         )
     except requests.exceptions.RequestException as exc:
         return {
@@ -319,7 +319,7 @@ def _fetch_business_group_context(business_group_id: str) -> dict:
             f"{BASE_URL}/business-groups/{business_group_id}",
             headers=create_headers(AUTH_TOKEN),
             verify=False,
-            timeout=30,
+            timeout=request_timeout(),
         )
     except requests.exceptions.RequestException:
         return {}
@@ -346,7 +346,7 @@ def _fetch_resource_bundle_context(resource_bundle_id: str) -> dict:
             f"{BASE_URL}/resource-bundles/{resource_bundle_id}",
             headers=create_headers(AUTH_TOKEN),
             verify=False,
-            timeout=30,
+            timeout=request_timeout(),
         )
     except requests.exceptions.RequestException:
         return {}
@@ -497,7 +497,7 @@ def _fetch_current_user() -> dict:
     try:
         url = f"{BASE_URL}/users/current-user-details"
         headers = create_headers(AUTH_TOKEN)
-        resp = requests.get(url, headers=headers, verify=False, timeout=10)
+        resp = requests.get(url, headers=headers, verify=False, timeout=request_timeout())
         if resp.status_code == 200:
             data = resp.json()
             return {
@@ -662,7 +662,7 @@ url = f"{BASE_URL}/generic-request/submit"
 headers = create_headers(AUTH_TOKEN)
 
 try:
-    resp = requests.post(url, headers=headers, json=body, verify=False, timeout=30)
+    resp = requests.post(url, headers=headers, json=body, verify=False, timeout=request_timeout())
     result = resp.json()
 except requests.exceptions.RequestException as e:
     print(f"[ERROR] Request failed: {e}")

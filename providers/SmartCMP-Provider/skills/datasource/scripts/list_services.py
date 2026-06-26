@@ -38,14 +38,14 @@ import yaml
 
 # Import shared utilities (handles URL normalization, SSL warnings)
 try:
-    from _common import render_markdown_table, require_config
+    from _common import request_timeout, render_markdown_table, require_config
 except ImportError:
     import os
     sys.path.insert(
         0,
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shared", "scripts"),
     )
-    from _common import render_markdown_table, require_config
+    from _common import request_timeout, render_markdown_table, require_config
 
 BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()
 
@@ -418,18 +418,30 @@ def _derive_blueprint_resource_type(raw_catalog: dict) -> dict:
 
 
 keyword = sys.argv[1] if len(sys.argv) > 1 else ""
-url = f"{BASE_URL}/catalogs/published"
+url = f"{BASE_URL}/catalogs/published/simples"
 params = {"query": "", "states": "PUBLISHED", "page": 1, "size": 50, "sort": "catalogIndex,asc"}
 if keyword:
     params["queryValue"] = keyword
 headers = HEADERS
 
-resp = requests.get(url, headers=headers, params=params, verify=False, timeout=30)
-if resp.status_code != 200:
-    print(f"HTTP {resp.status_code}: {resp.text}")
+try:
+    resp = requests.get(url, headers=headers, params=params, verify=False, timeout=request_timeout())
+except requests.exceptions.ReadTimeout:
+    print(f"[ERROR] SmartCMP catalog lookup timed out after {request_timeout()} seconds.")
+    sys.exit(1)
+except requests.exceptions.RequestException as exc:
+    print(f"[ERROR] SmartCMP catalog lookup failed: {exc}")
     sys.exit(1)
 
-result = resp.json()
+if resp.status_code != 200:
+    print(f"[ERROR] SmartCMP catalog lookup failed: HTTP {resp.status_code}: {resp.text}")
+    sys.exit(1)
+
+try:
+    result = resp.json()
+except ValueError:
+    print("[ERROR] SmartCMP catalog lookup returned invalid JSON.")
+    sys.exit(1)
 items = result.get("content", [])
 total = result.get("totalElements", len(items))
 

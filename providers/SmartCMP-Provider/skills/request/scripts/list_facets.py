@@ -27,11 +27,11 @@ import sys
 import requests
 
 try:
-    from _common import render_markdown_table, require_config
+    from _common import request_timeout, render_markdown_table, require_config
 except ImportError:
     import os
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shared', 'scripts'))
-    from _common import render_markdown_table, require_config
+    from _common import request_timeout, render_markdown_table, require_config
 
 
 def parse_args(argv=None):
@@ -58,7 +58,7 @@ def fetch_facets(*, base_url, headers, business_group_id, node_type="cloudchef.n
     url = f"{base_url}/resource-bundles/available-facets"
     params = {"businessGroupId": business_group_id, "cloudEntryId": "", "nodeType": node_type}
 
-    resp = requests.get(url, headers=headers, params=params, verify=False, timeout=30)
+    resp = requests.get(url, headers=headers, params=params, verify=False, timeout=request_timeout())
     if resp.status_code != 200:
         raise RuntimeError(f"HTTP {resp.status_code}: {resp.text}")
 

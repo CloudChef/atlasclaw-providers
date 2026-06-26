@@ -13,7 +13,7 @@ from typing import Any
 import requests
 
 try:
-    from _common import build_approval_object_actions, require_config
+    from _common import request_timeout, build_approval_object_actions, require_config
 except ImportError:
     import os
 
@@ -27,7 +27,7 @@ except ImportError:
             "scripts",
         ),
     )
-    from _common import build_approval_object_actions, require_config
+    from _common import request_timeout, build_approval_object_actions, require_config
 
 from _approval_context import format_timestamp, load_pending_approval_context
 from _approval_validation import APPROVAL_ID_FORMAT_HINT, is_request_id
@@ -116,7 +116,7 @@ def _fetch_catalog_policy(catalog_id: str) -> dict[str, Any]:
             f"{BASE_URL}/catalogs/{catalog_id}",
             headers=HEADERS,
             verify=False,
-            timeout=30,
+            timeout=request_timeout(),
         )
         response.raise_for_status()
         payload = response.json()

@@ -7,7 +7,15 @@
 from __future__ import annotations
 
 import os
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
+
+SHARED_SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent / "shared" / "scripts"
+if str(SHARED_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SHARED_SCRIPTS_DIR))
+
+from _common import request_timeout
 
 # In-process cache: (base_url, auth_token) -> symbol
 _CURRENCY_CACHE: dict[str, str] = {}
@@ -73,12 +81,14 @@ def _fetch_currency_symbol(base_url: str, auth_token: str) -> str:
         else:
             headers = {"CloudChef-Authenticate": auth_token}
 
+        timeout = request_timeout()
+
         # Step 1: get currencyUnitType code
         r_setting = requests.get(
             f"{base_url}/tenants/current/setting",
             headers=headers,
             verify=False,
-            timeout=5,
+            timeout=timeout,
         )
         if r_setting.status_code != 200:
             return "¥"
@@ -91,7 +101,7 @@ def _fetch_currency_symbol(base_url: str, auth_token: str) -> str:
             f"{base_url}/tenants/currencyUnits",
             headers=headers,
             verify=False,
-            timeout=5,
+            timeout=timeout,
         )
         if r_units.status_code != 200:
             return "¥"

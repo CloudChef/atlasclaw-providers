@@ -22,7 +22,7 @@ import sys
 if str(SHARED_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SHARED_SCRIPTS_DIR))
 
-from _common import create_headers, get_cmp_config
+from _common import request_timeout, create_headers, get_cmp_config
 
 
 ACTION_STATUS_MAP = {
@@ -42,7 +42,7 @@ POLICY_HINT_KEYS = {
     "relationType",
 }
 
-DEFAULT_TIMEOUT = 30
+default_timeout = request_timeout()
 DEFAULT_PAGE = 1
 DEFAULT_SIZE = 20
 DEFAULT_SORT = ""
@@ -250,7 +250,7 @@ def request_json(
     *,
     params: Mapping[str, Any] | None = None,
     payload: Mapping[str, Any] | None = None,
-    timeout: int = DEFAULT_TIMEOUT,
+    timeout: int = default_timeout,
 ) -> Any:
     """Send a JSON request to SmartCMP and return the decoded payload."""
     base_url, headers, _ = get_connection()
@@ -281,7 +281,7 @@ def request_json(
         raise RuntimeError(f"SmartCMP response is not valid JSON for {method.upper()} {path}.") from exc
 
 
-def get_json(path: str, *, params: Mapping[str, Any] | None = None, timeout: int = DEFAULT_TIMEOUT) -> Any:
+def get_json(path: str, *, params: Mapping[str, Any] | None = None, timeout: int = default_timeout) -> Any:
     """Send a GET request and decode the JSON response."""
     return request_json("GET", path, params=params, timeout=timeout)
 
@@ -291,7 +291,7 @@ def post_json(
     *,
     payload: Mapping[str, Any] | None = None,
     params: Mapping[str, Any] | None = None,
-    timeout: int = DEFAULT_TIMEOUT,
+    timeout: int = default_timeout,
 ) -> Any:
     """Send a POST request and decode the JSON response."""
     return request_json("POST", path, params=params, payload=payload, timeout=timeout)
@@ -302,7 +302,7 @@ def put_json(
     *,
     payload: Mapping[str, Any] | None = None,
     params: Mapping[str, Any] | None = None,
-    timeout: int = DEFAULT_TIMEOUT,
+    timeout: int = default_timeout,
 ) -> Any:
     """Send a PUT request and decode the JSON response."""
     return request_json("PUT", path, params=params, payload=payload, timeout=timeout)

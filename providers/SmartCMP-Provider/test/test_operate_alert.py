@@ -50,7 +50,7 @@ def test_main_maps_actions_and_emits_operation_block(monkeypatch):
     module = load_module()
     seen = []
 
-    def fake_put_json(path, *, payload=None, params=None, timeout=30):
+    def fake_put_json(path, *, payload=None, params=None, timeout=60):
         seen.append((path, payload, params, timeout))
         return {"updated": len(payload["ids"])}
 
@@ -85,7 +85,7 @@ def test_main_serializes_batch_ids_into_request_payload(monkeypatch):
     module = load_module()
     captured = {}
 
-    def fake_put_json(path, *, payload=None, params=None, timeout=30):
+    def fake_put_json(path, *, payload=None, params=None, timeout=60):
         captured["path"] = path
         captured["payload"] = payload
         return {"updated": len(payload["ids"])}
@@ -124,7 +124,7 @@ def test_main_invalid_action_returns_non_zero_with_error():
 def test_main_runtime_failure_returns_non_zero(monkeypatch):
     module = load_module()
 
-    def fake_put_json(path, *, payload=None, params=None, timeout=30):
+    def fake_put_json(path, *, payload=None, params=None, timeout=60):
         raise RuntimeError("operation failed")
 
     monkeypatch.setattr(module, "put_json", fake_put_json)
