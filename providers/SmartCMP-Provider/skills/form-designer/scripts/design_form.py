@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import argparse
-import copy
 import importlib.util
 import json
 import sys
@@ -54,16 +53,38 @@ except ModuleNotFoundError as exc:
 
 
 try:
-    from _catalog_fields import build_catalog_field_schema, resolve_catalog_field_alias
+    from _catalog_insertions import apply_catalog_fields
 except ModuleNotFoundError as exc:
-    if exc.name != "_catalog_fields":
+    if exc.name != "_catalog_insertions":
         raise
-    _catalog_fields = _load_sibling_module(
-        "_catalog_fields.py",
-        "_smartcmp_form_designer_catalog_fields",
+    _catalog_insertions = _load_sibling_module(
+        "_catalog_insertions.py",
+        "_smartcmp_form_designer_catalog_insertions",
     )
-    build_catalog_field_schema = _catalog_fields.build_catalog_field_schema
-    resolve_catalog_field_alias = _catalog_fields.resolve_catalog_field_alias
+    apply_catalog_fields = _catalog_insertions.apply_catalog_fields
+
+try:
+    from _value_expressions import apply_value_expressions
+except ModuleNotFoundError as exc:
+    if exc.name != "_value_expressions":
+        raise
+    _value_expressions = _load_sibling_module(
+        "_value_expressions.py",
+        "_smartcmp_form_designer_value_expressions",
+    )
+    apply_value_expressions = _value_expressions.apply_value_expressions
+
+try:
+    from _requested_fields import constrain_schema_to_requested_fields, load_requested_fields
+except ModuleNotFoundError as exc:
+    if exc.name != "_requested_fields":
+        raise
+    _requested_fields = _load_sibling_module(
+        "_requested_fields.py",
+        "_smartcmp_form_designer_requested_fields",
+    )
+    constrain_schema_to_requested_fields = _requested_fields.constrain_schema_to_requested_fields
+    load_requested_fields = _requested_fields.load_requested_fields
 
 try:
     from _form_fetch import fetch_form_definition, parse_form_edit_url
@@ -98,180 +119,62 @@ def _load_schema(schema_json: str) -> dict[str, Any]:
     return parsed
 
 
-def _apply_catalog_fields(schema: dict[str, Any], catalog_fields_json: str) -> list[str]:
-    """Insert requested SmartCMP catalog fields into a draft schema.
-
-    Args:
-        schema: Mutable schema object whose top-level `properties` receives
-            deterministic catalog field templates.
-        catalog_fields_json: JSON array of field insertion requests. Blank
-            input leaves the schema unchanged.
-
-    Returns:
-        Warnings for ignored malformed requests and unknown catalog fields.
-
-    Raises:
-        ValueError: If the request JSON or target schema shape cannot support
-            deterministic field insertion.
-    """
-    if not catalog_fields_json.strip():
-        return []
-
-    try:
-        requests_json = json.loads(catalog_fields_json)
-    except json.JSONDecodeError as error:
-        raise ValueError(f"catalog_fields_json is not valid JSON: {error}") from error
-    if not isinstance(requests_json, list):
-        raise ValueError("catalog_fields_json must be a JSON array.")
-
-    properties = schema.get("properties")
-    if not isinstance(properties, dict):
-        raise ValueError(
-            "schema.properties must be an object before catalog fields can be inserted."
-        )
-
-    warnings: list[str] = []
-    requested_targets: dict[str, str] = {}
-    for request in requests_json:
-        if not isinstance(request, dict):
-            warnings.append("Ignored non-object catalog field request.")
-            continue
-
-        try:
-            field_value = request.get("field")
-            definition = resolve_catalog_field_alias(field_value)
-            if definition is None:
-                raise ValueError(f"Unknown SmartCMP catalog field: {field_value}")
-
-            requested_field_key = request.get("fieldKey")
-            field_key = None
-            if isinstance(requested_field_key, str):
-                requested_field_key = requested_field_key.strip()
-                field_key = requested_field_key or None
-                if (
-                    requested_field_key
-                    and requested_field_key != definition.default_field_key
-                ):
-                    warnings.append(
-                        "Custom fieldKey "
-                        f"{requested_field_key!r} for catalog field "
-                        f"{definition.canonical_key!r} differs from SmartCMP "
-                        f"UI key {definition.default_field_key!r}; backend "
-                        "standard-field handling may not recognize it."
-                    )
-            target_key = field_key or definition.default_field_key
-            previous_canonical_key = requested_targets.get(target_key)
-            if (
-                previous_canonical_key is not None
-                and previous_canonical_key != definition.canonical_key
-            ):
-                warnings.append(
-                    "Multiple catalog field requests "
-                    f"{previous_canonical_key!r} and "
-                    f"{definition.canonical_key!r} target schema key "
-                    f"{target_key!r}; keeping a single SmartCMP UI field. "
-                    "Use explicit custom fieldKey values when separate "
-                    "display-only projections are required."
-                )
-                aggregate_definition = resolve_catalog_field_alias(target_key)
-                if (
-                    aggregate_definition is not None
-                    and aggregate_definition.default_field_key == target_key
-                ):
-                    definition = aggregate_definition
-                    field_key = target_key
-            else:
-                requested_targets[target_key] = definition.canonical_key
-
-            language = request.get("language", "zh")
-            hidden = request.get("hidden", False)
-            field = build_catalog_field_schema(
-                definition.canonical_key,
-                field_key=field_key,
-                language=language if isinstance(language, str) else "zh",
-                hidden=hidden if isinstance(hidden, bool) else False,
-            )
-        except ValueError as error:
-            warnings.append(str(error))
-            continue
-        explicit_replace_keys = {"hidden"} if hidden is True else set()
-        _merge_existing_catalog_field(properties, field, warnings, explicit_replace_keys)
-        properties[field["id"]] = field
-
-    return warnings
-
-
-_BEHAVIORAL_FIELD_KEYS = frozenset(("condition", "hidden", "selectDatas", "value"))
-_STRUCTURAL_TEMPLATE_KEYS = frozenset(("description", "id", "items", "title", "type", "widget"))
-
-
-def _merge_existing_catalog_field(
-    properties: dict[str, Any],
-    field: dict[str, Any],
+def _raise_for_fatal_warnings(
     warnings: list[str],
-    explicit_replace_keys: set[str],
+    *,
+    form_url: str = "",
+    value_expressions_json: str = "",
 ) -> None:
-    """Merge a catalog template with an existing field of the same schema key.
-
-    Catalog templates intentionally own structural keys such as `type`, `widget`,
-    and catalog metadata. Existing forms, however, may attach behavior such as
-    JavaScript expressions, conditions, visibility, or select metadata to that
-    same SmartCMP UI field. Preserve existing behavior unless the caller made an
-    explicit catalog-field request for a supported replacement.
-    """
-    existing = properties.get(field["id"])
-    if not isinstance(existing, dict):
-        return
-
-    preserved_keys: list[str] = []
-    preserved_behavior_keys: list[str] = []
-    overwritten_structural_keys: list[str] = []
-    for key, value in existing.items():
-        if key == "config" and isinstance(value, dict) and isinstance(field.get(key), dict):
-            field[key] = _merge_dict_preserving_existing(field[key], value)
-            preserved_behavior_keys.append(key)
-            continue
-
-        if key not in field:
-            field[key] = copy.deepcopy(value)
-            preserved_keys.append(key)
-            continue
-
-        if key in _BEHAVIORAL_FIELD_KEYS and key not in explicit_replace_keys:
-            field[key] = copy.deepcopy(value)
-            preserved_behavior_keys.append(key)
-        elif key in _STRUCTURAL_TEMPLATE_KEYS and field.get(key) != value:
-            overwritten_structural_keys.append(key)
-
-    if preserved_keys:
-        warnings.append(
-            "Preserved unknown keys while replacing existing catalog field "
-            f"{field['id']!r}: {', '.join(preserved_keys)}."
-        )
-    if preserved_behavior_keys:
-        warnings.append(
-            "Preserved existing behavior while replacing catalog field "
-            f"{field['id']!r}: {', '.join(preserved_behavior_keys)}."
-        )
-    if overwritten_structural_keys:
-        warnings.append(
-            "Replaced existing structural keys with catalog template values "
-            f"for field {field['id']!r}: {', '.join(overwritten_structural_keys)}."
+    fatal_warnings = [
+        warning
+        for warning in warnings
+        if "literal ellipsis placeholder" in warning
+    ]
+    if fatal_warnings:
+        raise ValueError(
+            "Generated schema contains abbreviated JavaScript. "
+            "Use value_expressions_json or provide a complete function string. "
+            + " ".join(fatal_warnings)
         )
 
+    if form_url.strip() and not value_expressions_json.strip():
+        legacy_expression_warnings = [
+            warning
+            for warning in warnings
+            if (
+                "is not a function(model, sourceParams, schema, unused, cfg)"
+                in warning
+                or "does not assign model[" in warning
+            )
+        ]
+        if legacy_expression_warnings:
+            raise ValueError(
+                "URL-based form changes cannot use legacy JavaScript expressions. "
+                "Use value_expressions_json for deterministic catalog/model value "
+                "updates, or provide a complete function(model, sourceParams, "
+                "schema, unused, cfg) expression that writes model[fieldKey]. "
+                + " ".join(legacy_expression_warnings)
+            )
 
-def _merge_dict_preserving_existing(
-    template: dict[str, Any],
-    existing: dict[str, Any],
-) -> dict[str, Any]:
-    """Return a deep config merge where existing behavior wins over defaults."""
-    merged = copy.deepcopy(template)
-    for key, value in existing.items():
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = _merge_dict_preserving_existing(merged[key], value)
-        else:
-            merged[key] = copy.deepcopy(value)
-    return merged
+
+_ROUTINE_VISIBLE_WARNING_PREFIXES = (
+    "Added root widget.id=object.",
+    "Changed widget.id=text to string for field ",
+    "Added config.visibility for field ",
+    "Added allowInRequest=true for field ",
+    "Added allowInApproval=true for field ",
+)
+
+
+def _visible_warnings(warnings: list[str]) -> list[str]:
+    return [
+        warning
+        for warning in warnings
+        if not any(
+            warning.startswith(prefix)
+            for prefix in _ROUTINE_VISIBLE_WARNING_PREFIXES
+        )
+    ]
 
 
 def _empty_schema_warning(mode: str) -> tuple[dict[str, Any], list[str]]:
@@ -287,11 +190,35 @@ def _empty_schema_warning(mode: str) -> tuple[dict[str, Any], list[str]]:
     )
 
 
-def _source_schema_from_url(form_url: str) -> tuple[dict[str, Any], dict[str, str]]:
+def _source_schema_from_url(form_url: str) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     """Read the source schema for modify mode when no draft schema is supplied."""
     base_url, _auth_token, headers, _instance = require_config()
     form = fetch_form_definition(form_url, base_url, headers)
-    return form.schema, {"formId": form.form_id, "name": form.name}
+    warnings: list[str] = []
+    if form.component_count:
+        warnings.append(
+            "Source form contains visual designer components; schema-only replacement "
+            "can be overwritten by SmartCMP visual designer component state. "
+            "Review component/designMode state before saving the form."
+        )
+    if form.model:
+        keys = ", ".join(sorted(form.model))
+        warnings.append(
+            "Source form content.model has existing keys "
+            f"({keys}); value expressions must overwrite target model values at runtime."
+        )
+    return (
+        form.schema,
+        {
+            "formId": form.form_id,
+            "name": form.name,
+            "route": form.source_route,
+            "designMode": form.design_mode,
+            "modelKeys": sorted(form.model),
+            "componentCount": form.component_count,
+        },
+        warnings,
+    )
 
 
 def _validate_source_url(form_url: str) -> dict[str, str]:
@@ -300,18 +227,28 @@ def _validate_source_url(form_url: str) -> dict[str, str]:
         return {}
     base_url, _auth_token, _headers, _instance = require_config()
     source = parse_form_edit_url(form_url, base_url)
-    return {"formId": source.form_id}
+    return {"formId": source.form_id, "route": source.route}
 
 
 def main(argv: list[str] | None = None) -> int:
     """Run the SmartCMP form schema design tool."""
     parser = argparse.ArgumentParser(description="Normalize a SmartCMP Angular form schema draft.")
-    parser.add_argument("--mode", choices=("new", "modify"), required=True)
+    parser.add_argument("--mode", choices=("new", "modify", "regenerate"), required=True)
     parser.add_argument("--schema-json", default="", help="Complete form schema JSON draft.")
     parser.add_argument(
         "--catalog-fields-json",
         default="",
         help="Optional JSON array of SmartCMP catalog standard fields to insert.",
+    )
+    parser.add_argument(
+        "--value-expressions-json",
+        default="",
+        help="Optional JSON array of target fields whose values project and compose model paths.",
+    )
+    parser.add_argument(
+        "--requested-fields-json",
+        default="",
+        help="Optional JSON array of exact top-level form fields requested by the user.",
     )
     parser.add_argument("--form-url", default="", help="Optional source form edit URL for modify mode.")
     parser.add_argument("--change-summary", default="", help="Short user-facing change summary.")
@@ -321,6 +258,21 @@ def main(argv: list[str] | None = None) -> int:
     source: dict[str, str] = {}
 
     try:
+        requested_fields = load_requested_fields(args.requested_fields_json)
+
+        if args.mode == "modify" and not args.schema_json and not args.form_url:
+            raise ValueError(
+                "schema_json or form_url is required for modify mode. "
+                "Provide complete JSON to normalize, or provide a source form edit URL "
+                "for deterministic catalog field insertion or value expression updates."
+            )
+
+        if args.mode in {"new", "regenerate"} and not args.schema_json:
+            raise ValueError(
+                f"schema_json is required for {args.mode} mode. "
+                "Generate the complete schema_json from the user's requirements before calling this tool."
+            )
+
         if args.schema_json:
             schema = _load_schema(args.schema_json)
             # A provided source URL is provenance only for this path. Validate it,
@@ -329,8 +281,14 @@ def main(argv: list[str] | None = None) -> int:
         elif args.mode == "modify" and args.form_url:
             # This fallback avoids asking the LLM to copy long existing schemas
             # when the requested change can be handled deterministically.
-            schema, source = _source_schema_from_url(args.form_url)
-            if args.catalog_fields_json.strip():
+            schema, source, source_warnings = _source_schema_from_url(args.form_url)
+            warnings.extend(source_warnings)
+            if args.value_expressions_json.strip():
+                warnings.append(
+                    "No schema_json was provided; loaded the source form before "
+                    "deterministic value expression update."
+                )
+            elif args.catalog_fields_json.strip():
                 warnings.append(
                     "No schema_json was provided; loaded the source form before "
                     "deterministic catalog field insertion."
@@ -342,9 +300,19 @@ def main(argv: list[str] | None = None) -> int:
         else:
             schema, warnings = _empty_schema_warning(args.mode)
 
-        warnings.extend(_apply_catalog_fields(schema, args.catalog_fields_json))
+        warnings.extend(constrain_schema_to_requested_fields(schema, requested_fields))
+        warnings.extend(apply_catalog_fields(schema, args.catalog_fields_json))
+        warnings.extend(apply_value_expressions(schema, args.value_expressions_json))
+        warnings.extend(
+            constrain_schema_to_requested_fields(schema, requested_fields, require_all=True)
+        )
         schema, normalization_warnings = normalize_schema(schema)
         warnings.extend(normalization_warnings)
+        _raise_for_fatal_warnings(
+            warnings,
+            form_url=args.form_url,
+            value_expressions_json=args.value_expressions_json,
+        )
     except (
         ValueError,
         SchemaNormalizationError,
@@ -355,17 +323,25 @@ def main(argv: list[str] | None = None) -> int:
 
     summary = args.change_summary.strip()
     if not summary:
-        summary = (
-            "Generated a new SmartCMP form schema."
-            if args.mode == "new"
-            else "Prepared a normalized SmartCMP form schema."
-        )
+        if args.mode == "new":
+            summary = "Generated a new SmartCMP form schema."
+        elif args.mode == "regenerate":
+            summary = "Regenerated a replacement SmartCMP form schema."
+        else:
+            summary = "Prepared a normalized SmartCMP form schema."
 
     print("Change Summary:")
     print(summary)
-    if warnings:
+    if args.form_url:
+        print("\nApply Note:")
+        print(
+            "This tool does not save changes to CMP. Review and copy the "
+            "replacement Schema JSON into the SmartCMP form editor manually."
+        )
+    visible_warnings = _visible_warnings(warnings)
+    if visible_warnings:
         print("\nWarnings:")
-        for warning in warnings:
+        for warning in visible_warnings:
             print(f"- {warning}")
     print("\nSchema JSON:")
     print("```json")
