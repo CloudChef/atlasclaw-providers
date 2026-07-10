@@ -1,6 +1,6 @@
 ---
 name: "form-designer"
-description: "SmartCMP form designer skill. Generate, read, normalize, and refine SmartCMP Angular form schema JSON without submitting requests or saving changes to CMP."
+description: "Use when creating, reading, normalizing, regenerating, or modifying SmartCMP Angular form schema JSON, including dynamic JavaScript behavior, catalog context values, visibility, selects, tables, and form edit URLs."
 provider_type: "smartcmp"
 instance_required: "true"
 
@@ -13,13 +13,6 @@ triggers:
   - SmartCMP form
   - Angular form
   - JavaScript form logic
-  - dynamic form interaction
-  - business group code
-  - application code
-  - owner login id
-  - Key-Value Tags
-  - Cloud Resource Tags
-  - attachments
   - 表单 schema
   - 生成表单
   - 修改表单
@@ -27,36 +20,29 @@ triggers:
   - 设计表单
   - 表单 JavaScript
   - 动态表单
-  - 业务组代码
-  - 应用代码
-  - 负责人
-  - 附件
 
 use_when:
   - User wants to create a new SmartCMP Angular form schema from natural language or a field list
-  - User wants to inspect or modify an existing SmartCMP form from a UI edit URL
+  - User wants to inspect an existing SmartCMP form or regenerate a replacement form from a UI edit URL
   - User wants SmartCMP form JSON normalized before copying it into CMP manually
-  - User asks for hidden fields, request visibility, approval visibility, labels, descriptions, selects, or table-style array fields in a form
+  - User asks for hidden fields, request visibility, approval visibility, labels, descriptions, selects, tables, or JavaScript behavior in a form
 
 avoid_when:
-  - User wants to submit a SmartCMP service request or ticket (use request skill)
-  - User wants to check submitted request status (use request skill)
-  - User wants to approve or reject a request (use approval skill)
-  - User wants to browse service catalogs or resource data unrelated to form schema design (use datasource skill)
+  - User wants to submit a SmartCMP service request or ticket
+  - User wants to check submitted request status
+  - User wants to approve or reject a request
   - User wants to save, update, publish, or delete a form in CMP
 
 examples:
   - "Generate a SmartCMP form with server name, CPU, memory, and approval-only cost fields"
-  - "按照这些字段生成一个 SmartCMP 表单 schema"
   - "Use this form URL and add a hidden environment field"
-  - "完善这个表单，让密码字段在申请和审批都可见"
   - "Normalize this SmartCMP Angular form schema"
 
 related:
   - datasource
 
 tool_read_name: "smartcmp_read_form_schema"
-tool_read_description: "Read one existing SmartCMP form schema from a current-instance UI edit URL. This tool is read-only: it only accepts URLs like #/main/service-model/forms/edit/<uuid> and calls GET /forms/<uuid>. It never saves, submits, updates, or deletes CMP data."
+tool_read_description: "Read one existing SmartCMP form schema from a current-instance UI edit or design URL. This tool is read-only: it accepts URLs like #/main/service-model/forms/edit/<uuid> or #/main/service-model/forms/design/<uuid> and calls GET /forms/<uuid>. It also exposes source content.model/designMode/component counts as diagnostic context. It never saves, submits, updates, or deletes CMP data."
 tool_read_entrypoint: "scripts/read_form.py"
 tool_read_groups:
   - cmp
@@ -72,43 +58,45 @@ tool_read_parameters: |
     "properties": {
       "form_url": {
         "type": "string",
-        "description": "SmartCMP UI form edit URL from the selected provider instance, for example https://cmp/#/main/service-model/forms/edit/<uuid>. External hosts and non-form-edit routes are rejected."
+        "description": "SmartCMP UI form edit/design URL from the selected provider instance, for example https://cmp/#/main/service-model/forms/edit/<uuid> or https://cmp/#/main/service-model/forms/design/<uuid>. External hosts and non-form routes are rejected."
       }
     },
     "required": ["form_url"]
   }
 
 tool_design_name: "smartcmp_design_form_schema"
-tool_design_description: "Normalize and return a SmartCMP Angular form schema JSON draft generated or modified by the LLM. For new forms, pass the generated schema_json. For existing forms, pass either the complete modified schema_json or form_url plus catalog_fields_json for deterministic catalog field insertion. This tool never writes to CMP."
+tool_design_description: "Normalize and return a SmartCMP Angular form schema JSON draft. Use mode=new for new forms, regenerate after reading a URL source for full schema replacement, and modify for deterministic normalization, catalog insertions, or deterministic value-expression updates from a trusted complete JSON or form URL source. This tool never writes to CMP."
 tool_design_entrypoint: "scripts/design_form.py"
 tool_design_groups:
   - cmp
   - form-designer
 tool_design_capability_class: "provider:smartcmp"
 tool_design_priority: 110
-tool_design_result_mode: "llm"
+tool_design_result_mode: "tool_only_ok"
 tool_design_cli_flag_overrides:
   mode: "--mode"
   schema_json: "--schema-json"
   form_url: "--form-url"
   change_summary: "--change-summary"
   catalog_fields_json: "--catalog-fields-json"
+  value_expressions_json: "--value-expressions-json"
+  requested_fields_json: "--requested-fields-json"
 tool_design_parameters: |
   {
     "type": "object",
     "properties": {
       "mode": {
         "type": "string",
-        "enum": ["new", "modify"],
-        "description": "Use new for a brand-new form schema, or modify for a schema derived from an existing form URL."
+        "enum": ["new", "modify", "regenerate"],
+        "description": "new for a new schema; regenerate for a replacement based on a URL source; modify for trusted complete JSON or deterministic inserts."
       },
       "schema_json": {
         "type": "string",
-        "description": "Complete SmartCMP Angular form schema JSON produced or modified by the LLM. The script will normalize structure and return the final schema."
+        "description": "Complete SmartCMP Angular form schema JSON. Required for new/regenerate, and required for modify unless form_url is supplied. Include only the user-requested business fields; the design tool may add hidden SmartCMP technical fields such as schemaFormValid. If the user constrains the exact field set or field count in any wording or language, schema.properties and fieldsets must match that business field set exactly, excluding hidden SmartCMP technical fields. Computed-value source reads must not become schema properties."
       },
       "form_url": {
         "type": "string",
-        "description": "Optional source SmartCMP form edit URL for modify mode. The tool validates this URL and may read the source schema when schema_json is omitted."
+        "description": "Optional source SmartCMP form edit/design URL for regenerate/modify mode. Required for modify when schema_json is omitted."
       },
       "change_summary": {
         "type": "string",
@@ -116,7 +104,15 @@ tool_design_parameters: |
       },
       "catalog_fields_json": {
         "type": "string",
-        "description": "Optional JSON array of on-demand SmartCMP catalog field insertions, for example [{\"field\":\"businessGroup.code\"}, {\"field\":\"application.code\"}]. Prefer omitting fieldKey for SmartCMP standard fields when backend processing must recognize the UI key."
+        "description": "Optional JSON array of explicitly requested SmartCMP standard catalog field insertions."
+      },
+      "value_expressions_json": {
+        "type": "string",
+        "description": "Optional deterministic compatibility helper for existing projection/composition workflows. Prefer explicit field-level JavaScript in schema_json for new SmartCMP form extensions. This is a JSON string containing an array of request objects; even one target field must be wrapped as a one-element array. Source values are read-only dependencies, not added form fields. Each request has fieldKey plus exactly one value shape: fields for flat key/value JSON with unique labels, or compose for the target output structure. Add valueType when the backend requires a specific submitted type: string, jsonString, object, or array. valueType=object/array writes the raw composed structure to model[fieldKey] while keeping the target schema field as an executable string widget; valueType=jsonString writes valid JSON text; string is for formatted text. For formatted string targets, compose must be a top-level $concat object such as {\"$concat\":[\"{key：\",{\"$field\":\"名称\"},\"}\"]}; do not model the final string as a plain object. Use plain object compose only when the target value should be object/array or JSON object text. In compose, plain object keys are output keys; source leaf marker objects must contain exactly one marker: field/$field/path/$path/$literal/$concat. Do not invent extra DSL keys. Do not use value_expressions_json as the default path when the user asked for custom JavaScript."
+      },
+      "requested_fields_json": {
+        "type": "string",
+        "description": "Optional JSON array of the exact top-level business form field keys requested by the user, in requested order. Every item must be a non-empty string. Use this whenever the user enumerates the form fields or gives a field count, for any number of fields. Do not include source/dependency values used only by value_expressions_json, and do not include hidden SmartCMP technical fields such as schemaFormValid. The design tool rejects missing requested fields."
       }
     },
     "required": ["mode"]
@@ -125,123 +121,84 @@ tool_design_parameters: |
 
 # form-designer
 
-Design, read, and normalize SmartCMP Angular form schema JSON. This skill is
-only for form schema authoring. It does not submit service requests and does not save
-changes to CMP.
+Design, read, and normalize SmartCMP Angular form schema JSON only. It does not submit requests or save changes.
 
 ## Boundaries
 
-- Never call request submission scripts or any request workflow tool.
-- Never call CMP write methods such as POST, PUT, PATCH, or DELETE for forms.
-- Existing form URLs are used only as read-only source material.
-- Final changes are copied from the AtlasClaw response by the user; this skill
-  does not persist them.
+- No submit/approve/status workflows.
+- No CMP form writes: no POST, PUT, PATCH, DELETE, publish, save, or delete.
+- Form URLs are read-only source material.
 
 ## Workflow
 
-### New Form
+- New form: if the user gave enough fields, do not read CMP or call datasource tools. Build complete `schema_json`, then call `smartcmp_design_form_schema` with `mode=new`.
+- Bare form edit/design URL: inspect only. Call `smartcmp_read_form_schema`; do not design.
+- URL plus full field-set or schema-shape changes: treat this as new-form generation with one extra read step. First call `smartcmp_read_form_schema` to understand the current form, then generate a fresh complete replacement schema from the user's latest requirements and call design with `mode=regenerate`. Use the old schema only as context; do not patch, splice, or preserve existing fields/JavaScript unless the user explicitly asks to keep them.
+- URL plus deterministic projection/composition changes: after the read step, call `smartcmp_design_form_schema` with `mode=modify`, `form_url`, and `value_expressions_json`. This lets the tool load the source schema and replace the target expression with the hardened runtime expression instead of asking the LLM to hand-copy the old schema or JavaScript.
+- `mode=modify` is only for complete caller-provided JSON, deterministic `catalog_fields_json` insertion, or deterministic `value_expressions_json` updates into a supplied `schema_json` or `form_url` source. Never call `mode=modify` with only `mode` or only insertion/update JSON; that would create an incomplete replacement schema.
+- If a read result warns that a field expression is not `function(model, sourceParams, schema, unused, cfg)`, do not answer by hand-writing a replacement `schema_json` with another legacy signature such as `function(formInRet, schemas, widget, injection)`. For catalog/model value rewrites, use `value_expressions_json`; for custom JavaScript, provide a complete modern-signature expression that writes `model[fieldKey]`.
+- If read/design output reports `designMode`, `modelKeys`, or `componentCount`, tell the user the source form has visual-designer/model state that can preserve stale runtime values even when the schema expression changes. The generated schema is still a manual replacement draft; SmartCMP persistence and visual designer state must be reviewed in CMP.
 
-1. Translate the user's field list or natural-language requirement into a
-   complete SmartCMP Angular schema JSON object.
-2. Preserve the language requested by the user. Generate bilingual
-   `i18nTitle` or `i18nPlaceholder` only when the user asks for bilingual output.
-3. Call `smartcmp_design_form_schema` with `mode=new` and the draft
-   `schema_json`.
-4. Return the normalized schema JSON and a short change summary.
+## General JavaScript Form Extensions
 
-### Modify Existing Form
+Use this skill for general SmartCMP form JavaScript extension work. The scripts provide generic validation, normalize structure, preserve unknown keys, and warn about JavaScript risk; they must not perform business semantic inference from field labels, expression substrings, or familiar variable names.
 
-1. Call `smartcmp_read_form_schema` with the SmartCMP form edit URL.
-2. If the user only asks to add supported catalog context fields, call
-   `smartcmp_design_form_schema` with `mode=modify`, the source `form_url`,
-   `catalog_fields_json`, and a short `change_summary`; omit `schema_json` so
-   the tool reads the source schema and inserts those fields deterministically.
-3. For other schema edits, modify the complete schema JSON from the tool result
-   metadata. Never pass truncated, summarized, or ellipsized JSON as
-   `schema_json`.
-4. Call `smartcmp_design_form_schema` with `mode=modify`, the complete modified
-   `schema_json`, the source `form_url`, and a short `change_summary`.
-5. Return the normalized schema JSON and the short change summary.
+Prefer explicit field-level JavaScript for dynamic behavior. When the user asks for computed values, visibility, linkage, validation, or non-catalog model reads, generate the requested JavaScript directly under the relevant SmartCMP key, usually `config.value.expression` with `source: "mock"` and `method: "mock"` for computed values. Service-catalog context reads are the exception: do not hand-write `sourceParams.<key>`, `sourceParams['<key>']`, or label-based guesses such as `sourceParams['业务组']`; use `value_expressions_json` with catalog aliases so `_catalog_fields.py` and the generated fallback paths decide the runtime source. The LLM owns the business meaning of the generated JavaScript; the script layer is not the source of business semantics.
 
-## Output Contract
+Catalog context is reference/catalog metadata for generating JavaScript, not a fixed synchronization feature. catalog-provided context values are read-only inputs to the generated expression. Do not add projection source values as form fields unless the user explicitly asks to show or edit them. Do not rely on catalog_fields_json to satisfy catalog context needs; use it only when the user explicitly asks to insert or display a SmartCMP standard catalog field.
 
-- Final user-visible output must include the complete normalized schema as a
-  fenced JSON block. Do not replace the schema JSON with only tables, summaries,
-  or field descriptions.
-- If `smartcmp_design_form_schema` returns a successful `Schema JSON` block,
-  treat that tool output as authoritative. Do not replace a successful design
-  result with a provider authentication error unless the tool output itself
-  reports authentication failure, HTTP 401, or HTTP 403. New-form design is a
-  local schema-authoring operation.
-- A concise change summary may precede the JSON. Warnings may follow the summary
-  when the script reports assumptions or risky JavaScript patterns.
+`value_expressions_json` is an optional compatibility helper for deterministic projection/composition cases that already fit its limited data shape. In plain terms, value_expressions_json is an optional compatibility helper, not the default design path. Do not use value_expressions_json as the default path for general SmartCMP JavaScript work, and do not force a custom JavaScript request into this helper. When using this helper, keep these contracts:
+
+- Service-catalog context derived fields are not general custom JavaScript. If the user asks a target field to be filled from standard service-catalog context, use `value_expressions_json` with `field`/`$field` catalog aliases unless the user provides complete custom JavaScript that reads verified paths instead of direct `sourceParams` keys.
+- User-enumerated fields are visible by default. Do not mark requested fields as hidden, titleless, off-screen, or non-editable unless the user explicitly asks for hidden or technical behavior. Field names do not imply hidden compatibility behavior by themselves.
+- `value_expressions_json` is always a JSON array string. For one computed target, pass a one-element array.
+- A form field is a user-facing/request parameter in `schema.properties`. A source value used only to compute another field is not a form field.
+- When the user enumerates fields or gives a field count, pass `requested_fields_json` with exactly those top-level business form field keys, in order. Every item must be a non-empty string. This is for any number of fields; do not include source/dependency values used only by `value_expressions_json`, and do not include hidden SmartCMP technical fields such as `schemaFormValid`. The design tool rejects missing requested fields.
+- Exact field-set constraints can be expressed in any wording or language. Infer them from the user's intended scope, not by matching a fixed keyword list. When the user constrains the exact field set or field count, `schema.properties` and `fieldsets` contain exactly those requested business form fields plus any hidden SmartCMP technical fields added by the design tool.
+- `fieldKey` is always the exact requested target field. There is no default target.
+- Use `valueType` when the backend requires the submitted parameter type: `string`, `jsonString`, `object`, or `array`. `object`/`array` submit raw structured `model[fieldKey]` values while the schema field stays a `type: "string"` / `widget.id: "string"` control so SmartCMP executes `config.value.expression`; `jsonString` submits valid JSON text; `string` submits formatted text. If omitted, the tool infers `object` or `array` from an existing target field schema type before falling back to `string`.
+- Choose exactly one value shape per request: top-level `fields` for a flat object, or `compose` for the exact nested object/array/string structure the target field should receive. Never send both `fields` and `compose` for the same `fieldKey`.
+- `fields` maps unique output labels to source reads and is only a shorthand for flat JSON such as `{"名称":"..."}`. Each item uses a `label` plus either `field` for a catalog alias or `path` for an exact model path. Do not repeat `label` to imply a parent key or group.
+- `compose` is the target output structure itself. Plain object keys become literal output keys; source reads must be single-key leaf markers using `field`/`$field`, `path`/`$path`, `$literal`, or `$concat`.
+- For any nested, grouped, array, or complex concatenation request, copy the requested output structure into `compose` before resolving source reads. Decompose complex output into leaf source reads, then combine those leaves with the surrounding JSON structure or `$concat`.
+- When the final target value is a single formatted string, use one top-level `$concat` containing literal text and source marker leaves. Do not model that final string as a plain object unless the user explicitly asks for JSON object output.
+- Do not invent helper metadata, placeholders, or alternate mini-languages inside `value_expressions_json`; if a key is not one of the supported source markers, the tool treats it as output data.
+- Source reads use `field`/`$field` for known catalog aliases with fallback candidate paths, or `path`/`$path` for exact model paths with no parent-path fallback.
+- Do not add source/dependency values as form fields unless the user explicitly asks to show or edit those values.
+- Preserve requested visibility and titles. Value-expression target fields stay executable scalar controls; use `valueType` for the runtime submitted value type instead of turning the schema field into an object or array container. Do not default value-expression target fields to hidden, titleless, or non-editable.
+- Return an empty string until at least one source value resolves.
+
+Only these catalog aliases are supported: `name`/`名称`, `owners`/`所有者`, `projects`/`应用系统`, `businessGroup`/`业务组`.
+
+For custom JavaScript, provide a complete function string under `config.value.expression` with `source: "mock"` and `method: "mock"`. The design tool rejects literal ellipsis placeholder JavaScript. Keep Chinese labels as literal UTF-8 text, not Unicode escape sequences.
+
+## Common Widget Contracts
+
+Use the SmartCMP widget shape, not generic web-control names:
+
+- Text input: `type: "string"` with `widget.id: "string"`.
+- Number input: `type: "number"` with `widget.id: "number"` and range validation when known.
+- Checkbox: `type: "boolean"` with `widget.id: "checkbox"`.
+- Select: `type: "string"`, `format: "uiselect"`, `widget.id: "select"`, and `default: null` when a placeholder should show.
+- Multi-select: `type: "array"` or `type: "string"`, `format: "uiselect"`, `widget.id: "select"`, plus `selectMode: "multiple"`.
+- Static options: use field-level `selectDatas` with display labels and stored values; do not hide option data inside `widget`.
+- Tables: top-level table fields use `type: "array"` with `widget.id: "table-head"`; row schema lives under `items.properties`, and `items.fieldsets` lists row columns.
+- User-facing text should prefer `i18nTitle`, `i18nPlaceholder`, and `i18nDescription` when Chinese/English rendering matters.
+- Required fields use `required`/`isRequired`; keep `schema.required` consistent when the target renderer expects root required lists.
+- Description-only Angular2 schemas still need non-empty `properties`; add a hidden placeholder property instead of returning a schema with only description text.
 
 ## Schema Rules
 
-- Root schema should be `type: object` with a `properties` object.
-- Top-level fields should include stable `id`, numeric `index`, `type`, and
-  `widget.id`.
-- Top-level fields should include `config.visibility.allowInRequest` and
-  `config.visibility.allowInApproval` unless the user explicitly provided a
-  different visibility rule.
-- Preserve `hidden`, `condition`, `fieldsets`, `selectDatas`, `value`, `items`,
-  and unknown schema keys.
-- Use warnings for ambiguous or unsupported structures instead of inventing CMP
-  workflow behavior.
+- Root: `type: object` with `properties` and `widget.id: "object"`.
+- `properties` and `fieldsets` must match the requested business form-field set; computed-value dependencies do not expand that set, and hidden SmartCMP technical fields such as `schemaFormValid` are the only allowed tool-added exception.
+- When adding fields through `catalog_fields_json` or `value_expressions_json`, the generated target fields must also be present in root `fieldsets`.
+- Root `fieldsets` use the catalog-request-compatible id `fieldset-default`; requested business fields use stable 1-based top-level `index` values in display order, while hidden SmartCMP technical fields do not participate in business field indexing.
+- Top-level fields: stable `id`, numeric `index`, matching `type`, and `widget.id` (`string`, not `text`, for string inputs).
+- Include `config.visibility.allowInRequest` and `allowInApproval` unless the user supplied different visibility.
+- Preserve unknown keys, `hidden`, `condition`, `fieldsets`, `selectDatas`, `value`, and `items`.
 
-## Catalog Context Fields
+## Output
 
-- Standard service-catalog fields are not added to every form. Add known
-  catalog fields only when the user asks for catalog context such as business
-  group code, application code, owners, attachments, or tags.
-- For supported catalog context fields, pass them through
-  `catalog_fields_json` and do not also hand-write duplicate catalog fields in
-  `schema_json`. Prefer SmartCMP UI keys such as `businessGroup`, `projects`,
-  `owners`, `attachments`, `keyValueTag`, and `cloudResourceTag` when backend
-  standard-field handling must recognize the field. If a custom `fieldKey` is
-  supplied for a catalog field, the design tool keeps it and emits a warning
-  because CMP backend standard-field handling may not recognize that custom key.
-  User-defined non-catalog fields should stay in `schema_json` and may use the
-  user's own field keys without this warning.
-- In modify mode, prefer `form_url` plus `catalog_fields_json` with no
-  `schema_json` when the requested change is only adding supported catalog
-  context fields. This preserves existing JavaScript and unknown keys without
-  requiring the LLM to copy a long schema.
-- Known meanings:
-  - `businessGroup.id`, `businessGroup.name`, `businessGroup.code`: business
-    group context from the catalog route; generated schema id is
-    `businessGroup`.
-  - `application.id`, `application.name`, `application.code`: application
-    context; generated schema id is the UI source key `projects`.
-  - `owners`, `owners.id`, `owners.name`, `owners.userName`,
-    `owners.userLoginId`: owner list and owner identity fields; generated
-    schema id is `owners`.
-  - `name`, `description`, `number`, `executeTime`: standard request/catalog
-    name, description, number/count, and execution time fields.
-  - `attachments`: attachment list.
-  - `keyValueTag`: SmartCMP Key-Value Tags.
-  - `cloudResourceTag`: SmartCMP Cloud Resource Tags.
-  - The analyzed Linux VM catalog stores bottom Key-Value Tags resource data
-    under `Compute.tags_copy`.
-- Generated catalog fields should be marked with
-  `x-smartcmp.builtinCatalogField`.
+Return the exact normalized schema text from `smartcmp_design_form_schema` as a fenced `json` block. All string values inside the returned JSON are opaque. Do not add, remove, rename, move, summarize, or abbreviate any property or string value. Do not summarize, abbreviate, reorder, rename, or replace long JavaScript strings with `...`.
 
-## JavaScript Field Logic
-
-- For dynamic form behavior, generate field-level JavaScript under
-  `config.value.expression`.
-- Use `model`, `sourceParams`, `schema`, and `cfg` for form context. DOM probing
-  is only a compatibility fallback for SmartCMP catalog context values.
-- The skill and scripts must not execute generated JavaScript.
-
-```json
-{
-  "config": {
-    "value": {
-      "source": "mock",
-      "method": "mock",
-      "expression": "function(model, sourceParams, schema, unused, cfg) { var bg = model.businessGroup || {}; var app = model.projects || {}; if (Array.isArray(app)) { app = app[0] || {}; } return [bg.code, app.code].filter(Boolean).join('-'); }"
-    }
-  }
-}
-```
+For URL-based regenerate or modify work, state that the result is a replacement schema for manual review and copying. Do not imply that the tool saved, updated, or published the CMP form.
