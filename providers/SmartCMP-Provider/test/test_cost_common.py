@@ -42,6 +42,22 @@ def test_normalize_timestamp_handles_milliseconds_and_seconds():
     assert common.normalize_timestamp(0) is None
 
 
+def test_normalize_timestamp_uses_atlasclaw_request_timezone(monkeypatch):
+    monkeypatch.setenv("ATLASCLAW_TIMEZONE", "America/New_York")
+
+    assert common.normalize_timestamp(1_710_000_000_000) == "2024-03-09T11:00:00-05:00"
+    assert common.normalize_timestamp(1_783_616_463_695) == "2026-07-09T13:01:03.695000-04:00"
+
+    monkeypatch.setenv("ATLASCLAW_TIMEZONE", "not-a-real-timezone")
+    assert common.normalize_timestamp(1_710_000_000_000) == "2024-03-09T16:00:00Z"
+
+    monkeypatch.setenv("ATLASCLAW_TIMEZONE", "../invalid-timezone")
+    assert common.normalize_timestamp(1_710_000_000_000) == "2024-03-09T16:00:00Z"
+
+    monkeypatch.setenv("ATLASCLAW_TIMEZONE", "Invalid\nTimezone")
+    assert common.normalize_timestamp(1_710_000_000_000) == "2024-03-09T16:00:00Z"
+
+
 def test_build_request_defaults_are_stable():
     assert common.build_pageable_request() == {"page": 0, "size": 20}
     assert common.build_pageable_request(page=-1, size=0) == {"page": 0, "size": 1}

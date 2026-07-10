@@ -254,12 +254,13 @@ def render_output(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="List SmartCMP cost optimization recommendations.")
-    parser.add_argument("--status", help="Filter by violation status.")
+    parser.add_argument("--status", default="ACTIVED", help="Filter by violation status.")
     parser.add_argument("--severity", action="append", help="Filter by severity.")
-    parser.add_argument("--category", help="Filter by category.")
+    parser.add_argument("--category", default="COST-OPTIMIZATION", help="Filter by category.")
     parser.add_argument("--query", default="", help="Free-text query.")
     parser.add_argument("--page", type=int, default=0, help="Zero-based page index.")
     parser.add_argument("--size", type=int, default=20, help="Page size.")
+    parser.add_argument("--sort", default="lastExecuteDate,desc", help="Sort field and direction.")
     parser.add_argument("--with-related-policies", action="store_true",
                         help="Show count of related policies in the same category.")
     args = parser.parse_args()
@@ -272,6 +273,8 @@ def main() -> int:
         params["severity"] = args.severity
     if args.category:
         params["category"] = args.category
+    if args.sort:
+        params["sort"] = args.sort
     params.update(build_pageable_request(page=args.page, size=args.size))
     params.update(build_query_request(query_value=args.query))
 

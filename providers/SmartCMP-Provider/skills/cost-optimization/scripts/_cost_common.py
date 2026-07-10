@@ -10,6 +10,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 SHARED_SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent / "shared" / "scripts"
 if str(SHARED_SCRIPTS_DIR) not in sys.path:
@@ -169,8 +170,19 @@ def normalize_money(value):
     return None
 
 
+def _resolve_display_timezone():
+    """Return the current request's IANA timezone, falling back to UTC."""
+    timezone_name = os.environ.get("ATLASCLAW_TIMEZONE", "").strip()
+    if not timezone_name:
+        return timezone.utc
+    try:
+        return ZoneInfo(timezone_name)
+    except (ZoneInfoNotFoundError, OSError, ValueError):
+        return timezone.utc
+
+
 def normalize_timestamp(value):
-    """Normalize timestamps to UTC ISO-8601 strings or None."""
+    """Normalize timestamps to the current request timezone ISO-8601 string or None."""
     if value in (None, "", "null"):
         return None
 
@@ -188,4 +200,5 @@ def normalize_timestamp(value):
     if timestamp > 10_000_000_000:
         timestamp /= 1000.0
 
-    return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    rendered = datetime.fromtimestamp(timestamp, tz=_resolve_display_timezone()).isoformat()
+    return rendered.replace("+00:00", "Z")
