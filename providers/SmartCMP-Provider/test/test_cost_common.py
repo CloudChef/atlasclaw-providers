@@ -54,6 +54,9 @@ def test_normalize_timestamp_uses_atlasclaw_request_timezone(monkeypatch):
     monkeypatch.setenv("ATLASCLAW_TIMEZONE", "../invalid-timezone")
     assert common.normalize_timestamp(1_710_000_000_000) == "2024-03-09T16:00:00Z"
 
+    monkeypatch.setenv("ATLASCLAW_TIMEZONE", "Invalid\nTimezone")
+    assert common.normalize_timestamp(1_710_000_000_000) == "2024-03-09T16:00:00Z"
+
 
 def test_build_request_defaults_are_stable():
     assert common.build_pageable_request() == {"page": 0, "size": 20}
