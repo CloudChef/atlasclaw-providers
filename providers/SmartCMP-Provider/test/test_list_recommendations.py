@@ -148,3 +148,39 @@ def test_render_output_handles_empty_list():
         1,
     )[0]
     assert json.loads(meta_text) == []
+
+
+def test_main_defaults_to_latest_active_cost_optimization_results(monkeypatch):
+    captured = {}
+
+    class Response:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"content": []}
+
+    def fake_get(url, **kwargs):
+        captured["url"] = url
+        captured["params"] = kwargs["params"]
+        return Response()
+
+    monkeypatch.setattr(
+        listing,
+        "require_config",
+        lambda: ("https://cmp.example/platform-api", "", {}, {}),
+    )
+    monkeypatch.setattr(listing.requests, "get", fake_get)
+    monkeypatch.setattr(listing, "render_output", lambda *args, **kwargs: "")
+    monkeypatch.setattr(sys, "argv", ["list_recommendations.py"])
+
+    assert listing.main() == 0
+    assert captured["url"] == "https://cmp.example/platform-api/compliance-policies/violations/search"
+    assert captured["params"] == {
+        "status": "ACTIVED",
+        "category": "COST-OPTIMIZATION",
+        "sort": "lastExecuteDate,desc",
+        "page": 0,
+        "size": 20,
+        "queryValue": "",
+    }
