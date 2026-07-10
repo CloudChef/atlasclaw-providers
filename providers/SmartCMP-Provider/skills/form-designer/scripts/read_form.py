@@ -50,6 +50,14 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"SmartCMP Form: {form.name or form.form_id}")
     print(f"Form ID: {form.form_id}")
+    if form.design_mode or form.model or form.component_count:
+        print("\nContent Context:")
+        if form.design_mode:
+            print(f"- Design Mode: {form.design_mode}")
+        if form.model:
+            print(f"- Model Keys: {', '.join(sorted(form.model))}")
+        if form.component_count:
+            print(f"- Component Count: {form.component_count}")
     if warnings:
         print("Warnings:")
         for warning in warnings:
@@ -60,10 +68,17 @@ def main(argv: list[str] | None = None) -> int:
     print("```")
 
     meta = {
+        "source": {
+            "formId": form.form_id,
+            "route": form.source_route,
+        },
         "formId": form.form_id,
         "name": form.name,
         "description": form.description,
         "contentKeys": form.raw_content_keys,
+        "model": form.model,
+        "designMode": form.design_mode,
+        "componentCount": form.component_count,
         "warnings": warnings,
         "schema": schema,
     }

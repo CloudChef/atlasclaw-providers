@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 import requests
 
 try:
-    from _common import request_timeout, normalize_ui_base_url
+    from _common import normalize_ui_base_url
 except ImportError:
     import os
     import sys
@@ -25,11 +25,18 @@ except ImportError:
         0,
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shared", "scripts"),
     )
-    from _common import request_timeout, normalize_ui_base_url
+    from _common import normalize_ui_base_url
+
+try:
+    from _common import request_timeout
+except ImportError:
+
+    def request_timeout() -> int:
+        return 30
 
 
 _FORM_EDIT_ROUTE = re.compile(
-    r"^/main/service-model/forms/edit/"
+    r"^/main/service-model/forms/(?P<route>edit|design)/"
     r"(?P<form_id>[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
     r"/?$"
 )
@@ -41,6 +48,7 @@ class FormSource:
 
     form_id: str
     form_url: str
+    route: str
 
 
 @dataclass(frozen=True)
@@ -51,6 +59,10 @@ class FormDefinition:
     name: str
     description: str
     schema: dict[str, Any]
+    model: dict[str, Any]
+    design_mode: str
+    component_count: int
+    source_route: str
     raw_content_keys: list[str]
 
 
@@ -92,10 +104,13 @@ def parse_form_edit_url(form_url: str, cmp_base_url: str) -> FormSource:
     fragment_route = parsed_url.fragment.split("?", 1)[0].strip()
     route_match = _FORM_EDIT_ROUTE.match(fragment_route)
     if not route_match:
-        raise ValueError("form_url must use #/main/service-model/forms/edit/<uuid>.")
+        raise ValueError(
+            "form_url must use #/main/service-model/forms/edit/<uuid> "
+            "or #/main/service-model/forms/design/<uuid>."
+        )
 
     form_id = str(uuid.UUID(route_match.group("form_id")))
-    return FormSource(form_id=form_id, form_url=raw_url)
+    return FormSource(form_id=form_id, form_url=raw_url, route=route_match.group("route"))
 
 
 def extract_schema_from_payload(payload: Any) -> dict[str, Any]:
@@ -127,6 +142,21 @@ def extract_schema_from_payload(payload: Any) -> dict[str, Any]:
     if not isinstance(schema, dict):
         raise ValueError("Form content.schema must be a JSON object.")
     return schema
+
+
+def extract_model_from_payload(payload: Any) -> dict[str, Any]:
+    """Extract optional `content.model` from a SmartCMP form definition response."""
+    content = payload.get("content") if isinstance(payload, dict) else None
+    if not isinstance(content, dict):
+        return {}
+
+    model = content.get("model")
+    if isinstance(model, str):
+        try:
+            model = json.loads(model)
+        except json.JSONDecodeError:
+            return {}
+    return model if isinstance(model, dict) else {}
 
 
 def fetch_form_definition(
@@ -164,12 +194,19 @@ def fetch_form_definition(
     response.raise_for_status()
     payload = response.json()
     schema = extract_schema_from_payload(payload)
+    model = extract_model_from_payload(payload)
     content = payload.get("content") if isinstance(payload, dict) else {}
+    components = content.get("components") if isinstance(content, dict) else None
+    design_mode = content.get("designMode") if isinstance(content, dict) else ""
 
     return FormDefinition(
         form_id=source.form_id,
         name=str(payload.get("name") or "") if isinstance(payload, dict) else "",
         description=str(payload.get("description") or "") if isinstance(payload, dict) else "",
         schema=schema,
+        model=model,
+        design_mode=str(design_mode or "") if isinstance(content, dict) else "",
+        component_count=len(components) if isinstance(components, list) else 0,
+        source_route=source.route,
         raw_content_keys=sorted(content.keys()) if isinstance(content, dict) else [],
     )
