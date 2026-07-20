@@ -220,6 +220,8 @@ tool_approve_groups:
   - approval
 tool_approve_capability_class: "provider:smartcmp"
 tool_approve_priority: 120
+tool_approve_effect: "mutate"
+tool_approve_requires_approval: true
 tool_approve_cli_positional:
   - ids
 tool_approve_cli_split:
@@ -270,6 +272,8 @@ tool_reject_groups:
   - approval
 tool_reject_capability_class: "provider:smartcmp"
 tool_reject_priority: 130
+tool_reject_effect: "mutate"
+tool_reject_requires_approval: true
 tool_reject_cli_positional:
   - ids
 tool_reject_cli_split:

@@ -2,6 +2,47 @@
 
 SmartCMP Provider is a service provider module for AtlasClaw, integrating with SmartCMP cloud management platform. It supports cloud resource provisioning, approval workflow management, alarm alert handling, data source queries, form schema design, and resource compliance analysis.
 
+## Embedded Assistant Context
+
+SmartCMP's AtlasClaw integration deterministically resolves five normalized page paths through
+`assistant_context/routes.json`: pending approval detail, catalog request, My Application request
+detail, cloud resource detail, and virtual-machine detail. The request-detail template is
+`/main/new-process/myApplication/{application_type}/{request_id}`. The manifest maps each path to
+one existing `smartcmp:*` Skill and declares one Provider-level Context entrypoint,
+`assistant_context/resolve.py`. Adding or remapping a Skill requires only a route entry; it does not
+add a Skill-specific resolver. The single resolver handles supported SmartCMP page-object APIs
+independently of `skill_ref`, and a genuinely new SmartCMP object API extends that Provider-level
+object boundary rather than a domain Skill. Context resolution requires the explicitly configured
+Provider type/instance and accepts only the request-scoped Host
+`CloudChef-Authenticate` Cookie for the explicitly selected Provider instance. It ignores Provider
+tokens, user tokens, configured cookies, and username/password credentials, and never auto-logs in.
+It returns minimal objects containing only approved display fields and does not introduce a separate login, token, credential,
+role, menu, ACL, or database-permission flow.
+
+Successful Context resolution also returns standard `object_actions` as display-only Chat intents. Pending
+approval exposes Open, Analyze, Approve, and Reject; those prompts continue through the existing
+`smartcmp:approval` conversation flow. Catalog Context exposes Open and Request, resource and
+virtual-machine Context expose Open and Operations, and My Application request detail exposes Open
+and Status. Resolver actions carry only the generic display, navigation, and Chat-prompt fields
+consumed by AtlasClaw. Each prompt refers to the current page object; AtlasClaw supplies the resolved
+object snapshot to the conversation. The matched existing Skill remains responsible for selecting
+and running its own authorized capabilities under the current user's existing permissions.
+Existing business Skill execution semantics remain unchanged.
+
+Approval analysis is exposed through the standard Analyze object action. A matched route declares
+exactly one existing domain Skill, while the manifest declares only one external resolver for the
+Provider. Neither mapping redefines that Skill's capabilities, parameters, authentication,
+authorization, or ordinary menu conversation behavior. The browser receives only the selected
+display fields and generic actions, while AtlasClaw keeps the resolved object in its server-side
+context snapshot.
+
+Deployment configuration must reference:
+
+- `route_manifest`: `assistant_context/routes.json`
+
+Authentication cookies, tokens, and Provider credentials must remain in the existing runtime
+configuration and must never be written into either manifest.
+
 ## Features
 
 - **Resource Requests** - Submit cloud resource or application provisioning requests and query submitted request status by Request ID

@@ -190,6 +190,8 @@ tool_power_groups:
   - day2
 tool_power_capability_class: "provider:smartcmp"
 tool_power_priority: 140
+tool_power_effect: "mutate"
+tool_power_requires_approval: true
 tool_power_result_mode: "tool_only_ok"
 tool_power_cli_positional:
   - resource_ids

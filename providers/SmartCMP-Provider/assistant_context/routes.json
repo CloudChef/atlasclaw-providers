@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "provider_type": "smartcmp",
+  "context_resolver": {
+    "entrypoint": "assistant_context/resolve.py"
+  },
+  "routes": [
+    {
+      "id": "pending-approval-detail",
+      "priority": 400,
+      "match": {
+        "path_template": "/main/new-application/pendingApproval/{approval_type}/{approval_id}"
+      },
+      "result": {
+        "page_type": "approval-detail",
+        "object_type": "approval_request",
+        "skill_ref": "smartcmp:approval"
+      }
+    },
+    {
+      "id": "catalog-request",
+      "priority": 300,
+      "match": {"path_template": "/main/catalog-ui/request/{catalog_id}"},
+      "result": {
+        "page_type": "catalog-request",
+        "object_type": "catalog",
+        "skill_ref": "smartcmp:request"
+      }
+    },
+    {
+      "id": "request-detail",
+      "priority": 300,
+      "match": {
+        "path_template": "/main/new-process/myApplication/{application_type}/{request_id}"
+      },
+      "result": {
+        "page_type": "request-detail",
+        "object_type": "request",
+        "skill_ref": "smartcmp:request"
+      }
+    },
+    {
+      "id": "cloud-resource-detail",
+      "priority": 300,
+      "match": {"path_template": "/main/cloud-resource/{resource_id}"},
+      "result": {
+        "page_type": "resource-detail",
+        "object_type": "resource",
+        "skill_ref": "smartcmp:resource"
+      }
+    },
+    {
+      "id": "virtual-machine-detail",
+      "priority": 400,
+      "match": {"path_template": "/main/virtual-machines/{resource_id}/details"},
+      "result": {
+        "page_type": "virtual-machine-detail",
+        "object_type": "virtual_machine",
+        "skill_ref": "smartcmp:resource"
+      }
+    }
+  ]
+}

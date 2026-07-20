@@ -90,6 +90,8 @@ tool_operate_groups:
   - alarm
 tool_operate_capability_class: "provider:smartcmp"
 tool_operate_priority: 150
+tool_operate_effect: "mutate"
+tool_operate_requires_approval: true
 tool_operate_cli_positional:
   - alert_ids
 tool_operate_cli_split:

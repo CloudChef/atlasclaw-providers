@@ -61,6 +61,8 @@ tool_execute_groups:
   - finops
 tool_execute_capability_class: "provider:smartcmp"
 tool_execute_priority: 150
+tool_execute_effect: "mutate"
+tool_execute_requires_approval: true
 tool_track_name: "smartcmp_track_cost_optimization"
 tool_track_description: "Track SmartCMP cost optimization remediation execution."
 tool_track_entrypoint: "scripts/track_execution.py"

@@ -91,6 +91,8 @@ tool_submit_groups:
   - request
 tool_submit_capability_class: "provider:smartcmp"
 tool_submit_priority: 160
+tool_submit_effect: "mutate"
+tool_submit_requires_approval: true
 tool_submit_result_mode: "tool_only_ok"
 tool_submit_cli_positional: []
 tool_submit_cli_flag_overrides:
