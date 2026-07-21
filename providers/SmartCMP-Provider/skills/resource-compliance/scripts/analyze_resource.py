@@ -28,6 +28,14 @@ def _load_module_from_path(module_name, file_path):
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SHARED_SCRIPT_DIR = os.path.join(SCRIPT_DIR, "..", "..", "shared", "scripts")
 DATASOURCE_SCRIPT_DIR = os.path.join(SCRIPT_DIR, "..", "..", "datasource", "scripts")
+RESOURCE_SCRIPT_DIR = os.path.join(SCRIPT_DIR, "..", "..", "resource", "scripts")
+
+for import_root in (SHARED_SCRIPT_DIR, RESOURCE_SCRIPT_DIR):
+    if import_root not in sys.path:
+        sys.path.insert(0, import_root)
+
+from _common import request_timeout, require_config
+from _resource_object_actions import build_resource_object_actions
 
 analysis_module = _load_module_from_path(
     "resource_compliance_analysis_local",
@@ -36,14 +44,6 @@ analysis_module = _load_module_from_path(
 analyze_normalized_resource = analysis_module.analyze_normalized_resource
 build_analysis_facts = analysis_module.build_analysis_facts
 build_normalized_from_legacy_facts = analysis_module.build_normalized_from_legacy_facts
-
-common_module = _load_module_from_path(
-    "resource_compliance_common_local",
-    os.path.join(SHARED_SCRIPT_DIR, "_common.py"),
-)
-require_config = common_module.require_config
-build_resource_object_actions = common_module.build_resource_object_actions
-request_timeout = common_module.request_timeout
 
 list_resource_module = _load_module_from_path(
     "resource_compliance_list_resource_local",

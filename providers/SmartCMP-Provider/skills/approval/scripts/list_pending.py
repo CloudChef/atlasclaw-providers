@@ -37,7 +37,7 @@ from typing import Any, Optional
 import requests
 
 try:
-    from _common import request_timeout, build_approval_object_actions, require_config
+    from _common import request_timeout, require_config
 except ImportError:
     import os
 
@@ -45,7 +45,9 @@ except ImportError:
         0,
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shared", "scripts"),
     )
-    from _common import request_timeout, build_approval_object_actions, require_config
+    from _common import request_timeout, require_config
+
+from _approval_object_actions import build_approval_object_actions
 
 from _approval_validation import request_id_from_item
 from _approval_specs import (

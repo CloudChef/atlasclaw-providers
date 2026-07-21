@@ -80,6 +80,7 @@ Use the request parameter contract.
                 "sourceKey": "resource.iaas.machine.instance.abstract",
                 "serviceCategory": "CLOUD_COMPONENT_SERVICE",
                 "type": "CLOUD_COMPONENT",
+                "status": "PUBLISHED",
                 "instructions": instructions,
             }
         )
@@ -95,6 +96,13 @@ Use the request parameter contract.
     assert "Catalog Detail: Linux VM" in stdout.getvalue()
     meta = _extract_meta(stderr.getvalue())
     assert meta["id"] == "catalog-1"
+    assert meta["object_type"] == "catalog"
+    assert meta["object_id"] == "catalog-1"
+    assert meta["object_name"] == "Linux VM"
+    assert [action["action_id"] for action in meta["object_actions"]] == [
+        "open_detail",
+        "request",
+    ]
     assert meta["hasPreApprovalInstructions"] is True
     assert meta["preApprovalInstructionHeading"] == "# Pre Approval Instructions"
     assert meta["preApprovalInstructions"] == "Approve only when the requester selects the dev environment."
@@ -106,7 +114,14 @@ def test_catalog_detail_reports_missing_preapproval_section(monkeypatch) -> None
 
     def fake_get(url, headers=None, verify=None, timeout=None):
         assert url == "https://cmp.example.com/platform-api/catalogs/catalog-2"
-        return _FakeResponse({"id": "catalog-2", "name": "VPC", "instructions": "# Request Instructions\n\nBuild it."})
+        return _FakeResponse(
+            {
+                "id": "catalog-2",
+                "name": "VPC",
+                "status": "DISABLED",
+                "instructions": "# Request Instructions\n\nBuild it.",
+            }
+        )
 
     monkeypatch.setattr(module.requests, "get", fake_get)
     stdout = io.StringIO()

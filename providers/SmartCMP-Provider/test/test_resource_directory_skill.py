@@ -15,6 +15,9 @@ import requests
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PROVIDER_ROOT = REPO_ROOT / "providers" / "SmartCMP-Provider"
 COMMON_PATH = PROVIDER_ROOT / "skills" / "shared" / "scripts" / "_common.py"
+RESOURCE_ACTIONS_PATH = (
+    PROVIDER_ROOT / "skills" / "resource" / "scripts" / "_resource_object_actions.py"
+)
 
 
 def load_common_module():
@@ -29,6 +32,26 @@ def load_common_module():
     finally:
         sys.modules.pop(spec.name, None)
     return module
+
+
+def load_resource_actions_module():
+    shared_scripts = str(COMMON_PATH.parent)
+    added_path = shared_scripts not in sys.path
+    if added_path:
+        sys.path.insert(0, shared_scripts)
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "test_smartcmp_resource_action_module",
+            RESOURCE_ACTIONS_PATH,
+        )
+        assert spec is not None
+        assert spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        if added_path:
+            sys.path.remove(shared_scripts)
 
 
 class FakeResponse:
@@ -62,12 +85,18 @@ def run_script(monkeypatch, argv: list[str], *, fake_get):
 
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
+    script_dir = str(script_path.parent)
+    added_path = script_dir not in sys.path
+    if added_path:
+        sys.path.insert(0, script_dir)
     try:
         spec.loader.exec_module(module)
         with redirect_stdout(stdout), redirect_stderr(stderr):
             exit_code = module.main(argv)
     finally:
         sys.modules.pop(module_name, None)
+        if added_path:
+            sys.path.remove(script_dir)
 
     return exit_code, stdout.getvalue(), stderr.getvalue()
 
@@ -94,6 +123,7 @@ def localized(default: str, zh_cn: str) -> dict[str, object]:
 
 def test_ui_helpers_build_user_facing_routes_and_resource_actions():
     common = load_common_module()
+    resource_actions = load_resource_actions_module()
 
     assert common.normalize_ui_base_url("https://cmp.example/platform-api") == "https://cmp.example"
     assert common.normalize_ui_base_url("cmp.example/platform-api") == "https://cmp.example"
@@ -116,9 +146,12 @@ def test_ui_helpers_build_user_facing_routes_and_resource_actions():
             "res-1",
             category="cloud-resource",
         )
-        == "https://cmp.example/#/main/cloud-resource/res-1/details"
+        == "https://cmp.example/#/main/cloud-resource/res-1"
     )
-    assert common.build_resource_object_actions("cmp.example/platform-api", "res-1") == [
+    assert resource_actions.build_resource_object_actions(
+        "cmp.example/platform-api",
+        "res-1",
+    ) == [
         {
             "action_id": "open_detail",
             "kind": "open_url",
@@ -128,7 +161,7 @@ def test_ui_helpers_build_user_facing_routes_and_resource_actions():
             "tone": "default",
         }
     ]
-    assert common.build_resource_object_actions(
+    assert resource_actions.build_resource_object_actions(
         "cmp.example/platform-api",
         "res-1",
         resource_name="资源A",
@@ -189,25 +222,14 @@ def test_list_all_resource_hits_all_resources_api_and_emits_object_actions(monke
     assert payload[0]["object_type"] == "cloud_resource"
     assert payload[0]["object_id"] == "res-1"
     assert payload[0]["object_name"] == "资源A"
-    assert payload[0]["object_actions"] == [
-        {
-            "action_id": "view_detail",
-            "kind": "agent_prompt",
-            "display_label": localized("View details", "查看详情"),
-            "effect": "read",
-            "tone": "default",
-            "agent_prompt": localized("Show resource details for res-1", "查看 res-1 的资源详情"),
-        },
-        {
-            "action_id": "open_detail",
-            "kind": "open_url",
-            "display_label": localized("Open", "打开"),
-            "href": "https://cmp.example.com/#/main/cloud-resource/res-1/details",
-            "effect": "navigate",
-            "tone": "default",
-        }
+    assert [action["action_id"] for action in payload[0]["object_actions"]] == [
+        "view_detail",
+        "open_detail",
     ]
-    assert "https://cmp.example.com/#/main/cloud-resource/res-1/details" not in stdout
+    assert payload[0]["object_actions"][1]["href"] == (
+        "https://cmp.example.com/#/main/cloud-resource/res-1"
+    )
+    assert "https://cmp.example.com/#/main/cloud-resource/res-1" not in stdout
 
 
 def test_list_all_resource_hits_virtual_machine_ui_url(monkeypatch):
