@@ -194,8 +194,8 @@ def test_main_resolves_resource_name_from_directory_metadata(monkeypatch):
             "kind": "agent_prompt",
             "display_label": localized("View details", "查看详情"),
             "agent_prompt": localized(
-                "Show resource details for res-hidden-2",
-                "查看 res-hidden-2 的资源详情",
+                "Show resource details for e2e-newrole-linux3-0501",
+                "查看 e2e-newrole-linux3-0501 的资源详情",
             ),
             "effect": "read",
             "tone": "default",
@@ -203,10 +203,10 @@ def test_main_resolves_resource_name_from_directory_metadata(monkeypatch):
         {
             "action_id": "analyze",
             "kind": "agent_prompt",
-            "display_label": localized("Analyze", "分析"),
+            "display_label": localized("Health", "健康分析"),
             "agent_prompt": localized(
-                "Analyze resource res-hidden-2",
-                "分析资源 res-hidden-2",
+                "Analyze resource health for e2e-newrole-linux3-0501",
+                "分析资源 e2e-newrole-linux3-0501 的健康状态",
             ),
             "effect": "read",
             "tone": "default",
@@ -367,7 +367,7 @@ def test_result_object_actions_include_open_url_when_config_is_available(monkeyp
             "action_id": "view_detail",
             "kind": "agent_prompt",
             "display_label": localized("View details", "查看详情"),
-            "agent_prompt": localized("Show resource details for res-1", "查看 res-1 的资源详情"),
+            "agent_prompt": localized("Show resource details for ubuntu-01", "查看 ubuntu-01 的资源详情"),
             "effect": "read",
             "tone": "default",
         },
@@ -382,8 +382,11 @@ def test_result_object_actions_include_open_url_when_config_is_available(monkeyp
         {
             "action_id": "analyze",
             "kind": "agent_prompt",
-            "display_label": localized("Analyze", "分析"),
-            "agent_prompt": localized("Analyze resource res-1", "分析资源 res-1"),
+            "display_label": localized("Health", "健康分析"),
+            "agent_prompt": localized(
+                "Analyze resource health for ubuntu-01",
+                "分析资源 ubuntu-01 的健康状态",
+            ),
             "effect": "read",
             "tone": "default",
         },

@@ -38,7 +38,7 @@ def build_resource_object_actions(
     """
     # The producing Tool selects these flags from the data it actually resolved;
     # object type alone must not invent detail, analysis, or operation actions.
-    target = str(resource_id or resource_name or "").strip()
+    target = str(resource_name or resource_id or "").strip()
     actions: list[dict[str, object]] = []
     if target and include_detail_action:
         detail_action = build_object_prompt_action(
@@ -60,10 +60,10 @@ def build_resource_object_actions(
     if target and include_analysis_action:
         analyze_action = build_object_prompt_action(
             "analyze",
-            label_en="Analyze",
-            label_zh="分析",
-            prompt_en=f"Analyze resource {target}",
-            prompt_zh=f"分析资源 {target}",
+            label_en="Health",
+            label_zh="健康分析",
+            prompt_en=f"Analyze resource health for {target}",
+            prompt_zh=f"分析资源 {target} 的健康状态",
         )
         if analyze_action:
             actions.append(analyze_action)

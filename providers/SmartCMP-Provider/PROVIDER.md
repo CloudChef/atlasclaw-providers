@@ -307,7 +307,7 @@ CMP_URL=https://cmp.example.com
 | `datasource` | Data Query | Read-only reference data queries, standalone business-group scope discovery, request reference lookups, and resource lookup by ID for service discovery and analysis workflows | `smartcmp_list_all_business_groups`, `smartcmp_list_applications`, `smartcmp_list_components`, `smartcmp_list_images`, `list_services`, `list_resource` |
 | `request` | Provisioning | Cloud resource provisioning requests that use datasource lookups for reference data before submission | `submit`, `status` |
 | `approval` | Workflow | Approval workflow management | `list_pending`, `approve`, `reject` |
-| `alarm` | Monitoring | Alarm alert listing, analysis, and status operations | `list_alerts`, `analyze_alert`, `operate_alert` |
+| `alarm` | Monitoring | Alarm workflows plus component-model-driven resource health evidence | `list_alerts`, `analyze_alert`, `analyze_resource_health`, `operate_alert` |
 | `preapproval-agent` | Agent | Autonomous approval pre-review | Webhook-triggered, policy-based decisions |
 | `request-decomposition-agent` | Agent | Transform natural-language requirements into request drafts | NL parsing, multi-skill orchestration |
 | `cost-optimization` | Optimization | Analyze savings opportunities and execute platform-native fixes | `list_recommendations`, `analyze_recommendation`, `execute_optimization`, `track_execution` |
@@ -399,14 +399,24 @@ python skills/approval/scripts/reject.py <request_id> --reason "Budget exceeded"
 
 #### alarm
 
-Inspect and analyze alarm alerts, and optionally operate on alert
-status when appropriate.
+Inspect and analyze alarm alerts, collect component-specific monitoring
+evidence for LLM resource health analysis, and optionally operate on alert
+status when appropriate. Resource health analysis does not require an alert and
+does not use alarm-policy thresholds as its verdict.
 
 ```bash
 python skills/alarm/scripts/list_alerts.py                            # List current alerts
 python skills/alarm/scripts/analyze_alert.py <alert_id>               # Analyze one alert
+python skills/alarm/scripts/analyze_resource_health.py --resource-name <name> # Collect health evidence
 python skills/alarm/scripts/operate_alert.py <alert_id> --action mute # Change alert status
 ```
+
+`analyze_resource_health.py` resolves the resource `componentType`, loads its
+effective monitoring model, and queries only model-defined Prometheus metrics
+that can be scoped to that resource. AWS VM, AWS RDS, vSphere VM, software,
+hardware, and other components therefore share one flow without sharing a
+hard-coded metric list. The script emits facts and time-series statistics; the
+AtlasClaw LLM supplies the `healthy`, `abnormal`, or `indeterminate` judgment.
 
 #### cost-optimization
 

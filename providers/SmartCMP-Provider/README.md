@@ -45,7 +45,7 @@ configuration and must never be written into the manifest.
 
 - **Resource Requests** - Submit cloud resource or application provisioning requests and query submitted request status by Request ID
 - **Approval Management** - View pending approval tasks, approve requests, or reject requests
-- **Alarm Management** - List alerts, analyze one alert, and run explicit alert status operations
+- **Alarm and Resource Health** - List and analyze alerts, collect component-specific resource monitoring evidence, and run explicit alert status operations
 - **Directory Queries** - List business-group scopes such as tenant/租户/部门/BU/项目, resource pools, resources, or cloud hosts from the same UI directory endpoints used by CMP
 - **Resource Operations** - List current-user executable operations and run enabled no-parameter day2 operations on existing cloud resources
 - **Data Queries** - Query service catalogs, applications, templates, images, and other reference data
@@ -192,14 +192,16 @@ python skills/approval/scripts/approve.py <request_id> --reason "Approved per po
 python skills/approval/scripts/reject.py <request_id> --reason "Budget exceeded"
 ```
 
-### alarm - Alarm Alert Management
+### alarm - Alarm and Resource Health Management
 
-Inspect and analyze SmartCMP alarms directly in this provider. Use
+Inspect and analyze SmartCMP alarms directly in this provider, or analyze one
+resource independently from alerts using its component monitoring model. Use
 `operate_alert.py` only when an explicit status action is intended.
 
 **Use Cases:**
 - List current alarm alerts
 - Analyze a specific alert with structured recommendations
+- Collect component-specific Prometheus evidence for LLM resource health analysis
 - Operate on alert status using English actions such as `mute`, `resolve`, or `reopen`
 
 **Examples:**
@@ -210,9 +212,18 @@ python skills/alarm/scripts/list_alerts.py
 # Analyze one alert
 python skills/alarm/scripts/analyze_alert.py <alert_id>
 
+# Collect one resource's model-driven monitoring evidence
+python skills/alarm/scripts/analyze_resource_health.py --resource-name <name>
+
 # Operate on one or more alerts
 python skills/alarm/scripts/operate_alert.py <alert_id> --action mute
 ```
+
+Resource health analysis uses the resolved resource `componentType` to load
+the component's effective monitoring model and query its own Prometheus metric
+definitions. It never substitutes a generic VM metric list. The script returns
+evidence only; the AtlasClaw LLM determines whether the observed resource is
+healthy, abnormal, or indeterminate.
 
 ### datasource - Data Source Queries
 
@@ -504,8 +515,8 @@ SmartCMP-Provider/
 │   │   ├── scripts/                 # Approval scripts
 │   │   ├── references/              # Reference docs
 │   │   └── SKILL.md
-│   ├── alarm/                       # Alarm alert skill
-│   │   ├── scripts/                 # Alarm listing, analysis, and operations
+│   ├── alarm/                       # Alarm and resource health skill
+│   │   ├── scripts/                 # Alert workflows and model-driven resource health evidence
 │   │   ├── references/
 │   │   └── SKILL.md
 │   ├── cost-optimization/           # Cost optimization skill
@@ -565,7 +576,7 @@ scripts are located in `datasource/scripts/`:
 1. **Environment Variables** - All scripts read connection info from `CMP_URL`, `CMP_COOKIE`, `CMP_USERNAME`, `CMP_PASSWORD`, and `CMP_AUTH_URL` environment variables
 2. **Cookie Expiration** - If you encounter `401` errors, refresh and update the Cookie
 3. **Output Format** - Script output includes named metadata blocks such as `##..._START## ... ##..._END##` for programmatic parsing
-4. **Alarm Coverage** - Monitoring and alert workflows are supported directly by the `alarm` skill in this provider
+4. **Alarm and Health Coverage** - Alert workflows and component-model-driven resource health analysis are supported directly by the `alarm` skill
 5. **Error Handling** - On `[ERROR]` output, report to user immediately; do NOT self-debug
 6. **Resource Compliance** - `resource-compliance` reuses the shared normalized resource view from `list_resource.py`, then attempts live external validation for lifecycle and support checks
 7. **Localized Responses** - Scripts should return stable fields and metadata. Agents are responsible for explaining results in the current user's message language.

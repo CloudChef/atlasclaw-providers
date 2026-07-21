@@ -8,7 +8,7 @@ triggers:
   - resource compliance
   - compliance analysis
   - security analysis
-  - analyze resource
+  - analyze resource compliance
   - resource risk
   - mysql version
   - windows patch
@@ -32,6 +32,7 @@ use_when:
 avoid_when:
   - User wants to browse general catalog data only (use datasource skill)
   - User wants to browse a resource list, virtual-machine list, or cloud-host detail/attribute view only (use resource skill)
+  - User wants runtime health or monitoring analysis without compliance, lifecycle, version, patch, or security intent (use alarm skill resource health analysis)
   - User wants to submit a provisioning request (use request skill)
   - User wants to approve or reject requests (use approval skill)
 

@@ -148,8 +148,11 @@ def test_main_renders_compact_resource_detail(monkeypatch):
         {
             "action_id": "analyze",
             "kind": "agent_prompt",
-            "display_label": localized("Analyze", "分析"),
-            "agent_prompt": localized("Analyze resource res-1", "分析资源 res-1"),
+            "display_label": localized("Health", "健康分析"),
+            "agent_prompt": localized(
+                "Analyze resource health for mysqlLinux2",
+                "分析资源 mysqlLinux2 的健康状态",
+            ),
             "effect": "read",
             "tone": "default",
         },
@@ -158,8 +161,8 @@ def test_main_renders_compact_resource_detail(monkeypatch):
             "kind": "agent_prompt",
             "display_label": localized("Operations", "操作"),
             "agent_prompt": localized(
-                    "List available operations for resource res-1",
-                    "查看资源 res-1 的可用操作",
+                "List available operations for resource mysqlLinux2",
+                "查看资源 mysqlLinux2 的可用操作",
             ),
             "effect": "read",
             "tone": "default",

@@ -42,6 +42,7 @@ def test_alarm_skill_layout():
         SCRIPTS_DIR / "_alarm_common.py",
         SCRIPTS_DIR / "list_alerts.py",
         SCRIPTS_DIR / "analyze_alert.py",
+        SCRIPTS_DIR / "analyze_resource_health.py",
         SCRIPTS_DIR / "operate_alert.py",
     ]
     for script_path in expected_scripts:
@@ -64,11 +65,24 @@ def test_alarm_skill_declares_tool_input_contracts():
     assert "tool_operate_parameters:" in skill_text
     assert '"required": ["alert_ids", "action"]' in skill_text
 
+    assert 'tool_resource_health_name: "analyze_resource_health"' in skill_text
+    assert 'tool_resource_health_result_mode: "llm"' in skill_text
+    assert "tool_resource_health_parameters:" in skill_text
+    assert '"resource_name"' in skill_text
+    assert '"resource_index"' in skill_text
+    assert '"resource_id"' in skill_text
+    assert '"window_hours"' in skill_text
+
 
 def test_alarm_scripts_import_cleanly():
     helper_module = load_module("test_alarm_common_module", SCRIPTS_DIR / "_alarm_common.py")
     assert hasattr(helper_module, "emit_placeholder")
 
-    for script_name in ("list_alerts.py", "analyze_alert.py", "operate_alert.py"):
+    for script_name in (
+        "list_alerts.py",
+        "analyze_alert.py",
+        "analyze_resource_health.py",
+        "operate_alert.py",
+    ):
         module = load_module(f"test_{script_name[:-3]}", SCRIPTS_DIR / script_name)
         assert hasattr(module, "main"), f"{script_name} should define main()"
