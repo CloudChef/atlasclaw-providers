@@ -87,7 +87,7 @@ def test_build_analysis_payload_contains_required_sections():
     assert payload["assessment"]["taskDefinitionPresent"] is True
     assert payload["assessment"]["savingSummaryAvailable"] is True
     assert payload["assessment"]["operationSummaryAvailable"] is True
-    assert payload["suggestedNextStep"] == "execute_fix"
+    assert payload["suggestedNextStep"] == "remediate"
     assert "taskDefinitionPresent" not in payload["facts"]
 
 
@@ -264,7 +264,7 @@ def test_render_analysis_outputs_human_summary_and_structured_block():
     }
 
 
-def test_render_analysis_exposes_resource_open_and_execute_actions():
+def test_render_analysis_exposes_resource_open_and_remediate_actions():
     payload = {
         "violationId": "vio-1",
         "facts": {
@@ -279,7 +279,7 @@ def test_render_analysis_exposes_resource_open_and_execute_actions():
             "executionReadiness": "ready",
         },
         "recommendations": [],
-        "suggestedNextStep": "execute_fix",
+        "suggestedNextStep": "remediate",
     }
 
     output = analyzer.render_analysis(payload, base_url="https://cmp.example.com/platform-api")
@@ -299,22 +299,28 @@ def test_render_analysis_exposes_resource_open_and_execute_actions():
             "tone": "default",
         },
         {
-            "action_id": "execute",
+            "action_id": "remediate",
             "kind": "agent_prompt",
-            "display_label": localized("Execute", "执行"),
+            "display_label": localized("Remediate", "修复"),
             "agent_prompt": localized(
-                "Execute cost optimization recommendation vio-1",
-                "执行成本优化建议 vio-1",
+                "Remediate cost optimization recommendation vio-1",
+                "修复成本优化建议 vio-1",
             ),
             "effect": "mutate",
             "tone": "warning",
             "requires_confirmation": True,
             "confirmation_message": localized(
-                "Confirm executing cost optimization recommendation vio-1?",
-                "确认执行成本优化建议 vio-1？",
+                "Confirm remediating cost optimization recommendation vio-1?",
+                "确认修复成本优化建议 vio-1？",
             ),
         },
     ]
+
+    legacy_payload = {**payload, "suggestedNextStep": "execute_fix"}
+    assert analyzer.build_analysis_object_actions(
+        legacy_payload,
+        base_url="https://cmp.example.com/platform-api",
+    )[1]["action_id"] == "remediate"
 
 
 def test_render_analysis_omits_resource_open_when_route_is_unknown():

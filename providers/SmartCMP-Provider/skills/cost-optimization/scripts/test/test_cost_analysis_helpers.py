@@ -159,11 +159,11 @@ class TestBuildRecommendations:
         assert recs[0]["priority"] == "P0"
         assert recs[0]["type"] == "primary_action"
 
-    def test_ready_status_yields_execute_fix(self):
-        """When fixType is present and status ACTIVE → action=execute_fix."""
+    def test_ready_status_yields_remediate(self):
+        """When fixType is present and status ACTIVE → action=remediate."""
         facts = self._make_facts(fixType="DAY2", status="ACTIVE")
         recs = build_recommendations(facts)
-        assert recs[0]["action"] == "execute_fix"
+        assert recs[0]["action"] == "remediate"
         assert recs[0]["confidence"] == "high"
 
     def test_missing_fix_type_yields_configure_platform_policy(self):
@@ -303,7 +303,7 @@ class TestBuildPolicyHistoryInsight:
         facts = normalize_analysis_facts({"id": "V001"})
         rec = build_policy_history_insight(facts, [])
         assert rec["confidence"] == "low"
-        assert "No execution history" in rec["reasonEn"]
+        assert "No evaluation history" in rec["reasonEn"]
 
     def test_reason_is_english(self):
         facts = normalize_analysis_facts({"id": "V001", "times": 2})

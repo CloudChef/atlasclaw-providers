@@ -21,6 +21,8 @@ APPROVAL_ID = "e0b48865-9b12-4f83-a494-745534532995"
 GENERIC_REQUEST_ID = "a1111111-3333-4333-8333-333333333333"
 WORKFLOW_ID = "RES20260719000004"
 RESOURCE_ID = "7d64abdf-1111-4111-8111-111111111111"
+ALERT_ID = "bccacc1a-651c-4d11-b8ea-a58e24e8f32b"
+RECOMMENDATION_ID = "7c6196b1-5623-4d85-896d-e74b4f9042cd"
 
 
 class _Response:
@@ -64,6 +66,8 @@ def _load(monkeypatch):
         "_approval_object_actions",
         "_request_object_actions",
         "_resource_object_actions",
+        "_alarm_object_actions",
+        "_cost_object_actions",
     )
     previous_modules = {name: sys.modules.pop(name, None) for name in imported_names}
     try:
@@ -208,6 +212,64 @@ def test_pending_approval_resolves_exact_three_id_shape(monkeypatch) -> None:
         "approve",
         "reject",
     ]
+
+
+def test_alert_and_cost_context_return_state_aware_actions(monkeypatch) -> None:
+    """The two new page objects expose only actions supported by live state."""
+    module = _load(monkeypatch)
+
+    def fake_get(url, **_kwargs):
+        if url.endswith(f"/alarm-alert/{ALERT_ID}"):
+            return _Response(
+                {
+                    "id": ALERT_ID,
+                    "alarmPolicyName": "CPU high",
+                    "status": "ALERT_FIRING",
+                    "level": 2,
+                    "resourceExternalName": "vm-01",
+                }
+            )
+        assert url.endswith(f"/compliance-policies/violations/{RECOMMENDATION_ID}")
+        return _Response(
+            {
+                "id": RECOMMENDATION_ID,
+                "policyName": "Right-size VM",
+                "status": "ACTIVED",
+                "resourceId": RESOURCE_ID,
+                "monthlySaving": 120,
+                "fixType": "RESIZE",
+            }
+        )
+
+    alert = module.resolve_page_context(
+        "alarm-alert-detail",
+        f"/main/alarm-activity-management/alarm-triggered/edit/{ALERT_ID}",
+        {"alert_id": ALERT_ID},
+        "alarm-alert-detail",
+        "alarm_alert",
+        request_get=fake_get,
+    )
+    assert alert["object"]["id"] == ALERT_ID
+    assert [action["action_id"] for action in alert["object_actions"]] == [
+        "analyze",
+        "mute",
+        "resolve",
+    ]
+
+    cost = module.resolve_page_context(
+        "cost-optimization-detail",
+        f"/main/measurement-billing/resource-usage-analysis/{RECOMMENDATION_ID}",
+        {"recommendation_id": RECOMMENDATION_ID},
+        "cost-optimization-detail",
+        "cost_optimization_recommendation",
+        request_get=fake_get,
+    )
+    assert cost["object"]["id"] == RECOMMENDATION_ID
+    assert [action["action_id"] for action in cost["object_actions"]] == [
+        "analyze",
+        "remediate",
+    ]
+    assert cost["object_actions"][1]["requires_confirmation"] is True
 
 
 def test_catalog_request_and_resource_resolvers_return_selected_display_fields(monkeypatch) -> None:

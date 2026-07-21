@@ -20,7 +20,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from _alarm_common import default_timeout, get_connection, get_json
-from _common import build_object_prompt_action
+from _alarm_object_actions import build_alert_object_actions
 
 
 def _load_local_analysis_module():
@@ -303,25 +303,13 @@ def build_alert_analysis_object_actions(payload: dict[str, Any]) -> list[dict[st
     if not alert_id or not suggested_operation.get("should_operate") or not operation:
         return []
 
-    labels = {
-        "mute": ("Mute", "静音", "warning"),
-        "resolve": ("Resolve", "解决", "success"),
-        "reopen": ("Reopen", "重新打开", "warning"),
-    }
-    label_en, label_zh, tone = labels.get(operation, (operation.title(), operation, "warning"))
-    action = build_object_prompt_action(
-        operation,
-        label_en=label_en,
-        label_zh=label_zh,
-        prompt_en=f"{label_en} alert {alert_id}",
-        prompt_zh=f"{label_zh}告警 {alert_id}",
-        confirmation_en=f"Confirm {label_en.lower()} alert {alert_id}?",
-        confirmation_zh=f"确认{label_zh}告警 {alert_id}？",
-        effect="mutate",
-        tone=tone,
-        requires_confirmation=True,
-    )
-    return [action] if action else []
+    return [
+        action
+        for action in build_alert_object_actions(
+            {"id": alert_id}, operations=(operation,)
+        )
+        if action["action_id"] != "analyze"
+    ]
 
 
 def attach_alert_analysis_object_metadata(payload: dict[str, Any]) -> dict[str, Any]:
