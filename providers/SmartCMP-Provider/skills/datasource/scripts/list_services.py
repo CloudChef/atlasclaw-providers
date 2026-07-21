@@ -40,12 +40,19 @@ import yaml
 try:
     from _common import request_timeout, render_markdown_table, require_config
 except ImportError:
-    import os
     sys.path.insert(
         0,
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shared", "scripts"),
     )
     from _common import request_timeout, render_markdown_table, require_config
+
+REQUEST_SCRIPTS_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "request", "scripts")
+)
+if REQUEST_SCRIPTS_ROOT not in sys.path:
+    sys.path.insert(0, REQUEST_SCRIPTS_ROOT)
+
+from _request_object_actions import attach_catalog_object_metadata
 
 BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()
 
@@ -486,7 +493,15 @@ for i, c in enumerate(items):
     for key in ("node", "type"):
         if key not in entry and derived_resource_type.get(key):
             entry[key] = derived_resource_type[key]
-    meta.append(entry)
+    # This Tool reads only /catalogs/published/simples, so the endpoint itself
+    # is the authoritative proof that the Request action is available.
+    entry["status"] = "PUBLISHED"
+    meta.append(
+        attach_catalog_object_metadata(
+            entry,
+            base_url=BASE_URL,
+        )
+    )
 
 # ── User-visible output ──────────────────────────────────────────────────
 print(

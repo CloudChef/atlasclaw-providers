@@ -19,7 +19,8 @@ SHARED_SCRIPTS_DIR = SCRIPT_DIR.parents[1] / "shared" / "scripts"
 if str(SHARED_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SHARED_SCRIPTS_DIR))
 
-from _common import request_timeout, build_resource_object_actions, require_config  # noqa: E402
+from _common import request_timeout, require_config  # noqa: E402
+from _resource_object_actions import build_resource_object_actions  # noqa: E402
 
 
 RESOURCE_NAME_SEARCH_SIZE = 100

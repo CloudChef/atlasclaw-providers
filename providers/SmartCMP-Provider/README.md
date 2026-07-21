@@ -2,6 +2,45 @@
 
 SmartCMP Provider is a service provider module for AtlasClaw, integrating with SmartCMP cloud management platform. It supports cloud resource provisioning, approval workflow management, alarm alert handling, data source queries, form schema design, and resource compliance analysis.
 
+## Embedded Assistant Context
+
+SmartCMP's AtlasClaw integration deterministically resolves five normalized page paths through
+`assistant_context/routes.json`: pending approval detail, catalog request, My Application request
+detail, cloud resource detail, and virtual-machine detail. The request-detail template is
+`/main/new-process/myApplication/{application_type}/{request_id}`. The manifest maps each path to
+one existing `smartcmp:*` Skill and declares one Provider-level Context entrypoint,
+`assistant_context/resolve.py`. A new page for an existing object type needs only a route entry when
+it keeps that object's existing owning Domain Skill. A genuinely new SmartCMP object API extends
+the Provider-level read adapter and adds its dynamic action builder to the owning Domain Skill; it
+does not require changes to AtlasClaw Core/UI or Host. Routes must not remap an object to an
+unrelated Skill because the Snapshot's executable Tools and the object's actions must share the
+same owner.
+Context resolution requires the explicitly configured
+Provider type/instance and accepts only the request-scoped Host
+`CloudChef-Authenticate` Cookie for the explicitly selected Provider instance. It ignores Provider
+tokens, user tokens, configured cookies, and username/password credentials, and never auto-logs in.
+It returns minimal objects containing only approved display fields and does not introduce a separate login, token, credential,
+role, menu, ACL, or database-permission flow.
+
+Successful Context resolution returns the current page object plus Provider-declared
+`object_actions`. The route's exact existing `skill_ref` still limits Agent execution to that
+Skill's currently registered and authorized Tools, but the complete Tool inventory remains an
+internal server-side capability and is never rendered as Context buttons. Each Domain Skill owns
+the actions for the objects it returns and derives them from the current object state. Its Chat
+Tool results and Context resolver reuse that same builder, so both surfaces present the same
+labels, tones, prompts, and confirmation metadata. Adding another route for an existing object
+type reuses its Domain Skill action definition; a new object type adds its action definition with
+the Domain Skill rather than to a central object-type table. Returning no object actions is valid
+and renders no action buttons. Existing business Skill execution and authorization semantics
+remain unchanged.
+
+When AtlasClaw selects SmartCMP as its single default Embed Provider, Core loads
+`assistant_context/routes.json` by convention. The Provider package does not declare a
+configurable manifest path, and SmartCMP Host messages do not select a Provider instance.
+
+Authentication cookies, tokens, and Provider credentials must remain in the existing runtime
+configuration and must never be written into the manifest.
+
 ## Features
 
 - **Resource Requests** - Submit cloud resource or application provisioning requests and query submitted request status by Request ID

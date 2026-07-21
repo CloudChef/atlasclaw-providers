@@ -94,6 +94,7 @@ def test_status_resolves_visible_request_id_via_search_then_detail(monkeypatch):
                 {
                     "id": internal_id,
                     "requestId": request_id,
+                    "type": "CLOUD_BLUEPRINT_SERVICE",
                     "name": "Linux-test-agent",
                     "catalogName": "Linux VM",
                     "state": "APPROVAL_PENDING",
@@ -117,7 +118,6 @@ def test_status_resolves_visible_request_id_via_search_then_detail(monkeypatch):
     ]
     assert f"Request ID: {request_id}" in stdout
     assert internal_id not in stdout
-    assert internal_id not in stderr
     assert "State: APPROVAL_PENDING" in stdout
     assert "Status Category: approval_pending" in stdout
     assert "Approval Passed: false" in stdout
@@ -126,6 +126,14 @@ def test_status_resolves_visible_request_id_via_search_then_detail(monkeypatch):
 
     meta = extract_meta(stderr)
     assert meta["requestId"] == request_id
+    assert meta["object_type"] == "request"
+    assert meta["object_id"] == request_id
+    assert meta["object_name"] == "Linux-test-agent"
+    assert [action["action_id"] for action in meta["object_actions"]] == ["open_detail"]
+    assert meta["object_actions"][0]["href"] == (
+        "https://cmp.example.com/#/main/new-process/myApplication/"
+        f"CLOUD_BLUEPRINT_SERVICE/{internal_id}"
+    )
     assert "internalRequestId" not in meta
     assert meta["statusCategory"] == "approval_pending"
     assert meta["approvalPassed"] is False
@@ -156,6 +164,7 @@ def test_status_does_not_treat_success_message_as_error(monkeypatch):
                 {
                     "id": internal_id,
                     "workflowId": request_id,
+                    "type": "CLOUD_BLUEPRINT_SERVICE",
                     "name": "Linux-finished",
                     "catalogName": "Linux VM",
                     "state": "FINISHED",
@@ -170,7 +179,6 @@ def test_status_does_not_treat_success_message_as_error(monkeypatch):
     assert exit_code == 0
     assert "State: FINISHED" in stdout
     assert internal_id not in stdout
-    assert internal_id not in stderr
     assert "Error:" not in stdout
     meta = extract_meta(stderr)
     assert meta["statusCategory"] == "approval_passed"

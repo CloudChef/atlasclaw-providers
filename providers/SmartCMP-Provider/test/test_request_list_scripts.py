@@ -274,6 +274,16 @@ This section is not for request building.
     assert catalog["node"] == "alicloud_slb"
     assert catalog["type"] == "resource.iaas.network.load_balancer.alicloud_slb"
     assert catalog["componentType"] == "resource.iaas.network.load_balancer.alicloud_slb"
+    assert catalog["object_type"] == "catalog"
+    assert catalog["object_id"] == "catalog-slb"
+    assert catalog["object_name"] == "Load Balancer"
+    assert [action["action_id"] for action in catalog["object_actions"]] == [
+        "open_detail",
+        "request",
+    ]
+    assert catalog["object_actions"][0]["href"] == (
+        "https://cmp.example.com/#/main/catalog-ui/request/catalog-slb"
+    )
     assert "params" not in catalog
     assert catalog["instructions"]["topLevelRequired"] == ["catalogId", "businessGroupId", "name"]
     assert catalog["instructions"]["requestInstructions"] == "Build from the request parameter section only."

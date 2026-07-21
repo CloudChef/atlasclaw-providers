@@ -27,6 +27,14 @@ except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from _common import request_timeout, require_config
 
+REQUEST_SCRIPTS_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "request", "scripts")
+)
+if REQUEST_SCRIPTS_ROOT not in sys.path:
+    sys.path.insert(0, REQUEST_SCRIPTS_ROOT)
+
+from _request_object_actions import attach_catalog_object_metadata
+
 
 BASE_URL, AUTH_TOKEN, HEADERS, _ = require_config()
 
@@ -89,6 +97,7 @@ def _build_meta(catalog: dict[str, Any], catalog_id: str) -> dict[str, Any]:
         "sourceKey": _first_text(catalog.get("sourceKey")),
         "serviceCategory": _first_text(catalog.get("serviceCategory")),
         "catalogType": _first_text(catalog.get("type")),
+        "status": _first_text(catalog.get("status"), catalog.get("state")),
         "hasInstructions": bool(raw_instructions),
         "hasPreApprovalInstructions": bool(preapproval_instructions),
     }
@@ -123,7 +132,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[ERROR] Request failed: {error}")
         return 1
 
-    meta = _build_meta(catalog, catalog_id)
+    meta = attach_catalog_object_metadata(
+        _build_meta(catalog, catalog_id),
+        base_url=BASE_URL,
+    )
     print(f"Catalog Detail: {meta.get('name') or catalog_id}")
     print(f"Catalog ID: {meta.get('id') or catalog_id}")
     print(f"Has Pre Approval Instructions: {str(meta.get('hasPreApprovalInstructions')).lower()}")

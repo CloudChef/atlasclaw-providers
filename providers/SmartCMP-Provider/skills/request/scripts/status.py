@@ -36,6 +36,14 @@ except ImportError:
     )
     from _common import request_timeout, require_config
 
+try:
+    from _request_object_actions import attach_request_object_metadata
+except ImportError:
+    import os
+
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from _request_object_actions import attach_request_object_metadata
+
 
 MATCH_FIELDS = (
     "requestId",
@@ -351,7 +359,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[ERROR] {error}")
         return 1
 
-    meta = build_status_meta(detail, request_id)
+    meta = attach_request_object_metadata(
+        build_status_meta(detail, request_id),
+        request=detail,
+        base_url=base_url,
+    )
     print(render_status(meta))
     if error:
         print(f"Note: {error}")
