@@ -6,6 +6,30 @@
   },
   "routes": [
     {
+      "id": "alarm-alert-detail",
+      "priority": 400,
+      "match": {
+        "path_template": "/main/alarm-activity-management/alarm-triggered/edit/{alert_id}"
+      },
+      "result": {
+        "page_type": "alarm-alert-detail",
+        "object_type": "alarm_alert",
+        "skill_ref": "smartcmp:alarm"
+      }
+    },
+    {
+      "id": "cost-optimization-detail",
+      "priority": 400,
+      "match": {
+        "path_template": "/main/measurement-billing/resource-usage-analysis/{recommendation_id}"
+      },
+      "result": {
+        "page_type": "cost-optimization-detail",
+        "object_type": "cost_optimization_recommendation",
+        "skill_ref": "smartcmp:cost-optimization"
+      }
+    },
+    {
       "id": "pending-approval-detail",
       "priority": 400,
       "match": {

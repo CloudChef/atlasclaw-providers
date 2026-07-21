@@ -23,7 +23,7 @@ from _alarm_common import (
     get_json,
     normalize_timestamp,
 )
-from _common import build_object_prompt_action
+from _alarm_object_actions import build_alert_object_actions as build_domain_alert_actions
 
 
 def positive_int(value: str) -> int:
@@ -71,17 +71,11 @@ def _alert_object_name(alert: Mapping[str, Any]) -> str:
 
 def build_alert_object_actions(alert_id: str) -> list[dict[str, object]]:
     """Build explicit UI actions for one SmartCMP alert row."""
-    normalized_alert_id = str(alert_id or "").strip()
-    if not normalized_alert_id:
-        return []
-    action = build_object_prompt_action(
-        "view_detail",
-        label_en="View details",
-        label_zh="查看详情",
-        prompt_en=f"Analyze alert {normalized_alert_id}",
-        prompt_zh=f"分析告警 {normalized_alert_id}",
+    return build_domain_alert_actions(
+        {"id": alert_id},
+        operations=(),
+        analyze_action_id="view_detail",
     )
-    return [action] if action else []
 
 
 def build_alert_meta(alert: Mapping[str, Any], index: int) -> dict[str, Any]:

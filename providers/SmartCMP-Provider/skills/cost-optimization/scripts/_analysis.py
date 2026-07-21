@@ -38,7 +38,7 @@ BEST_PRACTICE_GUIDANCE_ZH = {
     "idle_shutdown": "停止或调度空闲计算资源，避免持续产生浪费。",
     "orphan_cleanup": "清理未挂载或未使用的资源（如磁盘、公网IP），减少资源浪费。",
     "storage_optimization": "将数据迁移到更合适的存储层级，并合理调整容量。",
-    "manual_review": "请在执行前审阅 SmartCMP 的优化建议。",
+    "manual_review": "请在修复前审阅 SmartCMP 的优化建议。",
 }
 
 # Mapping from SavingOperationType to ViolationType
@@ -59,13 +59,13 @@ OPERATION_SPECIFIC_GUIDANCE = {
         "zh": "检测到计算资源规格过大，建议根据近30天CPU/内存峰值利用率降配至合适规格。降配前请确认业务峰值时段，避免影响生产可用性。",
         "en": "Downsize compute to match observed peak utilization over 30 days. Verify business peak windows before applying changes.",
         "risk": "medium",
-        "risk_notes": ["May impact performance during peak hours", "Execute within a maintenance window", "Backup resource configuration before applying"],
+        "risk_notes": ["May impact performance during peak hours", "Remediate within a maintenance window", "Backup resource configuration before applying"],
     },
     "TEAR_DOWN_IN_RESOURCE": {
-        "zh": "检测到长期空闲资源，建议先确认资源归属业务方，确认无使用需求后再执行卸载，以避免误删。",
+        "zh": "检测到长期空闲资源，建议先确认资源归属业务方，确认无使用需求后再修复，以避免误删。",
         "en": "Confirm resource ownership and absence of planned usage before tearing down idle resources.",
         "risk": "high",
-        "risk_notes": ["Operation is irreversible", "Confirm no dependent resources before executing", "Notify resource owner before proceeding"],
+        "risk_notes": ["Operation is irreversible", "Confirm no dependent resources before remediation", "Notify resource owner before proceeding"],
     },
     "CHANGE_PAY_TYPE": {
         "zh": "当前资源采用非最优计费模式，建议切换为更适合使用频率的计费方式以降低费用。",
@@ -203,9 +203,9 @@ def build_recommendations(facts: dict, context: dict | None = None) -> list[dict
         confidence = "medium"
         reason = "SmartCMP does not show positive savings or the finding already looks complete."
     elif readiness == "ready":
-        action = "execute_fix"
+        action = "remediate"
         confidence = "high"
-        reason = "A repair action is configured on the platform; the day2 fix can be executed safely."
+        reason = "A repair action is configured on the platform; the finding is ready for native remediation."
     elif missing_repair_action:
         action = "configure_platform_policy"
         confidence = "high"
@@ -297,17 +297,17 @@ def build_risk_assessment(facts: dict, operation_type: str, op_guidance: dict) -
 
     if operation_type == "TEAR_DOWN_IN_RESOURCE":
         risk_level = "high"
-        risk_notes = ["Operation is irreversible; resource cannot be recovered after deletion", "Confirm no dependent resources before executing", "Notify resource owner before proceeding"]
+        risk_notes = ["Operation is irreversible; resource cannot be recovered after deletion", "Confirm no dependent resources before remediation", "Notify resource owner before proceeding"]
     elif operation_type == "RESIZE":
         risk_level = "medium"
-        risk_notes = ["May impact performance during peak hours", "Execute within a maintenance window", "Backup resource configuration before applying"]
+        risk_notes = ["May impact performance during peak hours", "Remediate within a maintenance window", "Backup resource configuration before applying"]
     elif operation_type in ("CHANGE_PAY_TYPE", "SWITCH_TO_SUBSCRIPTION"):
         risk_level = "low"
         if not risk_notes:
             risk_notes = ["Billing model change carries low risk"]
     else:
         risk_level = "medium"
-        risk_notes = ["Assess potential impact before executing"]
+        risk_notes = ["Assess potential impact before remediation"]
 
     return {
         "type": "risk_assessment",
@@ -317,8 +317,8 @@ def build_risk_assessment(facts: dict, operation_type: str, op_guidance: dict) -
         "reason": f"Risk level: {risk_level}. {risk_notes[0] if risk_notes else ''}",
         "reasonEn": f"Risk level: {risk_level}. {risk_notes[0] if risk_notes else ''}",
         "evidence": [f"operationType={operation_type}", f"riskLevel={risk_level}"],
-        "bestPractice": op_guidance.get("en", "Assess execution risk before proceeding."),
-        "bestPracticeZh": op_guidance.get("zh", "执行前请评估风险。"),
+        "bestPractice": op_guidance.get("en", "Assess remediation risk before proceeding."),
+        "bestPracticeZh": op_guidance.get("zh", "修复前请评估风险。"),
         "platformExecutable": False,
         "risk": risk_level,
         "riskNotes": risk_notes,
@@ -378,11 +378,11 @@ def build_policy_history_insight(facts: dict, policy_executions: list) -> dict:
             "action": "check_history",
             "confidence": "low",
             "priority": "P2",
-            "reason": "No execution history found for this policy.",
-            "reasonEn": "No execution history found for this policy.",
+            "reason": "No evaluation history found for this policy.",
+            "reasonEn": "No evaluation history found for this policy.",
             "evidence": [],
-            "bestPractice": "Monitor policy execution frequency.",
-            "bestPracticeZh": "监控策略执行频率。",
+            "bestPractice": "Monitor policy evaluation frequency.",
+            "bestPracticeZh": "监控策略评估频率。",
             "platformExecutable": False,
             "risk": "none",
             "riskNotes": [],

@@ -1,6 +1,6 @@
 ---
 name: "cost-optimization"
-description: "Cost optimization skill. Review FinOps and optimization recommendations, analyze savings opportunities with multi-dimensional insights plus datasource-enriched resource context, risk assessment, and best practices guidance. Execute native day2 remediation and track remediation state."
+description: "Cost optimization skill. Review FinOps and optimization recommendations, analyze savings opportunities with multi-dimensional insights plus datasource-enriched resource context, risk assessment, and best practices guidance. Remediate findings through native day2 repair and track remediation state."
 provider_type: "smartcmp"
 instance_required: "true"
 
@@ -11,7 +11,7 @@ triggers:
   - resource usage analysis
   - finops
   - rightsize
-  - execute optimization
+  - remediate optimization
   - 费用优化
   - 成本优化
   - 优化建议
@@ -25,7 +25,7 @@ use_when:
   - User wants to list optimization or FinOps recommendations
   - User wants to analyze cost optimization opportunities with detailed insights, resource context, and risk assessment
   - User wants to understand saving contribution and priority in global context
-  - User wants to execute native remediation for an optimization finding
+  - User wants to remediate an optimization finding through native day2 repair
   - User wants to track cost optimization remediation progress
 
 avoid_when:
@@ -54,7 +54,7 @@ tool_analyze_groups:
 tool_analyze_capability_class: "provider:smartcmp"
 tool_analyze_priority: 120
 tool_execute_name: "smartcmp_execute_cost_optimization"
-tool_execute_description: "Execute SmartCMP-native day2 remediation for a violation."
+tool_execute_description: "Remediate a SmartCMP cost optimization violation through its native day2 repair."
 tool_execute_entrypoint: "scripts/execute_optimization.py"
 tool_execute_groups:
   - cmp
@@ -62,7 +62,7 @@ tool_execute_groups:
 tool_execute_capability_class: "provider:smartcmp"
 tool_execute_priority: 150
 tool_track_name: "smartcmp_track_cost_optimization"
-tool_track_description: "Track SmartCMP cost optimization remediation execution."
+tool_track_description: "Track SmartCMP cost optimization remediation progress."
 tool_track_entrypoint: "scripts/track_execution.py"
 tool_track_groups:
   - cmp
@@ -87,14 +87,14 @@ discovery to remediation tracking.
    - Returns multi-dimensional recommendations (P0/P1/P2 priority)
    - Includes risk assessment and best practice guidance
    - Shows saving contribution, policy history, and resource operational context
-3. Execute a native day2 fix with `execute_optimization.py`
+3. Remediate the finding through the native day2 repair in `execute_optimization.py`
 4. Track remediation state with `track_execution.py`
 
 ## Analysis Output Enhancement
 
 The `analyze_recommendation.py` now provides:
 
-- **P0 Primary Action**: Core recommendation (execute_fix / configure_platform_policy / manual_review)
+- **P0 Primary Action**: Core recommendation (remediate / configure_platform_policy / manual_review)
 - **P1 Risk Assessment**: Risk level (high/medium/low) with specific warnings
 - **P1 Configuration Guide**: When fixType is missing, explains how to configure day2 repair
 - **P1 Saving Priority**: Contribution percentage to global optimizable amount
@@ -103,7 +103,7 @@ The `analyze_recommendation.py` now provides:
 
 ## Safety Boundary
 
-The skill only executes platform-native remediation through:
+The skill only performs platform-native remediation through:
 
 - `POST /compliance-policies/violations/day2/fix/{id}`
 

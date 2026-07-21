@@ -96,7 +96,7 @@ def test_build_recommendations_always_returns_required_fields():
     primary_action = recommendations[0]
     assert primary_action["type"] == "primary_action"
     assert primary_action["priority"] == "P0"
-    assert primary_action["action"] == "execute_fix"
+    assert primary_action["action"] == "remediate"
     assert primary_action["confidence"] == "high"
     assert primary_action["platformExecutable"] is True
     assert primary_action["reason"]

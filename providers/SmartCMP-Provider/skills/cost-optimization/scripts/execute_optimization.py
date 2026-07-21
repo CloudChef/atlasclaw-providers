@@ -65,7 +65,7 @@ def extract_error_message(response) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Execute a SmartCMP-native day2 cost optimization fix.")
+    parser = argparse.ArgumentParser(description="Remediate a SmartCMP cost finding through its native day2 repair.")
     parser.add_argument("--id", required=True, help="Violation identifier.")
     args = parser.parse_args()
 

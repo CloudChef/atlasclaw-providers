@@ -32,6 +32,16 @@ def test_routes_match_context_to_existing_skills_with_one_provider_resolver() ->
         for route in routes
     ] == [
         (
+            "alarm-alert-detail",
+            "/main/alarm-activity-management/alarm-triggered/edit/{alert_id}",
+            "smartcmp:alarm",
+        ),
+        (
+            "cost-optimization-detail",
+            "/main/measurement-billing/resource-usage-analysis/{recommendation_id}",
+            "smartcmp:cost-optimization",
+        ),
+        (
             "pending-approval-detail",
             "/main/new-application/pendingApproval/{approval_type}/{approval_id}",
             "smartcmp:approval",

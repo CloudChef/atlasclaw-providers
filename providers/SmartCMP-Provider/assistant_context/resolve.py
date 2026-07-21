@@ -51,11 +51,17 @@ RESOURCE_SCRIPTS_ROOT = os.path.join(
     "resource",
     "scripts",
 )
+ALARM_SCRIPTS_ROOT = os.path.join(ASSISTANT_CONTEXT_ROOT, "..", "skills", "alarm", "scripts")
+COST_SCRIPTS_ROOT = os.path.join(
+    ASSISTANT_CONTEXT_ROOT, "..", "skills", "cost-optimization", "scripts"
+)
 sys.path.insert(0, SUPPORT_ROOT)
 sys.path.insert(0, os.path.abspath(SHARED_SCRIPTS_ROOT))
 sys.path.insert(0, os.path.abspath(REQUEST_SCRIPTS_ROOT))
 sys.path.insert(0, os.path.abspath(APPROVAL_SCRIPTS_ROOT))
 sys.path.insert(0, os.path.abspath(RESOURCE_SCRIPTS_ROOT))
+sys.path.insert(0, os.path.abspath(ALARM_SCRIPTS_ROOT))
+sys.path.insert(0, os.path.abspath(COST_SCRIPTS_ROOT))
 
 from _context_resolver_common import (  # noqa: E402
     BASE_URL,
@@ -77,17 +83,94 @@ from _request_object_actions import (  # noqa: E402
     build_request_object_actions,
 )
 from _resource_object_actions import build_resource_object_actions  # noqa: E402
+from _alarm_object_actions import build_alert_object_actions  # noqa: E402
+from _cost_object_actions import build_cost_object_actions  # noqa: E402
 
 
 _APPLICATION_TYPE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 _APPROVAL_TYPE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 _OBJECT_PARAMETER_NAMES: dict[str, frozenset[str]] = {
+    "alarm_alert": frozenset(("alert_id",)),
+    "cost_optimization_recommendation": frozenset(("recommendation_id",)),
     "approval_request": frozenset(("approval_type", "approval_id")),
     "catalog": frozenset(("catalog_id",)),
     "request": frozenset(("application_type", "request_id")),
     "resource": frozenset(("resource_id",)),
     "virtual_machine": frozenset(("resource_id",)),
 }
+
+
+def _resolve_alert(
+    route_parameters: dict[str, Any], *, request_get: RequestGet
+) -> dict[str, Any]:
+    """Resolve one exact alarm alert with state-aware actions."""
+    alert_id = exact_uuid(route_parameters.get("alert_id"))
+    if not alert_id:
+        return _failure("invalid_alert_reference")
+    try:
+        alert = get_json(f"alarm-alert/{alert_id}", request_get=request_get)
+    except (requests.exceptions.RequestException, TypeError, ValueError):
+        return _failure("provider_unavailable")
+    if not isinstance(alert, dict) or exact_uuid(alert.get("id")) != alert_id:
+        return _failure("alert_id_mismatch")
+    return success_object(
+        object_type="alarm_alert",
+        object_id=alert_id,
+        name=text(alert.get("alarmPolicyName") or alert.get("alarmActivityName") or alert.get("subject")) or alert_id,
+        state=text(alert.get("status")).lower(),
+        attributes={
+            "severity": alert.get("level", ""),
+            "trigger_at": text(alert.get("triggerAt")),
+            "last_trigger_at": text(alert.get("lastTriggerAt")),
+            "trigger_count": alert.get("triggerCount", ""),
+            "resource_id": text(alert.get("nodeInstanceId") or alert.get("entityInstanceId")),
+            "resource_name": text(alert.get("resourceExternalName") or alert.get("entityInstanceName")),
+            "metric_name": text(alert.get("metricName")),
+            "subject": text(alert.get("subject")),
+        },
+        object_actions=build_alert_object_actions(alert),
+    )
+
+
+def _resolve_cost_recommendation(
+    route_parameters: dict[str, Any], *, request_get: RequestGet
+) -> dict[str, Any]:
+    """Resolve one exact cost recommendation with remediation-aware actions."""
+    recommendation_id = exact_uuid(route_parameters.get("recommendation_id"))
+    if not recommendation_id:
+        return _failure("invalid_recommendation_reference")
+    try:
+        recommendation = get_json(
+            f"compliance-policies/violations/{recommendation_id}",
+            request_get=request_get,
+        )
+    except (requests.exceptions.RequestException, TypeError, ValueError):
+        return _failure("provider_unavailable")
+    if not isinstance(recommendation, dict) or exact_uuid(recommendation.get("id")) != recommendation_id:
+        return _failure("recommendation_id_mismatch")
+    task_definition = recommendation.get("taskDefinition")
+    task_definition = task_definition if isinstance(task_definition, dict) else {}
+    action_source = dict(recommendation)
+    action_source["taskDefinitionName"] = text(task_definition.get("name"))
+    return success_object(
+        object_type="cost_optimization_recommendation",
+        object_id=recommendation_id,
+        name=text(recommendation.get("policyName") or recommendation.get("resourceName")) or recommendation_id,
+        state=text(recommendation.get("status")).lower(),
+        attributes={
+            "severity": text(recommendation.get("severity")),
+            "category": text(recommendation.get("category")),
+            "resource_id": text(recommendation.get("resourceId")),
+            "resource_name": text(recommendation.get("resourceName")),
+            "resource_type": text(recommendation.get("resourceType") or recommendation.get("componentType")),
+            "monthly_cost": recommendation.get("monthlyCost", ""),
+            "monthly_saving": recommendation.get("monthlySaving", ""),
+            "saving_operation_type": text(recommendation.get("savingOperationType")),
+            "fix_type": text(recommendation.get("fixType")),
+            "task_instance_id": text(recommendation.get("taskInstanceId")),
+        },
+        object_actions=build_cost_object_actions(action_source),
+    )
 
 
 def _failure(reason: str) -> dict[str, object]:
@@ -379,6 +462,10 @@ def resolve_page_context(
         return _resolve_catalog(route_parameters, request_get=request_get)
     if normalized_object_type == "request":
         return _resolve_request(route_parameters, request_get=request_get)
+    if normalized_object_type == "alarm_alert":
+        return _resolve_alert(route_parameters, request_get=request_get)
+    if normalized_object_type == "cost_optimization_recommendation":
+        return _resolve_cost_recommendation(route_parameters, request_get=request_get)
     return _resolve_resource(
         route_parameters,
         expected_kind=normalized_object_type,

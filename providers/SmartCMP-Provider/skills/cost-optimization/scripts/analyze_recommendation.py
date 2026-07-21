@@ -32,7 +32,6 @@ try:
     from _common import (
         request_timeout,
         build_object_open_action,
-        build_object_prompt_action,
         build_resource_page_href,
         infer_resource_page_category,
         require_config,
@@ -45,7 +44,6 @@ except ImportError:
     from _common import (  # type: ignore
         request_timeout,
         build_object_open_action,
-        build_object_prompt_action,
         build_resource_page_href,
         infer_resource_page_category,
         require_config,
@@ -74,6 +72,8 @@ except ImportError:
         normalize_analysis_facts,
     )
     from _cost_common import normalize_money, get_currency_symbol  # type: ignore
+
+from _cost_object_actions import build_cost_object_actions
 
 
 resource_module = _load_module_from_path(
@@ -415,21 +415,20 @@ def build_analysis_object_actions(payload: dict, *, base_url: str = "") -> list[
         if action:
             actions.append(action)
 
-    if violation_id and payload.get("suggestedNextStep") == "execute_fix":
-        action = build_object_prompt_action(
-            "execute",
-            label_en="Execute",
-            label_zh="执行",
-            prompt_en=f"Execute cost optimization recommendation {violation_id}",
-            prompt_zh=f"执行成本优化建议 {violation_id}",
-            confirmation_en=f"Confirm executing cost optimization recommendation {violation_id}?",
-            confirmation_zh=f"确认执行成本优化建议 {violation_id}？",
-            effect="mutate",
-            tone="warning",
-            requires_confirmation=True,
-        )
-        if action:
-            actions.append(action)
+    action_source = dict(facts)
+    action_source["violationId"] = violation_id
+    if payload.get("suggestedNextStep") in {"remediate", "execute_fix"}:
+        # The analyzed payload's readiness decision is authoritative even when
+        # a compact test or older producer omits the original repair field.
+        action_source.setdefault("fixType", "analysis_ready")
+    else:
+        action_source.pop("fixType", None)
+        action_source.pop("taskDefinitionName", None)
+    actions.extend(
+        action
+        for action in build_cost_object_actions(action_source)
+        if action["action_id"] != "analyze"
+    )
     return actions
 
 

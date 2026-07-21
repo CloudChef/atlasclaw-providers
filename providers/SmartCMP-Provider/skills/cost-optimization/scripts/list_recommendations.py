@@ -14,7 +14,6 @@ try:
     from _common import (
         request_timeout,
         build_object_open_action,
-        build_object_prompt_action,
         build_resource_page_href,
         infer_resource_page_category,
         require_config,
@@ -29,7 +28,6 @@ except ImportError:
     from _common import (  # type: ignore
         request_timeout,
         build_object_open_action,
-        build_object_prompt_action,
         build_resource_page_href,
         infer_resource_page_category,
         require_config,
@@ -56,6 +54,8 @@ except ImportError:
         normalize_money,
         normalize_timestamp,
     )
+
+from _cost_object_actions import build_cost_object_actions
 
 
 def normalize_violation(
@@ -108,16 +108,9 @@ def build_recommendation_object_actions(
     violation_id = str(item.get("violationId") or "").strip()
     resource_id = str(item.get("resourceId") or "").strip()
     actions: list[dict[str, object]] = []
-    if violation_id:
-        action = build_object_prompt_action(
-            "view_detail",
-            label_en="View details",
-            label_zh="查看详情",
-            prompt_en=f"Analyze cost optimization recommendation {violation_id}",
-            prompt_zh=f"分析成本优化建议 {violation_id}",
-        )
-        if action:
-            actions.append(action)
+    actions.extend(
+        build_cost_object_actions(item, analyze_action_id="view_detail")[:1]
+    )
 
     resource_category = infer_resource_page_category(item)
     if resource_id and base_url and resource_category:
