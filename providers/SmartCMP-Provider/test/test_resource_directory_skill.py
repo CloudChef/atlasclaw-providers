@@ -173,7 +173,7 @@ def test_ui_helpers_build_user_facing_routes_and_resource_actions():
             "display_label": localized("View details", "查看详情"),
             "effect": "read",
             "tone": "default",
-            "agent_prompt": localized("Show resource details for res-1", "查看 res-1 的资源详情"),
+            "agent_prompt": localized("Show resource details for 资源A", "查看 资源A 的资源详情"),
         },
         {
             "action_id": "open_detail",
@@ -278,8 +278,8 @@ def test_list_all_resource_hits_virtual_machine_ui_url(monkeypatch):
     assert payload[0]["object_name"] == "云主机A"
     assert payload[0]["object_actions"][0]["display_label"] == localized("View details", "查看详情")
     assert payload[0]["object_actions"][0]["agent_prompt"] == localized(
-        "Show resource details for vm-1",
-        "查看 vm-1 的资源详情",
+        "Show resource details for 云主机A",
+        "查看 云主机A 的资源详情",
     )
     assert payload[0]["object_actions"][1]["href"] == (
         "https://cmp.example.com/#/main/virtual-machines/vm-1/details"

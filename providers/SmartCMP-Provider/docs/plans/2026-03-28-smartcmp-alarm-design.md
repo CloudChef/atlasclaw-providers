@@ -74,7 +74,8 @@ The important platform schemas are:
 
 ## Non-Goals
 
-- Adding a Prometheus provider or direct Prometheus HTTP queries.
+- Adding independent Prometheus credentials or a user-configured Prometheus
+  provider. Resource health may use only the CMP-managed query endpoint.
 - Triggering remediation jobs or alarm operation tasks in the first version.
 - Claiming root cause from incomplete data.
 - Replacing SmartCMP's own alarm lifecycle semantics.
@@ -194,9 +195,10 @@ The analysis flow should be:
 6. Run LLM reasoning on normalized facts only.
 7. Emit human summary plus structured analysis JSON.
 
-Metric metadata endpoints such as `/alarm-policies/alarm-metrics` and
-`/alarm-policies/alarm-metric-groups` remain optional future enrichment and are
-not part of the current implementation path.
+Metric metadata endpoints remain outside alert analysis. The separate resource
+health path uses `/alarm-policies/alarm-metric-groups` only as the component
+monitoring-model catalog; it does not read an alert rule or threshold from that
+endpoint.
 
 ## What The LLM Should Do
 
@@ -342,7 +344,15 @@ and status operations.
 
 ## Future Extension
 
-If AtlasClaw later gains a Prometheus provider, the SmartCMP alarm analysis flow
-can optionally enrich recommendations with Prometheus-native query evidence.
-That future enhancement should plug into the analysis stage only. It should not
-change the first-version SmartCMP-only provider boundary defined here.
+Resource health analysis is a separate entry point from alarm analysis. It
+resolves a resource's component type, reads that component's effective
+monitoring model, and uses the CMP-managed Prometheus endpoint for scoped,
+read-only queries. The provider must not maintain resource-type-to-metric maps:
+AWS VM, AWS RDS, vSphere VM, base VM, and other components all use their own
+model definitions. It emits only facts and descriptive time-series statistics;
+the AtlasClaw LLM determines `healthy`, `abnormal`, or `indeterminate` without
+reusing alarm thresholds.
+
+If AtlasClaw later gains a standalone Prometheus provider, it may supply another
+safe query transport. It must not change the component-model contract or merge
+resource health analysis into the alert lifecycle.
