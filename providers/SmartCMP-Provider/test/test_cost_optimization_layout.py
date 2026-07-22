@@ -12,10 +12,13 @@ def test_cost_optimization_skill_layout_exists():
     expected_files = [
         "SKILL.md",
         "references/WORKFLOW.md",
+        "references/RESOURCE_ANALYSIS.md",
         "scripts/_cost_common.py",
         "scripts/_analysis.py",
+        "scripts/_resource_cost_analysis.py",
         "scripts/list_recommendations.py",
         "scripts/analyze_recommendation.py",
+        "scripts/analyze_resource_cost.py",
         "scripts/execute_optimization.py",
         "scripts/track_execution.py",
     ]
@@ -33,5 +36,8 @@ def test_cost_optimization_skill_metadata_contains_required_keys():
     assert 'provider_type: "smartcmp"' in skill_text
     assert "tool_list_name:" in skill_text
     assert "tool_analyze_name:" in skill_text
+    assert "tool_resource_analyze_name:" in skill_text
+    assert 'tool_resource_analyze_result_mode: "llm"' in skill_text
+    assert "tool_resource_analyze_parameters:" in skill_text
     assert "tool_execute_name:" in skill_text
     assert "tool_track_name:" in skill_text

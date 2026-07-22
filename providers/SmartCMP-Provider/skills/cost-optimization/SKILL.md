@@ -1,6 +1,6 @@
 ---
 name: "cost-optimization"
-description: "Cost optimization skill. Review FinOps and optimization recommendations, analyze savings opportunities with multi-dimensional insights plus datasource-enriched resource context, risk assessment, and best practices guidance. Remediate findings through native day2 repair and track remediation state."
+description: "Cost optimization skill. Review SmartCMP FinOps recommendations or analyze one cloud, software, hardware, virtualized, VM, or database resource for platform-confirmed and LLM-inferred savings opportunities. Use active policy evidence, bounded resource cost facts, risk assessment, and conservative saving estimates; remediate only existing findings through native day2 repair and track remediation state."
 provider_type: "smartcmp"
 instance_required: "true"
 
@@ -20,10 +20,14 @@ triggers:
   - 空闲资源
   - 资源利用率
   - 查看优化建议
+  - 分析资源费用
+  - 资源费用优化
+  - RDS费用分析
 
 use_when:
   - User wants to list optimization or FinOps recommendations
   - User wants to analyze cost optimization opportunities with detailed insights, resource context, and risk assessment
+  - User wants to analyze whether one named or selected resource may have cost optimization potential even when no recommendation exists
   - User wants to understand saving contribution and priority in global context
   - User wants to remediate an optimization finding through native day2 repair
   - User wants to track cost optimization remediation progress
@@ -53,6 +57,38 @@ tool_analyze_groups:
   - finops
 tool_analyze_capability_class: "provider:smartcmp"
 tool_analyze_priority: 120
+tool_resource_analyze_name: "smartcmp_analyze_resource_cost"
+tool_resource_analyze_description: "Collect read-only SmartCMP cost evidence for one resource, correlate enabled applicable cost policies, latest resource executions, and active violations, then use the LLM to distinguish platform-confirmed findings from model-only optimization potential. Prefer resource_name or a visible resource_index with recent smartcmp_list_all_resource metadata; resource_id is an internal compatibility input only. Never claim that COMPLIANCE without explicit complete evidence means the resource has no optimization opportunity, never invent a saving amount, and never remediate from model-only evidence."
+tool_resource_analyze_entrypoint: "scripts/analyze_resource_cost.py"
+tool_resource_analyze_groups:
+  - cmp
+  - finops
+  - resource
+tool_resource_analyze_capability_class: "provider:smartcmp"
+tool_resource_analyze_priority: 125
+tool_resource_analyze_result_mode: "llm"
+tool_resource_analyze_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "resource_name": {
+        "type": "string",
+        "description": "Exact visible SmartCMP resource name. Prefer this for interactive requests."
+      },
+      "resource_index": {
+        "type": "integer",
+        "description": "Visible table # value from the latest smartcmp_list_all_resource result."
+      },
+      "resource_directory_json": {
+        "type": "string",
+        "description": "Hidden JSON metadata from the latest smartcmp_list_all_resource result or Current Workflow Context. Pass this when resolving a visible table # value or validating a listed resource name."
+      },
+      "resource_id": {
+        "type": "string",
+        "description": "Compatibility-only internal SmartCMP resource ID. Do not request this from users or expose it in the final reply."
+      }
+    }
+  }
 tool_execute_name: "smartcmp_execute_cost_optimization"
 tool_execute_description: "Remediate a SmartCMP cost optimization violation through its native day2 repair."
 tool_execute_entrypoint: "scripts/execute_optimization.py"
@@ -78,16 +114,27 @@ discovery to remediation tracking.
 
 ## Workflow
 
-1. List recommendations with `list_recommendations.py`
+Choose the entry path that matches the user's object:
+
+1. Analyze an existing recommendation:
+   - List recommendations with `list_recommendations.py`
    - Optional: `--with-related-policies` to show related policy counts
-2. Analyze a recommendation with `analyze_recommendation.py`
+   - Analyze a recommendation with `analyze_recommendation.py`
    - Silently resolve the related `resourceId` through datasource
      `../datasource/scripts/list_resource.py`
    - Merge normalized resource `type + properties` into the analysis facts
    - Returns multi-dimensional recommendations (P0/P1/P2 priority)
    - Includes risk assessment and best practice guidance
    - Shows saving contribution, policy history, and resource operational context
-3. Remediate the finding through the native day2 repair in `execute_optimization.py`
+2. Analyze a resource directly:
+   - Call `analyze_resource_cost.py` with an exact visible name or recent list `#` selection
+   - Read resource facts, enabled applicable policy configurations, latest resource executions,
+     and active violations without triggering policy execution
+   - Use the returned `analysisContract` to keep platform facts separate from `llm_potential`
+   - Read [references/RESOURCE_ANALYSIS.md](references/RESOURCE_ANALYSIS.md) for VM, AWS RDS,
+     and generic resource reasoning rules
+3. Remediate an existing finding through the native day2 repair in `execute_optimization.py` only
+   after the user explicitly requests it
 4. Track remediation state with `track_execution.py`
 
 ## Analysis Output Enhancement
@@ -108,6 +155,14 @@ The skill only performs platform-native remediation through:
 - `POST /compliance-policies/violations/day2/fix/{id}`
 
 It does not call AWS or Azure APIs directly.
+
+Resource-first analysis is read-only. It must not call:
+
+- `POST /compliance-policies/execute`
+- `POST /compliance-policies/violations/day2/fix/{id}`
+
+Only an existing platform violation may enter the separate remediation flow. An
+`llm_potential` result is never executable.
 
 ## Resource Enrichment
 
