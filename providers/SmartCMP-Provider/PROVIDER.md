@@ -311,7 +311,7 @@ CMP_URL=https://cmp.example.com
 | `preapproval-agent` | Agent | Autonomous approval pre-review | Webhook-triggered, policy-based decisions |
 | `request-decomposition-agent` | Agent | Transform natural-language requirements into request drafts | NL parsing, multi-skill orchestration |
 | `cost-optimization` | Optimization | Analyze savings opportunities and execute platform-native fixes | `list_recommendations`, `analyze_recommendation`, `execute_optimization`, `track_execution` |
-| `resource-compliance` | Analysis | Resolve resources by exact name or visible list index, normalize `type + properties`, and run componentType-driven cloud/software/OS compliance analysis | `list_resource`, `analyze_resource` |
+| `resource-compliance` | Analysis | Resolve any resource by exact name or visible list index, build bounded CMP evidence, and run one generic LLM compliance analysis | `list_resource`, `analyze_resource` |
 | `form-designer` | Form Design | Generate, read, normalize, and refine SmartCMP Angular form schema JSON without saving CMP forms | `read_form`, `design_form` |
 
 ### Core Skills
@@ -439,11 +439,12 @@ and only uses the native day2 fix endpoint.
 #### resource-compliance
 
 Inspect one or more existing resources by exact resource name or visible list
-selection and analyze lifecycle, patch, security, and configuration posture
-with componentType-driven analyzers.
+selection, build a bounded and redacted CMP evidence profile, and let the LLM
+analyze operational state and compliance risk through one generic process.
 
-`list_resource.py` returns both the raw resource payloads and a shared
-normalized `type + properties` view that can be reused beyond compliance.
+`list_resource.py` returns the canonical resource payload and shared normalized
+facts. The compliance tool treats `componentType` as context rather than an
+analyzer gate and does not read configured CMP policy results.
 
 ```bash
 python skills/resource/scripts/list_all_resource.py --scope virtual_machines                  # Show visible names and indexes
@@ -459,10 +460,20 @@ Representative output fields:
 
 ```json
 {
-  "type": "resource.software.app.tomcat",
-  "analysisTargets": ["software:tomcat"]
+  "results": [
+    {
+      "analysisTargets": ["llm:generic_cloud_resource"],
+      "analysisStatus": "evidence_collected",
+      "resourceProfile": {},
+      "evidenceCoverage": {}
+    }
+  ]
 }
 ```
+
+The script does not call product-specific lifecycle or CVE sources. The final
+LLM answer must distinguish confirmed CMP facts, model inference, and missing
+evidence. It never performs remediation automatically.
 
 #### form-designer
 

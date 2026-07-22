@@ -51,7 +51,7 @@ configuration and must never be written into the manifest.
 - **Data Queries** - Query service catalogs, applications, templates, images, and other reference data
 - **Intelligent Agents** - Automated pre-approval and request decomposition capabilities
 - **Cost Optimization** - Review optimization recommendations, analyze savings, execute SmartCMP-native fixes, and track remediation progress
-- **Resource Compliance** - Resolve resources by exact name or visible list index, reuse the shared normalized resource view, and analyze lifecycle, patch, security, and configuration posture
+- **Resource Compliance** - Resolve any CMP resource, build a bounded and redacted fact profile, and let the LLM perform one generic compliance analysis without configured CMP rules
 - **Form Designer** - Generate, read, normalize, and refine SmartCMP Angular form schemas without saving changes to CMP
 
 ## Quick Start
@@ -435,16 +435,16 @@ List SmartCMP optimization recommendations, analyze savings opportunities, execu
 ### resource-compliance - Resource Compliance
 
 Fetch one or more existing SmartCMP resources by exact resource name or visible
-list selection, reuse the shared normalized resource view, and analyze
-lifecycle, patch, security, and configuration posture.
+list selection, build one provider-neutral evidence profile, and let the LLM
+analyze operational state and compliance risk.
 
 **Workflow:**
 1. Resolve the resource by visible name or latest resource-list index; keep SmartCMP UUIDs internal
-2. Retrieve resource summary, full resource data, details, and the standard normalized `type + properties` view with `list_resource.py`
-3. Reuse that normalized resource view (`type = componentType`) for analyzer routing
-4. Route cloud/software/OS analyzers (Tomcat, MySQL, PostgreSQL, Redis, Elasticsearch, SQL Server, Linux, Windows, AliCloud OSS)
-5. Perform best-effort live internet validation against authoritative sources when product/version evidence is sufficient
-6. Emit readable output and a stable `##RESOURCE_COMPLIANCE_START##` JSON block
+2. Retrieve the canonical CMP resource view and its normalized `type + properties` evidence
+3. Build a bounded, redacted `resourceProfile` for any component type
+4. Emit `analysisTargets: ["llm:generic_cloud_resource"]` and the LLM contract
+5. Let the LLM distinguish confirmed facts, inference, and missing evidence without using CMP compliance rules or external product adapters
+6. Emit a non-judgmental summary and a stable `##RESOURCE_COMPLIANCE_START##` JSON block
 
 **Examples:**
 ```bash
@@ -470,14 +470,21 @@ UUIDs. Resource IDs are internal API and webhook compatibility values only.
 Representative output fields:
 ```json
 {
-  "type": "resource.software.app.tomcat",
-  "analysisTargets": ["software:tomcat"]
+  "results": [
+    {
+      "analysisTargets": ["llm:generic_cloud_resource"],
+      "analysisStatus": "evidence_collected",
+      "resourceProfile": {},
+      "evidenceCoverage": {}
+    }
+  ]
 }
 ```
 
 **Safety Boundary:**
-- Analysis is advisory and evidence-driven
-- External validation is best-effort and degrades conservatively when unavailable
+- The script collects evidence; the LLM provides the final advisory judgment
+- CMP state, absence of findings, or absence of a product rule is not proof of compliance
+- Patch, lifecycle, and CVE claims remain inferred or missing unless the payload contains authoritative evidence
 - No remediation APIs are called by this skill
 
 ### form-designer - SmartCMP Form Schema Design
@@ -578,7 +585,7 @@ scripts are located in `datasource/scripts/`:
 3. **Output Format** - Script output includes named metadata blocks such as `##..._START## ... ##..._END##` for programmatic parsing
 4. **Alarm and Health Coverage** - Alert workflows and component-model-driven resource health analysis are supported directly by the `alarm` skill
 5. **Error Handling** - On `[ERROR]` output, report to user immediately; do NOT self-debug
-6. **Resource Compliance** - `resource-compliance` reuses the shared normalized resource view from `list_resource.py`, then attempts live external validation for lifecycle and support checks
+6. **Resource Compliance** - `resource-compliance` builds one bounded CMP fact profile for every resource type and hands it to the LLM; it does not use configured CMP policy results or product-specific external adapters
 7. **Localized Responses** - Scripts should return stable fields and metadata. Agents are responsible for explaining results in the current user's message language.
 8. **No Raw Day2 Dumps** - Resource operations should not print raw request payloads or raw SmartCMP response details after a successful submission.
 9. **Form Designer Is Read-Only** - `form-designer` outputs schema JSON for manual review/copy only. It must not save or update CMP forms.

@@ -31,6 +31,7 @@ def test_resource_compliance_skill_layout_exists():
         "SKILL.md",
         "references/WORKFLOW.md",
         "scripts/_analysis.py",
+        "scripts/_resource_profile.py",
         "scripts/analyze_resource.py",
     ]
 
@@ -71,8 +72,12 @@ def test_resource_compliance_prefers_name_and_index_contract():
     assert '"resource_name"' in skill_text
     assert '"resource_index"' in skill_text
     assert '"resource_directory_json"' in skill_text
+    assert 'tool_analyze_result_mode: "llm"' in skill_text
     assert "Prefer resource_name or resource_index" in skill_text
     assert "Never ask users for SmartCMP UUIDs" in skill_text
+    assert "llm:generic_cloud_resource" in skill_text
+    assert "usesCmpComplianceRules" in workflow_text
+    assert "analysisContract" in workflow_text
     assert "python scripts/analyze_resource.py <resource_id>" not in skill_text
     assert "python scripts/analyze_resource.py <resource_id>" not in workflow_text
 
