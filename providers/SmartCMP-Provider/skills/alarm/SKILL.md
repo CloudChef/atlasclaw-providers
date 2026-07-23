@@ -61,13 +61,97 @@ related:
   - resource-compliance
 
 tool_list_name: "smartcmp_list_alerts"
-tool_list_description: "List SmartCMP triggered alerts with optional filters for status, severity level, time range, deployment, entity instance, node instance, alarm type, alarm category, and keyword query."
+tool_list_description: "List SmartCMP triggered alerts with optional filters through the CMP comprehensive-query mapping GET /alarm-alert?query. General mode preserves its status, time, level, deployment, entity, node, target, type, category, keyword, and paging filters. For comprehensive single-resource analysis, pass resource_name, resource_index with resource_directory_json, or internal resource_id and use resource_alert_scope=current_and_recent. Resource mode resolves one exact SmartCMP Resource.id, queries current ALERT_FIRING/ALERT_MUTED alerts without a time limit plus currently ALERT_RESOLVED alerts whose triggerAt is within the requested lookback, through the exact targetEntityId API filter. The CMP search API does not filter this query by resolveAt. The provider verifies the returned targetEntityId and emits association coverage. It does not associate alerts by resource name, nodeInstanceId, or entityInstanceId. Report incomplete association as partial or indeterminate according to the coverage block, never as proof that the resource has no alert."
 tool_list_entrypoint: "scripts/list_alerts.py"
 tool_list_groups:
   - cmp
   - alarm
 tool_list_capability_class: "provider:smartcmp"
 tool_list_priority: 100
+tool_list_result_mode: "llm"
+tool_list_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string",
+        "description": "Optional comma-separated alert statuses for general alert listing. Resource mode uses its fixed current and recent lifecycle statuses."
+      },
+      "days": {
+        "type": "integer",
+        "description": "General lookback window and resource resolved-alert history window. Default: 7.",
+        "default": 7,
+        "minimum": 1
+      },
+      "level": {
+        "type": "integer",
+        "description": "Optional SmartCMP alert severity level."
+      },
+      "deployment_id": {
+        "type": "string",
+        "description": "Optional deployment identifier for general alert listing."
+      },
+      "entity_instance_id": {
+        "type": "string",
+        "description": "Optional entity instance identifier for general alert listing."
+      },
+      "node_instance_id": {
+        "type": "string",
+        "description": "Optional node instance identifier for general alert listing."
+      },
+      "alarm_type": {
+        "type": "string",
+        "description": "Optional SmartCMP alarm type for general alert listing."
+      },
+      "alarm_category": {
+        "type": "string",
+        "description": "Optional comma-separated SmartCMP alarm categories for general alert listing."
+      },
+      "query": {
+        "type": "string",
+        "description": "Optional keyword for general alert listing. Do not use this as an exact resource association substitute."
+      },
+      "target_entity_id": {
+        "type": "string",
+        "description": "Optional exact SmartCMP alert targetEntityId filter for general alert listing. This identifier is polymorphic and is not always a Resource ID."
+      },
+      "resource_name": {
+        "type": "string",
+        "description": "Exact visible SmartCMP resource name for resource alert analysis."
+      },
+      "resource_index": {
+        "type": "integer",
+        "description": "Visible table # value from the latest smartcmp_list_all_resource result.",
+        "minimum": 1
+      },
+      "resource_directory_json": {
+        "type": "string",
+        "description": "Hidden JSON metadata from the latest smartcmp_list_all_resource result or Current Workflow Context."
+      },
+      "resource_id": {
+        "type": "string",
+        "description": "Internal SmartCMP Resource.id from trusted workflow context. Do not request it from users or expose it in the final reply."
+      },
+      "resource_alert_scope": {
+        "type": "string",
+        "enum": ["current", "current_and_recent"],
+        "description": "Resource alert lifecycle scope. current_and_recent means current alerts plus currently resolved alerts whose triggerAt is within the requested lookback. Default: current_and_recent.",
+        "default": "current_and_recent"
+      },
+      "page": {
+        "type": "integer",
+        "description": "Page number for general alert listing. Default: 1.",
+        "default": 1,
+        "minimum": 1
+      },
+      "size": {
+        "type": "integer",
+        "description": "Page size. Default: 20.",
+        "default": 20,
+        "minimum": 1
+      }
+    }
+  }
 
 tool_analyze_name: "smartcmp_analyze_alert"
 tool_analyze_description: "Analyze one SmartCMP alert with rule context, datasource-enriched resource facts, assessment, and remediation guidance. Always pass a real SmartCMP alertId as alert_id. If the user refers to a numbered result from a prior alert list, resolve that display index from the previous smartcmp_list_alerts metadata and pass that item's alertId, not the display index."
@@ -175,6 +259,7 @@ alert analysis, component-model-driven resource health evidence, and status oper
 
 Provide alarm-management capabilities:
 - List triggered alerts with machine-readable metadata
+- Resolve one exact resource and distinguish current firing/muted alerts from currently resolved alerts triggered within the configured lookback for comprehensive resource analysis
 - Analyze one alert with normalized facts, datasource-enriched resource context, assessment, and remediation guidance
 - Analyze one resource independently of alerts by handing component-specific monitoring evidence to the LLM
 - Perform validated status operations (`mute`, `resolve`, `reopen`)
@@ -183,7 +268,7 @@ Provide alarm-management capabilities:
 
 | Script | Description | Location |
 |--------|-------------|----------|
-| `list_alerts.py` | Query `/alarm-alert` and emit `##ALARM_META_START##` metadata | `scripts/` |
+| `list_alerts.py` | Query the CMP comprehensive-search mapping `/alarm-alert?query` for both general and exact-resource listing, then emit `##ALARM_META_START##` metadata | `scripts/` |
 | `analyze_alert.py` | Fetch alert + rule context, enrich related resources via datasource `list_resource.py`, and emit `##ALARM_ANALYSIS_START##` output | `scripts/` |
 | `analyze_resource_health.py` | Resolve one resource, load its component monitoring model, query scoped Prometheus series, and emit `##RESOURCE_HEALTH_CONTEXT_START##` evidence for LLM analysis | `scripts/` |
 | `operate_alert.py` | Call `/alarm-alert/operation` for validated status changes | `scripts/` |
@@ -214,3 +299,16 @@ Resource health analysis is independent of alert analysis:
 - The final LLM response must include status, confidence, principal findings, metric evidence, missing evidence, and recommended actions.
 - Treat disabled, unavailable, or missing monitoring as an evidence gap rather than proof that the resource is healthy or unhealthy.
 - Do not read active alerts or alarm-policy thresholds for the resource-health conclusion.
+
+## Resource Alert Evidence
+
+Resource alert evidence complements, but never changes, the independent health
+contract above.
+
+- Call `smartcmp_list_alerts` with the same exact resource target used by the other comprehensive analysis tools.
+- `current_and_recent` queries current `ALERT_FIRING` and `ALERT_MUTED` alerts without a trigger-time limit, then queries alerts whose current status is `ALERT_RESOLVED` and whose `triggerAt` is within the last seven days. SmartCMP does not expose a `resolveAt` range in this search contract, so this must not be described as “resolved during the last seven days.”
+- Resolve the target to SmartCMP `Resource.id`, pass it through the exact `targetEntityId` query parameter, and verify the same field in every returned alert.
+- Do not use the resource name, `nodeInstanceId`, or `entityInstanceId` as resource-association evidence.
+- Read `##RESOURCE_ALERT_COVERAGE_START##` before concluding that no alert was observed. `partial` or `indeterminate` association means the alert dimension is unknown.
+- If the same alert is observed as current and resolved across the two requests, preserve both observations and treat the lifecycle race as `partial` evidence.
+- Absence of a matched alert is not monitoring-health evidence and must not be used to upgrade an `indeterminate` health conclusion.

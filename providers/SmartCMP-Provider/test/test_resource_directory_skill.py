@@ -21,17 +21,23 @@ RESOURCE_ACTIONS_PATH = (
 
 
 def load_common_module():
-    spec = importlib.util.spec_from_file_location("test_smartcmp_common_action_module", COMMON_PATH)
-    assert spec is not None
-    assert spec.loader is not None
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
+    shared_scripts = str(COMMON_PATH.parent)
+    added_path = shared_scripts not in sys.path
+    if added_path:
+        sys.path.insert(0, shared_scripts)
     try:
+        spec = importlib.util.spec_from_file_location("test_smartcmp_common_action_module", COMMON_PATH)
+        assert spec is not None
+        assert spec.loader is not None
+
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
         spec.loader.exec_module(module)
+        return module
     finally:
-        sys.modules.pop(spec.name, None)
-    return module
+        sys.modules.pop("test_smartcmp_common_action_module", None)
+        if added_path:
+            sys.path.remove(shared_scripts)
 
 
 def load_resource_actions_module():
@@ -148,42 +154,63 @@ def test_ui_helpers_build_user_facing_routes_and_resource_actions():
         )
         == "https://cmp.example/#/main/cloud-resource/res-1"
     )
-    assert resource_actions.build_resource_object_actions(
+    base_actions = resource_actions.build_resource_object_actions(
         "cmp.example/platform-api",
         "res-1",
-    ) == [
-        {
-            "action_id": "open_detail",
-            "kind": "open_url",
-            "display_label": localized("Open", "打开"),
-            "href": "https://cmp.example/#/main/virtual-machines/res-1/details",
-            "effect": "navigate",
-            "tone": "default",
-        }
-    ]
-    assert resource_actions.build_resource_object_actions(
+    )
+    assert [action["action_id"] for action in base_actions] == ["open_detail", "analyze"]
+    assert base_actions[0] == {
+        "action_id": "open_detail",
+        "kind": "open_url",
+        "display_label": localized("Open", "打开"),
+        "href": "https://cmp.example/#/main/virtual-machines/res-1/details",
+        "effect": "navigate",
+        "tone": "default",
+    }
+
+    detailed_actions = resource_actions.build_resource_object_actions(
         "cmp.example/platform-api",
         "res-1",
         resource_name="资源A",
         include_detail_action=True,
-    ) == [
-        {
-            "action_id": "view_detail",
-            "kind": "agent_prompt",
-            "display_label": localized("View details", "查看详情"),
-            "effect": "read",
-            "tone": "default",
-            "agent_prompt": localized("Show resource details for 资源A", "查看 资源A 的资源详情"),
-        },
-        {
-            "action_id": "open_detail",
-            "kind": "open_url",
-            "display_label": localized("Open", "打开"),
-            "href": "https://cmp.example/#/main/virtual-machines/res-1/details",
-            "effect": "navigate",
-            "tone": "default",
-        },
+    )
+    assert [action["action_id"] for action in detailed_actions] == [
+        "view_detail",
+        "open_detail",
+        "analyze",
     ]
+    assert detailed_actions[0] == {
+        "action_id": "view_detail",
+        "kind": "agent_prompt",
+        "display_label": localized("View details", "查看详情"),
+        "effect": "read",
+        "tone": "default",
+        "agent_prompt": localized("Show resource details for 资源A", "查看 资源A 的资源详情"),
+    }
+
+
+def test_list_row_without_internal_id_omits_analyze_action(monkeypatch):
+    """A named row cannot offer comprehensive Analyze without exact identity."""
+
+    def fake_get(url, headers=None, verify=None, timeout=None):
+        return FakeResponse(
+            {
+                "content": [
+                    {
+                        "name": "legacy-row-without-id",
+                        "resourceType": "cloudchef.nodes.Compute",
+                        "componentType": "iaas.machine.virtual_machine",
+                        "status": "started",
+                    }
+                ]
+            }
+        )
+
+    exit_code, _stdout, stderr = run_script(monkeypatch, [], fake_get=fake_get)
+    payload = extract_meta(stderr)
+
+    assert exit_code == 0
+    assert [action["action_id"] for action in payload[0]["object_actions"]] == ["view_detail"]
 
 
 def test_list_all_resource_hits_all_resources_api_and_emits_object_actions(monkeypatch):
@@ -225,11 +252,43 @@ def test_list_all_resource_hits_all_resources_api_and_emits_object_actions(monke
     assert [action["action_id"] for action in payload[0]["object_actions"]] == [
         "view_detail",
         "open_detail",
+        "analyze",
     ]
+    analyze_action = payload[0]["object_actions"][2]
+    assert analyze_action["display_label"] == localized("Analyze", "综合分析")
+    assert 'resource named "资源A"' in analyze_action["agent_prompt"]["default"]
+    assert 'internal SmartCMP Resource ID "res-1"' in analyze_action["agent_prompt"]["default"]
+    assert "never expose it to the user" in analyze_action["agent_prompt"]["default"]
+    for tool_name in (
+        "smartcmp_resource_analyze_alerts",
+        "smartcmp_resource_analyze_health",
+        "smartcmp_resource_analyze_compliance",
+        "smartcmp_resource_analyze_cost",
+    ):
+        assert tool_name in analyze_action["agent_prompt"]["default"]
     assert payload[0]["object_actions"][1]["href"] == (
         "https://cmp.example.com/#/main/cloud-resource/res-1"
     )
     assert "https://cmp.example.com/#/main/cloud-resource/res-1" not in stdout
+
+
+def test_analyze_actions_with_duplicate_names_keep_distinct_internal_ids():
+    resource_actions = load_resource_actions_module()
+
+    first = resource_actions.build_resource_object_actions(
+        "cmp.example/platform-api",
+        "res-1",
+        resource_name="duplicate-name",
+    )[-1]
+    second = resource_actions.build_resource_object_actions(
+        "cmp.example/platform-api",
+        "res-2",
+        resource_name="duplicate-name",
+    )[-1]
+
+    assert 'internal SmartCMP Resource ID "res-1"' in first["agent_prompt"]["default"]
+    assert 'internal SmartCMP Resource ID "res-2"' in second["agent_prompt"]["default"]
+    assert first["agent_prompt"] != second["agent_prompt"]
 
 
 def test_list_all_resource_hits_virtual_machine_ui_url(monkeypatch):

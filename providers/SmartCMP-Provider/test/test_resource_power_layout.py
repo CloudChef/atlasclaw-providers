@@ -66,6 +66,43 @@ def test_resource_skill_explains_operation_workflow_after_lookup():
     assert "确认要执行吗？" not in skill_text
 
 
+def test_resource_skill_coordinates_comprehensive_read_only_analysis():
+    """Overall resource analysis should reuse every owning domain tool."""
+    skill_text = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "## Comprehensive Resource Analysis" in skill_text
+    assert "same target for every call" in skill_text
+    assert "best-effort" in skill_text
+    for tool_name in (
+        "smartcmp_resource_analyze_alerts",
+        "smartcmp_resource_analyze_health",
+        "smartcmp_resource_analyze_compliance",
+        "smartcmp_resource_analyze_cost",
+    ):
+        assert tool_name in skill_text
+    for entrypoint in (
+        '"../alarm/scripts/list_alerts.py"',
+        '"../alarm/scripts/analyze_resource_health.py"',
+        '"../resource-compliance/scripts/analyze_resource.py"',
+        '"../cost-optimization/scripts/analyze_resource_cost.py"',
+    ):
+        assert entrypoint in skill_text
+    for heading in (
+        "资源概况",
+        "当前及近期告警",
+        "运行健康",
+        "合规风险",
+        "费用优化",
+        "跨维度关联发现",
+        "证据缺口",
+        "按优先级排列的只读建议",
+    ):
+        assert heading in skill_text
+    assert "no matched resolved alert in the trigger-time lookback" in skill_text
+    assert "must not invent a combined" in skill_text
+    assert "Do not mute or resolve alerts" in skill_text
+
+
 def test_resource_operation_list_script_exists_in_resource_skill():
     """list_resource_operations.py should live under resource/scripts/."""
     script_path = SKILL_ROOT / "scripts" / "list_resource_operations.py"

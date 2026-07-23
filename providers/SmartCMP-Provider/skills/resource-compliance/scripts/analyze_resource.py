@@ -249,7 +249,6 @@ def attach_resource_object_metadata(
                 resource_id,
                 resource_name=resource_name,
                 include_detail_action=bool(resource_name),
-                include_analysis_action=bool(resource_name),
             ),
         }
     )

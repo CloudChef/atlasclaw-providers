@@ -105,6 +105,7 @@ def test_build_list_params_supports_time_window_and_list_filters():
         deployment_id="deployment-1",
         entity_instance_id="entity-1",
         node_instance_id="node-1",
+        target_entity_id="target-1",
         sort="triggerAt,desc",
         now_ms=1704067200000,
     )
@@ -120,6 +121,7 @@ def test_build_list_params_supports_time_window_and_list_filters():
         "deploymentId": "deployment-1",
         "entityInstanceId": "entity-1",
         "nodeInstanceId": "node-1",
+        "targetEntityId": "target-1",
     }
 
 

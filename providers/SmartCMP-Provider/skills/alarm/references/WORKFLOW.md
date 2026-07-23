@@ -44,10 +44,44 @@ Model templates that do not declare a bindable resource label are also reported
 as unavailable evidence; the provider does not guess a label or run an
 unscoped cross-resource query.
 
+## General Alert Query Flow
+
+All triggered-alert listing uses `GET /alarm-alert?query`. In SmartCMP, the
+presence of the `query` parameter selects the comprehensive search mapping that
+accepts status, time, level, deployment, entity, node, `targetEntityId`, alarm
+type/category, keyword, and paging filters. Bare `GET /alarm-alert` is the
+generic `findAll` mapping and must not be used for filtered alert listing.
+
+General mode preserves the caller's existing filters. A general
+`targetEntityId` remains polymorphic and must not be described as a SmartCMP
+`Resource.id` unless the caller is using the exact-resource flow below.
+
+## Resource Alert Flow
+
+For a comprehensive single-resource analysis, call `smartcmp_list_alerts` with
+the exact resource selector and `resource_alert_scope=current_and_recent`.
+
+1. Resolve the same resource ID/name used by health, compliance, and cost analysis.
+2. Use the resolved SmartCMP `Resource.id` as the exact `targetEntityId` filter on
+   `GET /alarm-alert?query`; the database field that stores this value is
+   `target_entity_id`.
+3. Query current `ALERT_FIRING` and `ALERT_MUTED` alerts without a trigger-time window.
+4. Query alerts whose current status is `ALERT_RESOLVED` and whose `triggerAt`
+   is within the last seven days as historical context. The SmartCMP search
+   contract does not expose a `resolveAt` range, so do not claim these alerts
+   were resolved during the last seven days.
+5. Verify that every candidate's returned `targetEntityId` equals the resolved
+   `Resource.id`, then de-duplicate by alert ID within each lifecycle. Preserve
+   conflicting cross-lifecycle observations as partial evidence. Do not
+   associate candidates by resource name, `nodeInstanceId`, or `entityInstanceId`.
+6. Use the resource-alert coverage block to distinguish complete empty results from incomplete association. Never turn an incomplete empty result into “no alerts.”
+
 ## Output Contracts
 
 - `list_alerts.py` prints a short human summary and emits
   `##ALARM_META_START## ... ##ALARM_META_END##`.
+  Exact-resource mode also emits
+  `##RESOURCE_ALERT_COVERAGE_START## ... ##RESOURCE_ALERT_COVERAGE_END##`.
 - `analyze_alert.py` prints a short human summary and emits
   `##ALARM_ANALYSIS_START## ... ##ALARM_ANALYSIS_END##`.
 - `operate_alert.py` prints a short human summary and emits

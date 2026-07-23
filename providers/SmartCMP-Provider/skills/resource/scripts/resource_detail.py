@@ -666,7 +666,6 @@ def main(argv: list[str] | None = None) -> int:
             base_url,
             view["resourceId"],
             resource_name=view["name"],
-            include_analysis_action=True,
             include_operations_action=True,
         ),
         "resourceId": view["resourceId"],

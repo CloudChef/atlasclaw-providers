@@ -161,6 +161,7 @@ def build_list_params(
     deployment_id: str = "",
     entity_instance_id: str = "",
     node_instance_id: str = "",
+    target_entity_id: str = "",
     alarm_type: str = "",
     alarm_categories: Any = None,
     business_group_ids: Any = None,
@@ -202,6 +203,8 @@ def build_list_params(
         params["entityInstanceId"] = entity_instance_id
     if node_instance_id:
         params["nodeInstanceId"] = node_instance_id
+    if target_entity_id:
+        params["targetEntityId"] = target_entity_id
     if alarm_type:
         params["alarmType"] = alarm_type
 
