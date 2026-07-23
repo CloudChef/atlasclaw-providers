@@ -52,6 +52,18 @@ def test_alarm_skill_layout():
 def test_alarm_skill_declares_tool_input_contracts():
     skill_text = (ALARM_DIR / "SKILL.md").read_text(encoding="utf-8")
 
+    assert "tool_list_parameters:" in skill_text
+    assert '"resource_name"' in skill_text
+    assert '"resource_index"' in skill_text
+    assert '"target_entity_id"' in skill_text
+    assert '"deployment_id"' in skill_text
+    assert '"entity_instance_id"' in skill_text
+    assert '"node_instance_id"' in skill_text
+    assert '"alarm_type"' in skill_text
+    assert '"alarm_category"' in skill_text
+    assert '"resource_alert_scope"' in skill_text
+    assert "RESOURCE_ALERT_COVERAGE_START" in skill_text
+
     assert "tool_analyze_cli_positional:" in skill_text
     assert "- alert_id" in skill_text
     assert "tool_analyze_parameters:" in skill_text

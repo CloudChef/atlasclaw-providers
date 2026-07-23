@@ -358,8 +358,22 @@ def test_catalog_request_and_resource_resolvers_return_selected_display_fields(m
     assert "credential" not in resource_result["object"]["attributes"]
     assert [action["action_id"] for action in resource_result["object_actions"]] == [
         "open_detail",
+        "analyze",
         "list_operations",
     ]
+
+    generic_resource_result = resolver.resolve_page_context(
+        "cloud-resource-detail",
+        f"/main/cloud-resource/{RESOURCE_ID}",
+        {"resource_id": RESOURCE_ID},
+        "resource-detail",
+        "resource",
+        request_get=resource_get,
+    )
+    assert generic_resource_result["success"] is True
+    assert [
+        action["action_id"] for action in generic_resource_result["object_actions"]
+    ] == ["open_detail", "analyze", "list_operations"]
 
 
 def test_object_parameter_contract_mismatch_fails_before_provider_io(monkeypatch) -> None:

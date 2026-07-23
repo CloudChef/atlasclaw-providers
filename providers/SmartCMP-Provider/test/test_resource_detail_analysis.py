@@ -136,38 +136,34 @@ def test_main_renders_compact_resource_detail(monkeypatch):
     assert meta["object_type"] == "virtual_machine"
     assert meta["object_id"] == "res-1"
     assert meta["object_name"] == "mysqlLinux2"
-    assert meta["object_actions"] == [
-        {
-            "action_id": "open_detail",
-            "kind": "open_url",
-            "display_label": localized("Open", "打开"),
-            "href": "https://cmp.example.com/#/main/virtual-machines/res-1/details",
-            "effect": "navigate",
-            "tone": "default",
-        },
-        {
-            "action_id": "analyze",
-            "kind": "agent_prompt",
-            "display_label": localized("Health", "健康分析"),
-            "agent_prompt": localized(
-                "Analyze resource health for mysqlLinux2",
-                "分析资源 mysqlLinux2 的健康状态",
-            ),
-            "effect": "read",
-            "tone": "default",
-        },
-        {
-            "action_id": "list_operations",
-            "kind": "agent_prompt",
-            "display_label": localized("Operations", "操作"),
-            "agent_prompt": localized(
-                "List available operations for resource mysqlLinux2",
-                "查看资源 mysqlLinux2 的可用操作",
-            ),
-            "effect": "read",
-            "tone": "default",
-        }
+    assert [action["action_id"] for action in meta["object_actions"]] == [
+        "open_detail",
+        "analyze",
+        "list_operations",
     ]
+    analyze_action = meta["object_actions"][1]
+    assert analyze_action["display_label"] == localized("Analyze", "综合分析")
+    assert 'resource named "mysqlLinux2"' in analyze_action["agent_prompt"]["default"]
+    assert 'internal SmartCMP Resource ID "res-1"' in analyze_action["agent_prompt"]["default"]
+    for tool_name in (
+        "smartcmp_resource_analyze_alerts",
+        "smartcmp_resource_analyze_health",
+        "smartcmp_resource_analyze_compliance",
+        "smartcmp_resource_analyze_cost",
+    ):
+        assert tool_name in analyze_action["agent_prompt"]["default"]
+    for heading in (
+        "Resource overview",
+        "Current and recent alerts",
+        "Runtime health",
+        "Compliance risk",
+        "Cost optimization",
+        "Cross-dimensional findings",
+        "Evidence gaps",
+        "Prioritized read-only recommendations",
+    ):
+        assert heading in analyze_action["agent_prompt"]["default"]
+    assert "alert association is partial or indeterminate" in analyze_action["agent_prompt"]["default"]
     assert "https://cmp.example.com/#/main/virtual-machines/res-1/details" not in output
     assert "mysqlLinux2" in output
     assert "- Status: started" in output
