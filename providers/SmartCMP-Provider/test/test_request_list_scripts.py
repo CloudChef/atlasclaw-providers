@@ -5,11 +5,13 @@ import importlib.util
 import io
 import json
 import re
+import subprocess
 import sys
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import requests
+import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -109,6 +111,261 @@ def extract_meta(stderr: str, block_name: str):
     )
     assert match is not None
     return json.loads(match.group(1))
+
+
+def _catalog_child_result(
+    catalogs,
+    *,
+    returncode: int = 0,
+    stdout: str = "Found catalogs\n",
+) -> subprocess.CompletedProcess:
+    envelope = json.dumps(
+        {"internal_request_trace_id": "trace-test", "catalogs": catalogs},
+        ensure_ascii=False,
+    )
+    return subprocess.CompletedProcess(
+        args=["list_services.py"],
+        returncode=returncode,
+        stdout=stdout,
+        stderr=(
+            "##CATALOG_META_START##\n"
+            f"{envelope}\n"
+            "##CATALOG_META_END##\n"
+        ),
+    )
+
+
+def test_request_catalog_list_defers_field_instructions(monkeypatch):
+    child_result = _catalog_child_result(
+        [
+            {
+                "index": 1,
+                "id": "catalog-linux",
+                "name": "LinuxOS",
+                "sourceKey": "linux",
+                "serviceCategory": "RESOURCE",
+                "status": "PUBLISHED",
+                "instructions": {
+                    "resourceSpecs": [
+                        {"params": {"largePromptField": {"description": "x" * 5000}}}
+                    ]
+                },
+                "object_actions": [{"action_id": "request", "kind": "open_url"}],
+            }
+        ]
+    )
+    observed_command = []
+
+    def fake_run(command, **kwargs):
+        observed_command.extend(command)
+        return child_result
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    exit_code, stdout, stderr = run_main_script(
+        monkeypatch,
+        REQUEST_SCRIPTS_DIR / "list_request_catalogs.py",
+        ["Linux"],
+    )
+
+    assert exit_code == 0
+    assert observed_command[-1] == "Linux"
+    assert "Found 1 matching published catalog(s)" in stdout
+    assert "LinuxOS (RESOURCE)" in stdout
+    assert "catalog-linux" not in stdout
+    assert "Source Key" not in stdout
+    payload = extract_meta(stderr, "CATALOG_META")
+    assert payload["catalog_detail_required_after_selection"] is True
+    assert payload["catalogs"][0]["id"] == "catalog-linux"
+    assert "instructions" not in payload["catalogs"][0]
+    assert "sourceKey" not in payload["catalogs"][0]
+    assert "object_actions" not in payload["catalogs"][0]
+
+
+def test_request_catalog_detail_returns_only_selected_full_metadata(monkeypatch):
+    child_result = _catalog_child_result(
+        [
+            {
+                "id": "catalog-linux",
+                "name": "LinuxOS",
+                "status": "PUBLISHED",
+                "instructions": {"resourceSpecs": [{"type": "cloudchef.nodes.Compute"}]},
+            }
+        ]
+    )
+    observed_command = []
+
+    def fake_run(command, **kwargs):
+        observed_command.extend(command)
+        return child_result
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    exit_code, stdout, stderr = run_main_script(
+        monkeypatch,
+        REQUEST_SCRIPTS_DIR / "get_request_catalog.py",
+        ["catalog-linux"],
+    )
+
+    assert exit_code == 0
+    assert observed_command[-2:] == ["--catalog-id", "catalog-linux"]
+    assert "Selected catalog: LinuxOS" in stdout
+    assert "Catalog ID:" not in stdout
+    payload = extract_meta(stderr, "CATALOG_DETAIL_META")
+    assert payload["internal_request_trace_id"] == "trace-test"
+    assert payload["catalog"]["id"] == "catalog-linux"
+    assert payload["catalog"]["instructions"]["resourceSpecs"][0]["type"] == (
+        "cloudchef.nodes.Compute"
+    )
+    assert "catalogs" not in payload
+
+
+@pytest.mark.parametrize("invalid_catalog_id", ["1", "resource.iaas.machine.instance.abstract"])
+def test_request_catalog_detail_rejects_display_index_and_source_key(
+    monkeypatch,
+    invalid_catalog_id,
+):
+    child_result = _catalog_child_result(
+        [{"id": "catalog-linux", "name": "LinuxOS", "status": "PUBLISHED"}]
+    )
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: child_result)
+
+    exit_code, stdout, stderr = run_main_script(
+        monkeypatch,
+        REQUEST_SCRIPTS_DIR / "get_request_catalog.py",
+        [invalid_catalog_id],
+    )
+
+    assert exit_code == 1
+    assert "returned a different catalog UUID" in stdout
+    assert "##CATALOG_DETAIL_META_START##" not in stderr
+
+
+@pytest.mark.parametrize(
+    ("catalogs", "expected_error"),
+    [
+        ({"id": "not-a-list"}, "field 'catalogs' must be a list"),
+        (["not-an-object"], "must be an object"),
+        ([{"index": 1, "name": "Missing ID"}], "has no catalog UUID"),
+        ([{"index": 1, "id": "catalog-no-name"}], "has no display name"),
+        (
+            [{"index": "", "id": "catalog-no-index", "name": "Missing Index"}],
+            "has no usable display index",
+        ),
+        (
+            [
+                {"index": 1, "id": "duplicate", "name": "One"},
+                {"index": 2, "id": "duplicate", "name": "Two"},
+            ],
+            "duplicate catalog UUID",
+        ),
+        (
+            [
+                {"index": 1, "id": "catalog-one", "name": "One"},
+                {"index": 1, "id": "catalog-two", "name": "Two"},
+            ],
+            "duplicate display index",
+        ),
+    ],
+)
+def test_request_catalog_list_rejects_ambiguous_metadata(
+    monkeypatch,
+    catalogs,
+    expected_error,
+):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kwargs: _catalog_child_result(catalogs),
+    )
+
+    exit_code, stdout, stderr = run_main_script(
+        monkeypatch,
+        REQUEST_SCRIPTS_DIR / "list_request_catalogs.py",
+        [],
+    )
+
+    assert exit_code == 1
+    assert expected_error in stdout
+    assert "##CATALOG_META_START##" not in stderr
+
+
+def test_request_catalog_list_allows_valid_empty_result(monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kwargs: _catalog_child_result([]),
+    )
+
+    exit_code, stdout, stderr = run_main_script(
+        monkeypatch,
+        REQUEST_SCRIPTS_DIR / "list_request_catalogs.py",
+        ["not-found"],
+    )
+
+    assert exit_code == 0
+    assert "Found 0 matching published catalog(s)" in stdout
+    assert extract_meta(stderr, "CATALOG_META")["catalogs"] == []
+
+
+def test_request_catalog_proxy_preserves_child_failure(monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kwargs: _catalog_child_result(
+            [],
+            returncode=7,
+            stdout="[ERROR] upstream catalog lookup failed",
+        ),
+    )
+
+    exit_code, stdout, stderr = run_main_script(
+        monkeypatch,
+        REQUEST_SCRIPTS_DIR / "list_request_catalogs.py",
+        [],
+    )
+
+    assert exit_code == 7
+    assert "[ERROR] upstream catalog lookup failed" in stdout
+    assert stdout.count("[ERROR]") == 1
+    assert stderr == ""
+
+
+@pytest.mark.parametrize(
+    ("child_stderr", "expected_error"),
+    [
+        ("", "no metadata envelope"),
+        (
+            "##CATALOG_META_START##\nnot-json\n##CATALOG_META_END##\n",
+            "invalid metadata",
+        ),
+        (
+            "##CATALOG_META_START##\n{}\n##CATALOG_META_END##\n",
+            "field 'catalogs' must be a list",
+        ),
+    ],
+)
+def test_request_catalog_proxy_rejects_invalid_envelopes(
+    monkeypatch,
+    child_stderr,
+    expected_error,
+):
+    child_result = subprocess.CompletedProcess(
+        args=["list_services.py"],
+        returncode=0,
+        stdout="",
+        stderr=child_stderr,
+    )
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: child_result)
+
+    exit_code, stdout, stderr = run_main_script(
+        monkeypatch,
+        REQUEST_SCRIPTS_DIR / "list_request_catalogs.py",
+        [],
+    )
+
+    assert exit_code == 1
+    assert expected_error in stdout
+    assert stderr == ""
 
 
 def run_main_script(monkeypatch, script_path: Path, argv: list[str], *, fake_get=None, fake_post=None):
@@ -335,6 +592,47 @@ def test_list_services_reports_read_timeout_without_traceback(monkeypatch):
     assert "[ERROR] SmartCMP catalog lookup timed out after 60 seconds." in stdout
     assert "Traceback" not in stdout
     assert "Traceback" not in stderr
+
+
+def test_list_services_exact_catalog_mode_bypasses_the_first_list_page(monkeypatch):
+    instructions = """
+# Request Parameter Instructions
+
+catalog:
+  id: "catalog-filtered"
+resource_specs:
+- node: "Compute"
+  type: "cloudchef.nodes.Compute"
+""".strip()
+
+    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        assert url == "https://cmp.example.com/platform-api/catalogs/catalog-filtered"
+        assert params is None
+        return FakeResponse(
+            {
+                "id": "catalog-filtered",
+                "nameZh": "Filtered Linux Catalog",
+                "serviceCategory": "CLOUD_COMPONENT_SERVICE",
+                "status": "PUBLISHED",
+                "instructions": instructions,
+            }
+        )
+
+    stdout, stderr = run_script(
+        monkeypatch,
+        "list_services.py",
+        ["--catalog-id", "catalog-filtered"],
+        fake_get=fake_get,
+        scripts_dir=DATASOURCE_SCRIPTS_DIR,
+    )
+
+    payload = extract_meta(stderr, "CATALOG_META")
+    assert "Filtered Linux Catalog" in stdout
+    assert len(payload["catalogs"]) == 1
+    assert payload["catalogs"][0]["id"] == "catalog-filtered"
+    assert payload["catalogs"][0]["instructions"]["resourceSpecs"][0]["type"] == (
+        "cloudchef.nodes.Compute"
+    )
 
 
 def test_list_services_tolerates_missing_instructions_from_older_cmp(monkeypatch):
