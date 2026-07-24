@@ -68,8 +68,8 @@ related:
 
 # === Tool Registration ===
 tool_list_services_name: "smartcmp_list_services"
-tool_list_services_description: "List available service catalogs from SmartCMP. Call this tool ONLY ONCE at the beginning of the workflow. If you already have a catalogId from a previous call, do NOT call this tool again — proceed directly to building the request body and calling smartcmp_submit_request. After receiving the catalog list, check whether the user's original message clearly matches a specific catalog. If so, auto-select it and proceed without asking. Otherwise show the numbered list. Displayed numbers are conversation choices only; if the user replies with a number, resolve it to the selected catalog metadata UUID before calling any next tool. Keep returned _internal metadata for workflow use only; do not show those fields to the user."
-tool_list_services_entrypoint: "../datasource/scripts/list_services.py"
+tool_list_services_description: "List available service catalog choices from SmartCMP. Call this tool ONLY ONCE at the beginning of a new request workflow. It returns compact catalog identity metadata, not request-field instructions. After receiving the list, check whether the user's original message clearly matches a specific catalog. If so, auto-select it; otherwise show the numbered list. Displayed numbers are conversation choices only. Resolve the selected number to the catalog metadata UUID, then call smartcmp_get_request_catalog before inspecting fields or calling any catalog-dependent lookup. Keep returned _internal metadata for workflow use only; do not show those fields to the user."
+tool_list_services_entrypoint: "scripts/list_request_catalogs.py"
 tool_list_services_group: "cmp"
 tool_list_services_capability_class: "provider:smartcmp"
 tool_list_services_priority: 100
@@ -82,6 +82,25 @@ tool_list_services_parameters: |
         "description": "Optional keyword to filter services"
       }
     }
+  }
+tool_catalog_detail_name: "smartcmp_get_request_catalog"
+tool_catalog_detail_description: "Load the normalized request-field instructions for exactly one catalog selected from smartcmp_list_services. catalog_id MUST be the selected catalog metadata UUID, never a displayed number or sourceKey. Call once immediately after catalog selection and before smartcmp_list_available_bgs or request-field assembly. Keep returned _internal metadata for workflow use only."
+tool_catalog_detail_entrypoint: "scripts/get_request_catalog.py"
+tool_catalog_detail_group: "cmp"
+tool_catalog_detail_capability_class: "provider:smartcmp"
+tool_catalog_detail_priority: 105
+tool_catalog_detail_cli_positional:
+  - catalog_id
+tool_catalog_detail_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "catalog_id": {
+        "type": "string",
+        "description": "REQUIRED. Selected catalog UUID from smartcmp_list_services metadata."
+      }
+    },
+    "required": ["catalog_id"]
   }
 tool_submit_name: "smartcmp_submit_request"
 tool_submit_description: "Submit resource request to SmartCMP. RULES: (1) NEVER claim submitted without calling this tool. (2) Show JSON preview and wait for user confirmation BEFORE calling. (3) json_body is REQUIRED. (4) catalogId MUST be UUID from catalog metadata id field. (5) Same-type multi-instance requests must use the selected catalog's declared count field, or fallback top-level quantity when no such field exists, without duplicating resourceSpecs; per-instance differences belong in request-decomposition-agent. See Field Placement table in skill body for exact structure rules."
@@ -243,7 +262,7 @@ Submit cloud resource, application environment, or ticket/work order requests th
 
 ## Flow
 
-Seven tools exist: `smartcmp_list_services`, `smartcmp_list_available_bgs`, `smartcmp_list_flavors`, `smartcmp_list_facets`, `smartcmp_list_resource_bundles`, `smartcmp_submit_request`, and `smartcmp_get_request_status`.
+Eight tools exist: `smartcmp_list_services`, `smartcmp_get_request_catalog`, `smartcmp_list_available_bgs`, `smartcmp_list_flavors`, `smartcmp_list_facets`, `smartcmp_list_resource_bundles`, `smartcmp_submit_request`, and `smartcmp_get_request_status`.
 
 ### Multi-resource routing boundary
 
@@ -337,42 +356,58 @@ Status semantics:
 1. Call `smartcmp_list_services` once. Auto-select a catalog only when the
    user's wording clearly matches one returned catalog; otherwise ask a
    numbered catalog-selection question.
-2. Call `smartcmp_list_available_bgs` with the selected catalog UUID. If one
+2. Call `smartcmp_get_request_catalog` once with the selected catalog UUID to
+   load only that catalog's generated request instructions.
+3. Call `smartcmp_list_available_bgs` with the selected catalog UUID. If one
    business group is returned, use it. If multiple are returned, ask a concise
    numbered question using display names only and wait for the user's
    selection. Do not show business group IDs to the user.
-3. Before asking for request fields, check the selected catalog metadata. If a
+4. Before asking for request fields, check the selected catalog metadata. If a
    ticket/work-order catalog (`serviceCategory: "GENERIC_SERVICE"`) has
    `instructions.genericRequest`, build from that metadata. If a cloud/resource
    catalog has no `instructions.resourceSpecs` but its selected catalog metadata
    has `type: "cloudchef.nodes.Compute"`, use the Compute fallback below. If it
    has no Markdown and is not Compute, stop and explain that the catalog is
    missing generated Markdown instructions.
-4. Build the request from the selected catalog's generated Markdown metadata:
+5. Build the request from the selected catalog's generated Markdown metadata:
    `instructions.resourceSpecs`, `instructions.genericRequest`, and
    `instructions.topLevelFields`.
-5. Ask only for active required fields with no default, plus fields explicitly
+6. Ask only for active required fields with no default, plus fields explicitly
    marked `ask: true`. Defaults are used silently.
-6. Show a JSON preview and ask for confirmation.
-7. After the user confirms, call `smartcmp_submit_request` with the preview JSON.
+7. Show a JSON preview and ask for confirmation.
+8. After the user confirms, call `smartcmp_submit_request` with the preview JSON.
 
-Steps 1 and 2 are mandatory for every new request. Never ask the user to type a
+Steps 1 through 3 are mandatory for every new request. Never ask the user to type a
 business group before calling `smartcmp_list_available_bgs`.
 
 ### Catalog identity contract
 
 - Displayed service list numbers are conversation choices only. Resolve them
   against the latest `smartcmp_list_services` result.
+- Preserve each returned `index` when displaying a filtered subset; never
+  renumber catalog choices in the assistant response.
+- A catalog-selection question MUST show the exact returned `index` at the
+  start of every option line, for example `3. LinuxOS`. Never ask the user to
+  reply with a number unless those numbers are visible in the response.
 - `catalogId` must be the selected catalog metadata UUID, never the displayed
   list number and never `sourceKey`.
 - After catalog selection, the next tool call must be
-  `smartcmp_list_available_bgs` with that UUID.
+  `smartcmp_get_request_catalog` with that UUID. After the selected catalog
+  detail returns, call `smartcmp_list_available_bgs` with the same UUID.
 - There is no catalog questionnaire/default-property/preview tool in this
   skill. Do not invent one.
 
 ### Tool sequencing
 
 - One lookup tool call per turn.
+- Mandatory catalog discovery is the exception: when the initial list has one
+  clear automatic match, `smartcmp_list_services` may be followed by
+  `smartcmp_get_request_catalog` and then `smartcmp_list_available_bgs` in the
+  same user turn. When the user must choose a catalog, stop after the list and
+  continue with detail plus business-group lookup after their selection.
+- `smartcmp_get_request_catalog` is a schema-loading step, not a user-facing
+  lookup. It may be followed by `smartcmp_list_available_bgs` in the same turn
+  so catalog selection does not create an empty conversational round trip.
 - After a lookup tool result, summarize the resolved result in natural language
   and ask at most one next question.
 - Do not paste raw tool output, `_internal` metadata, UUID dumps, or JSON meta
@@ -408,8 +443,8 @@ scope:
 - `# Request Parameter Instructions`: YAML parameter contract.
 - `# Request Instructions`: optional request-building guidance.
 
-`smartcmp_list_services` exposes the parsed `# Request Parameter Instructions`
-YAML as selected catalog metadata:
+`smartcmp_get_request_catalog` exposes the selected catalog's parsed
+`# Request Parameter Instructions` YAML as metadata:
 
 - `instructions.topLevelFields`
 - `instructions.topLevelRequired`
@@ -655,11 +690,13 @@ Omit `genericRequest.processForm` when no form fields are declared or active.
 ## Service Selection
 
 - Call `smartcmp_list_services` once at the start of a new request.
-- Match user wording against returned catalog name, `sourceKey`, and service
-  category.
+- Match user wording against the returned catalog name and service category.
+- If the result contains zero catalogs, report that no matching published
+  catalog exists and stop the request workflow.
 - If multiple catalogs could match, ask a numbered catalog-selection question.
 - When the user selects by number, resolve the number to the selected catalog
-  metadata UUID before calling any next tool.
+  metadata UUID, then call `smartcmp_get_request_catalog` with that UUID before
+  any catalog-dependent lookup or request-field assembly.
 
 ## Runtime Lookups
 
@@ -786,6 +823,10 @@ After confirmation:
 
 - User says yes → call `smartcmp_submit_request` with `json_body`.
 - User says no → ask what to change.
+- Any field added or changed after a preview or failed submission changes the
+  request payload and invalidates every earlier confirmation. Show the updated
+  summary and JSON preview, then ask for fresh confirmation before the next
+  submit attempt.
 - A bare number is a selection for the latest displayed list unless the
   immediately previous assistant message displayed a JSON preview and asked for
   confirmation.
@@ -793,6 +834,8 @@ After confirmation:
 ## Interaction Rules
 
 - `smartcmp_list_services` at most once per request conversation.
+- `smartcmp_get_request_catalog` once after catalog selection and before
+  catalog-dependent lookups or request-field assembly.
 - `smartcmp_list_available_bgs` is normally called once after catalog
   selection. It may be called one extra time only to resolve a user's business
   group selection in a tool-required turn.

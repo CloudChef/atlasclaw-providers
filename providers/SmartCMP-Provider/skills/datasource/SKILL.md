@@ -207,7 +207,7 @@ Most scripts are located in `scripts/`.
 | Script | Description | Arguments |
 |--------|-------------|-----------|
 | `scripts/list_all_business_groups.py` | List all business-group scopes (tenant / 租户 / 部门 / BU / 项目) from the standalone UI directory endpoint | `[QUERY_VALUE]` |
-| `scripts/list_services.py` | List published service catalogs | `[KEYWORD]` |
+| `scripts/list_services.py` | List published service catalogs; the request skill also uses its internal exact-detail mode | `[KEYWORD]` or `--catalog-id <CATALOG_ID>` |
 | `scripts/list_resource.py` | List resource evidence by resource ID from `/nodes/{resourceId}/view` first, with legacy resource fallback | `<RESOURCE_ID> [RESOURCE_ID ...]` |
 | `../shared/scripts/list_applications.py` | List applications for a selected business group | `<BUSINESS_GROUP_ID>` |
 | `../shared/scripts/list_components.py` | List component metadata for a catalog `sourceKey` | `<SOURCE_KEY>` |
@@ -299,6 +299,9 @@ scripts/list_all_business_groups.py [query_value]
 
 scripts/list_services.py [keyword]
   -> (catalogId, sourceKey)
+
+scripts/list_services.py --catalog-id <catalog_id>
+  -> exactly one normalized catalog detail for internal request-skill use
 ```
 
 ## Output Meta Blocks

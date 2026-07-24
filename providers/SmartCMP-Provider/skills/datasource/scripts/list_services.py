@@ -5,9 +5,12 @@
 
 Usage:
   python list_services.py [KEYWORD]
+  python list_services.py --catalog-id CATALOG_ID
 
 Arguments:
-  KEYWORD    Optional filter keyword for catalog name search
+  KEYWORD       Optional filter keyword for catalog name search
+  --catalog-id  Internal exact-ID mode used by the request skill to normalize
+                one selected catalog through the catalog-detail endpoint
 
 Output:
   - Numbered list of catalog names (user-visible)
@@ -26,12 +29,14 @@ Environment:
 Examples:
   python list_services.py              # List all catalogs
   python list_services.py "Linux"      # Filter by keyword
+  python list_services.py --catalog-id "catalog-uuid"  # Internal detail lookup
 """
 import json
 import os
 import re
 import sys
 import uuid
+from urllib.parse import quote
 
 import requests
 import yaml
@@ -424,11 +429,30 @@ def _derive_blueprint_resource_type(raw_catalog: dict) -> dict:
     return {}
 
 
-keyword = sys.argv[1] if len(sys.argv) > 1 else ""
-url = f"{BASE_URL}/catalogs/published/simples"
-params = {"query": "", "states": "PUBLISHED", "page": 1, "size": 50, "sort": "catalogIndex,asc"}
-if keyword:
-    params["queryValue"] = keyword
+keyword = ""
+exact_catalog_id = ""
+if len(sys.argv) > 1 and sys.argv[1] == "--catalog-id":
+    exact_catalog_id = sys.argv[2].strip() if len(sys.argv) > 2 else ""
+    if not exact_catalog_id:
+        print("[ERROR] Missing catalog ID for --catalog-id.")
+        sys.exit(1)
+elif len(sys.argv) > 1:
+    keyword = sys.argv[1]
+
+if exact_catalog_id:
+    url = f"{BASE_URL}/catalogs/{quote(exact_catalog_id, safe='')}"
+    params = None
+else:
+    url = f"{BASE_URL}/catalogs/published/simples"
+    params = {
+        "query": "",
+        "states": "PUBLISHED",
+        "page": 1,
+        "size": 50,
+        "sort": "catalogIndex,asc",
+    }
+    if keyword:
+        params["queryValue"] = keyword
 headers = HEADERS
 
 try:
@@ -449,8 +473,22 @@ try:
 except ValueError:
     print("[ERROR] SmartCMP catalog lookup returned invalid JSON.")
     sys.exit(1)
-items = result.get("content", [])
-total = result.get("totalElements", len(items))
+if exact_catalog_id:
+    if not isinstance(result, dict):
+        print("[ERROR] SmartCMP catalog detail must be a JSON object.")
+        sys.exit(1)
+    returned_catalog_id = str(result.get("id") or "").strip()
+    if returned_catalog_id != exact_catalog_id:
+        print(
+            "[ERROR] SmartCMP catalog detail returned a different catalog ID: "
+            f"{returned_catalog_id or '<missing>'}."
+        )
+        sys.exit(1)
+    items = [result]
+    total = 1
+else:
+    items = result.get("content", [])
+    total = result.get("totalElements", len(items))
 
 # ── Machine-readable metadata (agent reads silently, do NOT display to user)
 # IMPORTANT: Do NOT show this block to user. Parse it silently.
@@ -493,9 +531,14 @@ for i, c in enumerate(items):
     for key in ("node", "type"):
         if key not in entry and derived_resource_type.get(key):
             entry[key] = derived_resource_type[key]
-    # This Tool reads only /catalogs/published/simples, so the endpoint itself
-    # is the authoritative proof that the Request action is available.
-    entry["status"] = "PUBLISHED"
+    if exact_catalog_id:
+        status = str(c.get("status") or c.get("state") or "").strip()
+        if status:
+            entry["status"] = status
+    else:
+        # The published-list endpoint is the authoritative proof that the
+        # Request action is currently available.
+        entry["status"] = "PUBLISHED"
     meta.append(
         attach_catalog_object_metadata(
             entry,

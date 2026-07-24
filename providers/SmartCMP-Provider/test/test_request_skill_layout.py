@@ -22,12 +22,20 @@ def test_request_skill_requires_business_group_resolution() -> None:
 
     assert "smartcmp_list_available_bgs" in skill_text
     assert "Business-Group Resolution" in skill_text
-    assert "Steps 1 and 2 are mandatory" in skill_text
+    assert "Steps 1 through 3 are mandatory" in skill_text
     assert "Never ask the user to type a" in skill_text
     assert "If multiple groups remain, ask one concise numbered question" in skill_text
     assert "Do not display business group UUIDs" in skill_text
     assert "ask for both in the same sentence" in skill_text
     assert "Use the selected business group's `id` as top-level `businessGroupId`" in skill_text
+
+
+def test_request_skill_requires_fresh_confirmation_after_payload_changes() -> None:
+    skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
+
+    assert "Any field added or changed after a preview or failed submission" in skill_text
+    assert "invalidates every earlier confirmation" in skill_text
+    assert "ask for fresh confirmation before the next" in skill_text
 
 
 def test_request_skill_handles_business_group_selection_turns() -> None:
@@ -48,10 +56,29 @@ def test_request_skill_resolves_service_numbers_to_catalog_uuid() -> None:
     assert "Catalog identity contract" in skill_text
     assert "Displayed service list numbers are conversation choices only" in skill_text
     assert "latest `smartcmp_list_services` result" in skill_text
+    assert "never\n  renumber catalog choices" in skill_text
+    assert "start of every option line" in skill_text
+    assert "unless those numbers are visible" in skill_text
     assert "`catalogId` must be the selected catalog metadata UUID" in skill_text
     assert "never the displayed" in skill_text
     assert "never `sourceKey`" in skill_text
+    assert "smartcmp_get_request_catalog" in skill_text
     assert "There is no catalog questionnaire/default-property/preview tool" in skill_text
+    assert "no matching published\n  catalog exists and stop" in skill_text
+    assert "returned catalog name and service category" in skill_text
+    assert "returned catalog name, `sourceKey`" not in skill_text
+
+
+def test_request_skill_defers_catalog_schema_until_selection() -> None:
+    skill_text = REQUEST_SKILL.read_text(encoding="utf-8")
+
+    assert 'tool_list_services_entrypoint: "scripts/list_request_catalogs.py"' in skill_text
+    assert 'tool_catalog_detail_name: "smartcmp_get_request_catalog"' in skill_text
+    assert 'tool_catalog_detail_entrypoint: "scripts/get_request_catalog.py"' in skill_text
+    assert "compact catalog identity metadata" in skill_text
+    assert "Call `smartcmp_get_request_catalog` once with the selected catalog UUID" in skill_text
+    assert "schema-loading step, not a user-facing" in skill_text
+    assert "before\n  any catalog-dependent lookup" in skill_text
 
 
 def test_request_skill_uses_generated_markdown_only() -> None:
