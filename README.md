@@ -25,7 +25,7 @@ This repository contains reusable provider packages and reference implementation
 
 | Provider | Purpose | Status |
 | --- | --- | --- |
-| [`SmartCMP-Provider`](providers/SmartCMP-Provider/README.md) | Cloud resource requests, approval workflows, and reference-data lookup for SmartCMP | Reference implementation |
+| [`SmartCMP-Provider`](providers/SmartCMP-Provider/README.md) | Context-aware cloud requests, approvals, resource analysis and operations, monitoring, compliance, and FinOps workflows | Reference implementation |
 | [`jira`](providers/jira/README.md) | Jira issue operations and provider wiring patterns | Working example |
 | [`Weaver-Ecology`](providers/Weaver-Ecology/README.md) | Weaver Ecology OA workflow provider manifest and SSO configuration schema | Manifest scaffold |
 
@@ -45,6 +45,9 @@ providers/<provider-name>/
 ├── provider.schema.json     # Runtime/API/UI manifest
 ├── README.md                # Human-facing package docs
 ├── assets/                  # Optional icons/images
+├── assistant_context/       # Optional context-aware embed routes and resolver
+│   ├── routes.json          # Enterprise System path → page object → existing Skill
+│   └── resolve.py           # Provider-owned object and action resolver
 └── skills/
     ├── <skill-a>/
     │   ├── SKILL.md         # Skill metadata, trigger rules, entrypoints
@@ -69,6 +72,67 @@ providers/<provider-name>/
 
 Note: the directory name is a packaging concern, while the runtime identifier comes from `provider_type` in skill metadata and the corresponding key in `service_providers`. In this repository, `SmartCMP-Provider/` maps to the runtime provider type `smartcmp`.
 
+## Embedded Menu and Floating UI
+
+AtlasClaw Embedded mode provides two independent surfaces that can be deployed
+together or separately:
+
+- the menu UI opens a full AtlasClaw conversation without page Context;
+- the floating UI stays compact and follows supported Enterprise System pages.
+
+Both surfaces receive the same Enterprise System Cookie authentication context.
+AtlasClaw `host_cookie` authentication resolves the same signed-in user, while
+the configured HostApp Provider's Cookie auth mode forwards the current request
+Cookie to the existing system APIs. The surfaces can also share a
+bootstrap-validated active Chat Session, but one does not open, replace, or
+control the other.
+
+For the menu surface, the Enterprise System only needs a menu entry that embeds
+`/atlasclaw/?embedded=1&surface=menu`. It does not provide page Context. For the
+floating surface, the Enterprise System additionally owns the launcher and
+compact iframe lifecycle, supplies the exact Host Origin and a fresh nonce, and
+reports normalized route paths with monotonically increasing generations.
+Enterprise System code does not resolve business objects, choose a Provider or
+Skill, call Agent/Tool APIs, or duplicate confirmation UI.
+
+Core owns surface bootstrap, the secure embedding protocol, deterministic
+matching, Context lifecycle, and permission revalidation. The HostApp Provider
+owns the floating page semantics. For the floating surface, the optional
+`assistant_context/routes.json` manifest maps normalized Enterprise System
+paths to:
+
+- a stable page type;
+- a provider-owned object type;
+- the existing Provider Skill that owns the page workflow.
+
+Each route uses static path segments and single-segment placeholders such as
+`/main/items/{item_id}`. AtlasClaw evaluates the manifest again whenever the
+Enterprise System reports a newer page generation. This makes Context matching
+dynamic at runtime while keeping it deterministic and auditable; an LLM does
+not guess which page or Skill is active.
+
+The single Provider-level resolver loads the current business object with the
+request-scoped user credential and returns a bounded display projection plus
+the object's current `object_actions`. Actions can vary with object state,
+permissions, and available workflows. They enter the normal Chat path and the
+matched Skill's normal Tool, schema, confirmation, Provider, and RBAC checks;
+the browser does not select or invoke a Tool directly.
+
+Use these extension rules:
+
+- A new path for an already supported object and owning Skill normally adds one
+  route entry.
+- A new object API extends the Provider resolver's read adapter and the owning
+  Domain Skill's action builder.
+- Do not add provider-specific page mappings, action labels, or object fields
+  to AtlasClaw Core or the generic floating UI.
+- Do not put cookies, tokens, credentials, query strings, fragments, or
+  business DTOs in route manifests or embedding messages.
+
+See the [Core Embedded integration
+guide](https://github.com/CloudChef/atlasclaw/blob/main/docs/EMBED-INTEGRATION.md)
+for surface bootstrap, Cookie, Context, and page-message contracts.
+
 ## Authentication Model
 
 Authentication is a provider responsibility. AtlasClaw Core can pass user identity and runtime context, but each provider must obtain or derive credentials that the target system actually accepts.
@@ -77,14 +141,16 @@ That matters because one provider usually exposes multiple skills, and all of th
 
 ### Mode 1: Embedded UI
 
-In embedded deployments, the provider runs inside or alongside the host application's web experience. The browser session already carries user identity information such as:
+Embedded mode uses a two-layer Cookie contract:
 
-- session cookies
-- host-issued access tokens
-- tenant or organization context
-- user profile or account identifiers
+- AtlasClaw `auth.provider: "host_cookie"` reads the Enterprise System Cookie
+  and identity cookies to resolve the signed-in AtlasClaw user.
+- The configured HostApp Provider uses `auth_type: "cookie"` to receive the
+  request-scoped Enterprise System Cookie when it calls existing system APIs.
 
-In this mode, the provider should reuse the host application's existing authenticated context instead of asking the user to sign in again.
+The Cookie remains runtime-only and is not copied into Provider Tokens, route
+manifests, page messages, or persisted Provider configuration. This preserves
+the user's existing system permissions without asking for a second sign-in.
 
 ### Mode 2: Standalone AtlasClaw Deployment
 
@@ -256,6 +322,10 @@ The SmartCMP reference design in this repository highlights a few patterns worth
 - read-only lookup skills separated from write or approval skills
 - two-step confirmation for risky write operations
 - provider-owned user authentication that works consistently across embedded UI, standalone SSO, and API access
+- shared Enterprise System Cookie authentication for independent menu and
+  floating surfaces
+- provider-owned Context routes, object resolution, and state-aware actions for
+  the floating surface while the menu surface retains ordinary Chat
 - script-level normalization so the LLM sees a stable interface even when the external API is inconsistent
 
 These are design recommendations, not hard requirements for every provider.
@@ -265,8 +335,12 @@ These are design recommendations, not hard requirements for every provider.
 `SmartCMP-Provider` is the most complete architecture reference in this repository. It demonstrates how to split a provider into business-facing skills instead of one large generic integration:
 
 - `datasource`: read-only reference data lookup
+- `resource`: resource browsing, comprehensive analysis coordination, and day-2 operations
 - `request`: resource and application request submission
 - `approval`: approval queue actions
+- `alarm`: alert workflows and component-model-driven resource health evidence
+- `cost-optimization`: recommendation-first and direct resource-cost analysis
+- `resource-compliance`: bounded resource facts for generic LLM compliance analysis
 - `preapproval-agent`: webhook-oriented review orchestration
 - `request-decomposition-agent`: converts free-form demand into structured request candidates
 

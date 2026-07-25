@@ -1,22 +1,38 @@
 # SmartCMP Provider
 
-SmartCMP Provider is a service provider module for AtlasClaw, integrating with SmartCMP cloud management platform. It supports cloud resource provisioning, approval workflow management, alarm alert handling, data source queries, form schema design, and resource compliance analysis.
+SmartCMP Provider is a service provider module for AtlasClaw, integrating with SmartCMP cloud
+management platform. It supports context-aware page actions, cloud resource provisioning,
+approval workflows, resource analysis and operations, alarm and health analysis, data queries,
+cost optimization, form schema design, and resource compliance analysis.
 
 ## Embedded Assistant Context
 
-SmartCMP's AtlasClaw integration deterministically resolves five normalized page paths through
-`assistant_context/routes.json`: pending approval detail, catalog request, My Application request
-detail, cloud resource detail, and virtual-machine detail. The request-detail template is
-`/main/new-process/myApplication/{application_type}/{request_id}`. The manifest maps each path to
-one existing `smartcmp:*` Skill and declares one Provider-level Context entrypoint,
-`assistant_context/resolve.py`. A new page for an existing object type needs only a route entry when
-it keeps that object's existing owning Domain Skill. A genuinely new SmartCMP object API extends
-the Provider-level read adapter and adds its dynamic action builder to the owning Domain Skill; it
-does not require changes to AtlasClaw Core/UI or Host. Routes must not remap an object to an
-unrelated Skill because the Snapshot's executable Tools and the object's actions must share the
-same owner.
+SmartCMP's AtlasClaw integration dynamically follows SmartCMP navigation and deterministically matches
+seven normalized page patterns through `assistant_context/routes.json`:
+
+- triggered alarm detail;
+- cost optimization recommendation detail;
+- pending approval detail;
+- service catalog request;
+- My Application request detail;
+- cloud resource detail;
+- virtual-machine detail.
+
+The request-detail template is
+`/main/new-process/myApplication/{application_type}/{request_id}`. Every newer SmartCMP page generation
+is matched again, so the floating assistant clears stale Context and follows the current SmartCMP
+object without using an LLM to guess the page. The manifest maps each path to one existing
+`smartcmp:*` Skill and declares one Provider-level Context entrypoint,
+`assistant_context/resolve.py`.
+
+A new page for an existing object type needs only a route entry when it keeps that object's
+existing owning Domain Skill. A genuinely new SmartCMP object API extends the Provider-level read
+adapter and adds its dynamic action builder to the owning Domain Skill; it does not require changes
+to AtlasClaw Core/UI or the Enterprise System integration. Routes must not remap an object to an unrelated Skill because the
+Snapshot's executable Tools and the object's actions must share the same owner.
+
 Context resolution requires the explicitly configured
-Provider type/instance and accepts only the request-scoped Host
+Provider type/instance and accepts only the request-scoped
 `CloudChef-Authenticate` Cookie for the explicitly selected Provider instance. It ignores Provider
 tokens, user tokens, configured cookies, and username/password credentials, and never auto-logs in.
 It returns minimal objects containing only approved display fields and does not introduce a separate login, token, credential,
@@ -34,12 +50,69 @@ the Domain Skill rather than to a central object-type table. Returning no object
 and renders no action buttons. Existing business Skill execution and authorization semantics
 remain unchanged.
 
-When AtlasClaw selects SmartCMP as its single default Embed Provider, Core loads
-`assistant_context/routes.json` by convention. The Provider package does not declare a
-configurable manifest path, and SmartCMP Host messages do not select a Provider instance.
+SmartCMP Embedded mode exposes two independent UI surfaces. The menu surface is
+the full AtlasClaw conversation and never attaches SmartCMP page Context. The
+floating surface is compact and uses the routes above to follow SmartCMP
+navigation. Both surfaces receive the same Enterprise System Cookie
+authentication context, so they resolve the same signed-in SmartCMP user and
+reuse that user's SmartCMP access and permissions. They can also share the AtlasClaw-origin active Chat
+Session selected during bootstrap; neither surface is an expanded or collapsed
+form of the other.
 
-Authentication cookies, tokens, and Provider credentials must remain in the existing runtime
-configuration and must never be written into the manifest.
+SmartCMP only needs to add and embed the menu Agent entry for the menu surface;
+that path does not require a page-change bridge. To enable the floating
+assistant and dynamic Context, SmartCMP additionally manages the
+launcher/iframe, constructs the floating URL with its exact Origin and a fresh
+nonce, and sends normalized router paths with monotonically increasing
+generations. SmartCMP does not call AtlasClaw Context, Agent Run, or Tool APIs
+for the iframe and does not duplicate AtlasClaw confirmation UI.
+
+When AtlasClaw selects SmartCMP as its single default Embed Provider, Core loads
+`assistant_context/routes.json` by convention for the floating surface. The Provider package does
+not declare a configurable manifest path, and SmartCMP embedding messages do not select a Provider
+instance.
+
+The browser Cookie remains request-scoped and runtime-only. Static credentials
+used by standalone or direct-script workflows stay in their configured
+credential stores. Neither form of credential belongs in route manifests or
+embedding messages.
+
+### Embedded Cookie Configuration
+
+Embedded mode uses the SmartCMP browser session rather than the standalone
+credentials described later in this README. Configure all three bindings in
+AtlasClaw:
+
+```json
+{
+  "auth": {
+    "provider": "host_cookie",
+    "host_cookie": {
+      "cookie_name": "CloudChef-Authenticate",
+      "subject_cookie_name": "userLoginId"
+    }
+  },
+  "service_providers": {
+    "smartcmp": {
+      "default": {
+        "base_url": "https://smartcmp.example.com",
+        "auth_type": "cookie"
+      }
+    }
+  },
+  "embed_integration": {
+    "provider_type": "smartcmp",
+    "provider_instance": "default"
+  }
+}
+```
+
+AtlasClaw `host_cookie` authentication resolves the signed-in user. The
+configured SmartCMP HostApp Provider then receives the same request-scoped
+Enterprise System Cookie through `auth_type: "cookie"` when it reads SmartCMP
+objects or executes Domain Skills. See the [Core Embedded integration
+guide](https://github.com/CloudChef/atlasclaw/blob/main/docs/EMBED-INTEGRATION.md)
+for the complete Cookie and message contract.
 
 ## Features
 
@@ -47,18 +120,22 @@ configuration and must never be written into the manifest.
 - **Approval Management** - View pending approval tasks, approve requests, or reject requests
 - **Alarm and Resource Health** - List and analyze alerts, collect component-specific resource monitoring evidence, and run explicit alert status operations
 - **Directory Queries** - List business-group scopes such as tenant/租户/部门/BU/项目, resource pools, resources, or cloud hosts from the same UI directory endpoints used by CMP
-- **Resource Operations** - List current-user executable operations and run enabled no-parameter day2 operations on existing cloud resources
+- **Resource Analysis and Operations** - Dynamically analyze one resource across alerts, monitoring health, compliance risk, and cost optimization, or run current-user executable day2 operations
 - **Data Queries** - Query service catalogs, applications, templates, images, and other reference data
 - **Intelligent Agents** - Automated pre-approval and request decomposition capabilities
-- **Cost Optimization** - Review optimization recommendations, analyze savings, execute SmartCMP-native fixes, and track remediation progress
+- **Cost Optimization** - Review optimization recommendations or directly analyze a resource's optimization potential, execute SmartCMP-native fixes for existing findings, and track remediation progress
 - **Resource Compliance** - Resolve any CMP resource, build a bounded and redacted fact profile, and let the LLM perform one generic compliance analysis without configured CMP rules
 - **Form Designer** - Generate, read, normalize, and refine SmartCMP Angular form schemas without saving changes to CMP
 
-## Quick Start
+## Standalone and Script Quick Start
 
 ### Environment Configuration
 
-SmartCMP Provider supports two deployment modes. Configure in `.env` file at project root:
+The following `.env` modes support standalone AtlasClaw deployments and direct
+Provider scripts. They do not configure Embedded Context resolution, which
+always uses the request-scoped browser Cookie described above.
+
+Configure one of these standalone/script modes in the project-root `.env` file:
 
 > **Note:** Auth URL is automatically inferred from `CMP_URL` - no manual configuration needed!
 >
@@ -276,9 +353,10 @@ python skills/resource-pool/scripts/list_all_resource_pools.py
 python skills/resource-pool/scripts/list_all_resource_pools.py production
 ```
 
-### resource - Resource Browsing & Operations
+### resource - Resource Browsing, Analysis & Operations
 
-Browse, inspect, list current-user executable operations, and operate on SmartCMP resources or cloud hosts.
+Browse, inspect, comprehensively analyze, list current-user executable
+operations, and operate on SmartCMP resources or cloud hosts.
 
 **Use Cases:**
 - 查看我的云资源
@@ -287,6 +365,7 @@ Browse, inspect, list current-user executable operations, and operate on SmartCM
 - 查看所有云主机
 - 查看某个云主机详情
 - 分析某个云主机属性
+- 综合分析一个资源的告警、运行健康、合规和费用优化
 - 查看云主机可执行操作
 - 执行云主机操作
 - 把某个云资源关机
@@ -313,6 +392,14 @@ python skills/resource/scripts/list_resource_operations.py 'https://cmp/#/main/v
 # Execute one no-parameter operation
 python skills/resource/scripts/operate_resource.py res-1 --action create_snapshot
 ```
+
+The dynamic **Analyze** action on a resolved resource page uses the `resource`
+Skill as a coordinator. It keeps one exact internal resource target and calls
+the existing resource-scoped analyzers for current and recent alerts,
+component-model-driven Prometheus health, generic compliance risk, and
+resource-level cost optimization. It then synthesizes the four evidence sets
+without changing the resource. A failure or evidence gap in one dimension does
+not prevent the other read-only dimensions from completing.
 
 The resource list output includes each item's current status so users can tell
 whether a start or stop action is needed.
@@ -419,16 +506,27 @@ credential, so SmartCMP audit trails show the configured robot/admin account.
 
 ### cost-optimization - Cost Optimization
 
-List SmartCMP optimization recommendations, analyze savings opportunities, execute SmartCMP-native day2 fixes, and track remediation progress.
+List SmartCMP optimization recommendations, analyze savings opportunities, directly assess one
+resource's optimization potential, execute SmartCMP-native day2 fixes for existing findings, and
+track remediation progress.
 
 **Workflow:**
-1. Discover recommendations with `list_recommendations.py`
-2. Inspect a finding with `analyze_recommendation.py --id <violation_id>`
-3. Execute a SmartCMP-native fix with `execute_optimization.py --id <violation_id>`
-4. Check remediation state with `track_execution.py --id <violation_id>`
+1. For an existing recommendation, discover findings with `list_recommendations.py` and inspect
+   one with `analyze_recommendation.py --id <violation_id>`
+2. For any supported resource, call `analyze_resource_cost.py --resource-name <name>` even when no
+   recommendation exists
+3. Correlate enabled applicable policies, their latest exact resource executions, active
+   violations, billing facts, and missing evidence
+4. Keep platform-confirmed findings separate from `llm_potential`; no violation does not prove
+   that the resource is already optimized
+5. Execute `execute_optimization.py --id <violation_id>` only for an existing SmartCMP finding
+6. Check remediation state with `track_execution.py --id <violation_id>`
 
 **Safety Boundary:**
 - Public-cloud best-practice guidance is advisory only
+- Resource-first analysis is read-only and never runs a policy or remediation
+- Exact saving amounts are reported only when SmartCMP supplies them
+- Model-only opportunities cannot create repair actions
 - Execution uses `POST /compliance-policies/violations/day2/fix/{id}`
 - No direct AWS or Azure API calls are made by this skill
 
