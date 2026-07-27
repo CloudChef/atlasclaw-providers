@@ -127,6 +127,7 @@ def test_fetch_form_definition_extracts_schema_model_and_visual_context():
         calls.append({"url": url, "headers": headers, "verify": verify, "timeout": timeout})
         return FakeResponse(
             {
+                "id": "123e4567-e89b-12d3-a456-426614174000",
                 "name": "Existing",
                 "description": "Service form",
                 "content": {
@@ -169,6 +170,32 @@ def test_fetch_form_definition_extracts_schema_model_and_visual_context():
     assert form.component_count == 2
     assert form.source_route == "design"
     assert form.raw_content_keys == ["components", "designMode", "model", "schema"]
+
+
+def test_fetch_form_definition_rejects_response_id_mismatch():
+    module = load_module(
+        "form_fetch_response_identity_contract",
+        SCRIPTS_DIR / "_form_fetch.py",
+    )
+
+    with pytest.raises(ValueError, match="does not match"):
+        module.fetch_form_definition(
+            "https://cmp.example.com/#/main/service-model/forms/edit/"
+            "123e4567-e89b-12d3-a456-426614174000",
+            "https://cmp.example.com/platform-api",
+            {"CloudChef-Authenticate": "token"},
+            get=lambda *_args, **_kwargs: FakeResponse(
+                {
+                    "id": "0897c154-3c46-414e-906e-2a7277f8def2",
+                    "content": {
+                        "schema": {
+                            "type": "object",
+                            "properties": {},
+                        }
+                    },
+                }
+            ),
+        )
 
 
 def test_read_form_outputs_context_meta_and_rejects_bad_url(monkeypatch):
@@ -302,6 +329,7 @@ def test_value_expression_target_keeps_requested_field_set_and_runtime_value_typ
     )
 
     assert exit_code == 0, stdout
+    assert "does not save changes to CMP" in stdout
     meta = extract_meta(stderr, "FORM_DESIGN_META")
     assert list(meta["schema"]["properties"]) == ["payload", "schemaFormValid"]
     assert meta["schema"]["fieldsets"][0]["fields"] == ["payload", "schemaFormValid"]

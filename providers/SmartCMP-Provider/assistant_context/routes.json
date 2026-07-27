@@ -6,6 +6,66 @@
   },
   "routes": [
     {
+      "id": "form-definition-edit",
+      "priority": 500,
+      "match": {
+        "path_template": "/main/service-model/forms/edit/{form_id}"
+      },
+      "result": {
+        "page_type": "form-definition-edit",
+        "object_type": "form_definition",
+        "skill_ref": "smartcmp:form-designer"
+      }
+    },
+    {
+      "id": "form-definition-design",
+      "priority": 500,
+      "match": {
+        "path_template": "/main/service-model/forms/design/{form_id}"
+      },
+      "result": {
+        "page_type": "form-definition-design",
+        "object_type": "form_definition",
+        "skill_ref": "smartcmp:form-designer"
+      }
+    },
+    {
+      "id": "script-definition-edit",
+      "priority": 500,
+      "match": {
+        "path_template": "/main/model-design/scripts/edit/{script_id}"
+      },
+      "result": {
+        "page_type": "script-definition-edit",
+        "object_type": "script_definition",
+        "skill_ref": "smartcmp:script-designer"
+      }
+    },
+    {
+      "id": "optimization-policy-edit",
+      "priority": 500,
+      "match": {
+        "path_template": "/main/measurement-billing/cost-optimization/optimization-policy/edit/{policy_id}"
+      },
+      "result": {
+        "page_type": "optimization-policy-edit",
+        "object_type": "optimization_policy",
+        "skill_ref": "smartcmp:optimization-policy-designer"
+      }
+    },
+    {
+      "id": "blueprint-component-edit",
+      "priority": 500,
+      "match": {
+        "path_template": "/main/model-design/blueprint-components/edit/{component_id}"
+      },
+      "result": {
+        "page_type": "blueprint-component-edit",
+        "object_type": "blueprint_component",
+        "skill_ref": "smartcmp:component-script-designer"
+      }
+    },
+    {
       "id": "alarm-alert-detail",
       "priority": 400,
       "match": {

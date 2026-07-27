@@ -159,12 +159,57 @@ def extract_model_from_payload(payload: Any) -> dict[str, Any]:
     return model if isinstance(model, dict) else {}
 
 
+def form_definition_from_payload(
+    payload: Any,
+    source: FormSource,
+) -> FormDefinition:
+    """Build a form definition after verifying the response object identity.
+
+    Args:
+        payload: JSON response returned for the requested form.
+        source: Validated source URL metadata.
+
+    Returns:
+        Parsed form definition whose response ID exactly matches ``source``.
+
+    Raises:
+        ValueError: If the payload is invalid or belongs to another form.
+    """
+    if not isinstance(payload, dict):
+        raise ValueError("Form response must be a JSON object.")
+    try:
+        response_id = str(uuid.UUID(str(payload.get("id") or "").strip()))
+    except (ValueError, AttributeError) as exc:
+        raise ValueError("Form response contains an invalid form ID.") from exc
+    if response_id != source.form_id:
+        raise ValueError("Form response ID does not match the requested form.")
+
+    schema = extract_schema_from_payload(payload)
+    model = extract_model_from_payload(payload)
+    content = payload.get("content")
+    content = content if isinstance(content, dict) else {}
+    components = content.get("components")
+    design_mode = content.get("designMode")
+    return FormDefinition(
+        form_id=source.form_id,
+        name=str(payload.get("name") or ""),
+        description=str(payload.get("description") or ""),
+        schema=schema,
+        model=model,
+        design_mode=str(design_mode or ""),
+        component_count=len(components) if isinstance(components, list) else 0,
+        source_route=source.route,
+        raw_content_keys=sorted(content.keys()),
+    )
+
+
 def fetch_form_definition(
     form_url: str,
     base_url: str,
     headers: dict[str, str],
     *,
     get: Callable[..., requests.Response] | None = None,
+    timeout: int | None = None,
 ) -> FormDefinition:
     """Fetch one SmartCMP form definition using the read-only form API.
 
@@ -173,6 +218,7 @@ def fetch_form_definition(
         base_url: SmartCMP API base URL ending in `/platform-api`.
         headers: Authentication headers from the shared SmartCMP config helper.
         get: Optional injectable HTTP GET function used by tests.
+        timeout: Optional request timeout supplied by a Context-aware Tool.
 
     Returns:
         Form definition with extracted schema.
@@ -189,24 +235,8 @@ def fetch_form_definition(
         f"{base_url.rstrip('/')}/forms/{source.form_id}",
         headers=headers,
         verify=False,
-        timeout=request_timeout(),
+        timeout=request_timeout() if timeout is None else timeout,
     )
     response.raise_for_status()
     payload = response.json()
-    schema = extract_schema_from_payload(payload)
-    model = extract_model_from_payload(payload)
-    content = payload.get("content") if isinstance(payload, dict) else {}
-    components = content.get("components") if isinstance(content, dict) else None
-    design_mode = content.get("designMode") if isinstance(content, dict) else ""
-
-    return FormDefinition(
-        form_id=source.form_id,
-        name=str(payload.get("name") or "") if isinstance(payload, dict) else "",
-        description=str(payload.get("description") or "") if isinstance(payload, dict) else "",
-        schema=schema,
-        model=model,
-        design_mode=str(design_mode or "") if isinstance(content, dict) else "",
-        component_count=len(components) if isinstance(components, list) else 0,
-        source_route=source.route,
-        raw_content_keys=sorted(content.keys()) if isinstance(content, dict) else [],
-    )
+    return form_definition_from_payload(payload, source)

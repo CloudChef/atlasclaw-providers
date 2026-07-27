@@ -23,6 +23,10 @@ WORKFLOW_ID = "RES20260719000004"
 RESOURCE_ID = "7d64abdf-1111-4111-8111-111111111111"
 ALERT_ID = "bccacc1a-651c-4d11-b8ea-a58e24e8f32b"
 RECOMMENDATION_ID = "7c6196b1-5623-4d85-896d-e74b4f9042cd"
+FORM_ID = "0897c154-3c46-414e-906e-2a7277f8def2"
+SCRIPT_ID = "3e045633-6ed6-4988-bddf-c7136d54e7de"
+POLICY_ID = "e3085cba-e8b9-4e6c-a65d-36331cdbe47d"
+COMPONENT_ID = "010c8da0-9866-4b32-bbff-72f3d49efb4e"
 
 
 class _Response:
@@ -270,6 +274,228 @@ def test_alert_and_cost_context_return_state_aware_actions(monkeypatch) -> None:
         "remediate",
     ]
     assert cost["object_actions"][1]["requires_confirmation"] is True
+
+
+def test_edit_pages_resolve_minimal_current_objects_without_business_content(
+    monkeypatch,
+) -> None:
+    """Editor Context resolves identity only; each page Skill reads full content later."""
+    module = _load(monkeypatch)
+
+    def fake_get(url, **_kwargs):
+        if url.endswith(f"/forms/{FORM_ID}"):
+            return _Response(
+                {
+                    "id": FORM_ID,
+                    "name": "test-form",
+                    "enabled": True,
+                    "content": {"schema": {"type": "object"}},
+                }
+            )
+        if url.endswith(f"/scripts/{SCRIPT_ID}"):
+            return _Response(
+                {
+                    "id": SCRIPT_ID,
+                    "name": "example.py",
+                    "alias": "example",
+                    "type": "PYTHON",
+                    "state": "PUBLISHED",
+                    "content": "print('private editor content')",
+                }
+            )
+        if url.endswith(f"/compliance-policies/{POLICY_ID}"):
+            return _Response(
+                {
+                    "id": POLICY_ID,
+                    "name": "Right-size VM",
+                    "category": "COST-OPTIMIZATION.MACHINE",
+                    "type": "COMPLIANCE",
+                    "resourceType": ["resource.iaas.machine.instance"],
+                    "ruleContent": "private-rule-content",
+                    "policyConfigs": [{"status": "ENABLED"}],
+                }
+            )
+        assert url.endswith(f"/components/{COMPONENT_ID}")
+        return _Response(
+            {
+                "id": COMPONENT_ID,
+                "name": "MongoDB",
+                "resourceType": "resource.software.nosql.mongodb",
+                "parentType": "resource.software.nosql",
+                "published": True,
+                "model": {
+                    "blueprintFiles": [
+                        {"path": "scripts/install.sh", "content": "private-script-content"}
+                    ]
+                },
+            }
+        )
+
+    cases = [
+        (
+            "form-definition-edit",
+            f"/main/service-model/forms/edit/{FORM_ID}",
+            {"form_id": FORM_ID},
+            "form-definition-edit",
+            "form_definition",
+            FORM_ID,
+        ),
+        (
+            "form-definition-design",
+            f"/main/service-model/forms/design/{FORM_ID}",
+            {"form_id": FORM_ID},
+            "form-definition-design",
+            "form_definition",
+            FORM_ID,
+        ),
+        (
+            "script-definition-edit",
+            f"/main/model-design/scripts/edit/{SCRIPT_ID}",
+            {"script_id": SCRIPT_ID},
+            "script-definition-edit",
+            "script_definition",
+            SCRIPT_ID,
+        ),
+        (
+            "optimization-policy-edit",
+            (
+                "/main/measurement-billing/cost-optimization/"
+                f"optimization-policy/edit/{POLICY_ID}"
+            ),
+            {"policy_id": POLICY_ID},
+            "optimization-policy-edit",
+            "optimization_policy",
+            POLICY_ID,
+        ),
+        (
+            "blueprint-component-edit",
+            f"/main/model-design/blueprint-components/edit/{COMPONENT_ID}",
+            {"component_id": COMPONENT_ID},
+            "blueprint-component-edit",
+            "blueprint_component",
+            COMPONENT_ID,
+        ),
+    ]
+
+    for route_id, path, parameters, page_type, object_type, object_id in cases:
+        result = module.resolve_page_context(
+            route_id,
+            path,
+            parameters,
+            page_type,
+            object_type,
+            request_get=fake_get,
+        )
+        assert result["success"] is True
+        assert result["object"]["id"] == object_id
+        assert result["object_actions"] == []
+        serialized = json.dumps(result, ensure_ascii=False)
+        assert "private" not in serialized
+
+
+def test_optimization_policy_resolver_rejects_deceptive_category_prefix(
+    monkeypatch,
+) -> None:
+    module = _load(monkeypatch)
+    result = module.resolve_page_context(
+        "optimization-policy-edit",
+        (
+            "/main/measurement-billing/cost-optimization/"
+            f"optimization-policy/edit/{POLICY_ID}"
+        ),
+        {"policy_id": POLICY_ID},
+        "optimization-policy-edit",
+        "optimization_policy",
+        request_get=lambda *_args, **_kwargs: _Response(
+            {
+                "id": POLICY_ID,
+                "name": "Wrong category",
+                "category": "COST-OPTIMIZATIONX.MACHINE",
+            }
+        ),
+    )
+
+    assert result == {"success": False, "reason": "policy_category_mismatch"}
+
+
+@pytest.mark.parametrize(
+    (
+        "route_id",
+        "path",
+        "parameters",
+        "page_type",
+        "object_type",
+        "expected_reason",
+    ),
+    [
+        (
+            "form-definition-edit",
+            f"/main/service-model/forms/edit/{FORM_ID}",
+            {"form_id": FORM_ID},
+            "form-definition-edit",
+            "form_definition",
+            "form_id_mismatch",
+        ),
+        (
+            "form-definition-design",
+            f"/main/service-model/forms/design/{FORM_ID}",
+            {"form_id": FORM_ID},
+            "form-definition-design",
+            "form_definition",
+            "form_id_mismatch",
+        ),
+        (
+            "script-definition-edit",
+            f"/main/model-design/scripts/edit/{SCRIPT_ID}",
+            {"script_id": SCRIPT_ID},
+            "script-definition-edit",
+            "script_definition",
+            "script_id_mismatch",
+        ),
+        (
+            "optimization-policy-edit",
+            (
+                "/main/measurement-billing/cost-optimization/"
+                f"optimization-policy/edit/{POLICY_ID}"
+            ),
+            {"policy_id": POLICY_ID},
+            "optimization-policy-edit",
+            "optimization_policy",
+            "policy_id_mismatch",
+        ),
+        (
+            "blueprint-component-edit",
+            f"/main/model-design/blueprint-components/edit/{COMPONENT_ID}",
+            {"component_id": COMPONENT_ID},
+            "blueprint-component-edit",
+            "blueprint_component",
+            "component_id_mismatch",
+        ),
+    ],
+)
+def test_edit_page_resolvers_reject_provider_object_id_mismatch(
+    monkeypatch,
+    route_id: str,
+    path: str,
+    parameters: dict[str, str],
+    page_type: str,
+    object_type: str,
+    expected_reason: str,
+) -> None:
+    module = _load(monkeypatch)
+
+    result = module.resolve_page_context(
+        route_id,
+        path,
+        parameters,
+        page_type,
+        object_type,
+        request_get=lambda *_args, **_kwargs: _Response(
+            {"id": GENERIC_REQUEST_ID}
+        ),
+    )
+
+    assert result == {"success": False, "reason": expected_reason}
 
 
 def test_catalog_request_and_resource_resolvers_return_selected_display_fields(monkeypatch) -> None:

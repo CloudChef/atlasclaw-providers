@@ -38,13 +38,25 @@ import urllib3
 import requests
 from urllib.parse import urlparse, urlunparse
 
-from _object_actions_common import (
-    build_object_open_action,
-    build_object_prompt_action,
-    build_resource_page_href,
-    build_ui_hash_href,
-    normalize_ui_base_url,
-)
+try:
+    from _object_actions_common import (
+        build_object_open_action,
+        build_object_prompt_action,
+        build_resource_page_href,
+        build_ui_hash_href,
+        normalize_ui_base_url,
+    )
+except ModuleNotFoundError as exc:
+    if exc.name != "_object_actions_common":
+        raise
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from _object_actions_common import (
+        build_object_open_action,
+        build_object_prompt_action,
+        build_resource_page_href,
+        build_ui_hash_href,
+        normalize_ui_base_url,
+    )
 
 # Suppress SSL warnings globally when this module is imported
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)

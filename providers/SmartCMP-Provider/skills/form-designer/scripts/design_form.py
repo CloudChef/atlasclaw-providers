@@ -367,12 +367,11 @@ def main(argv: list[str] | None = None) -> int:
 
     print("Change Summary:")
     print(summary)
-    if args.form_url:
-        print("\nApply Note:")
-        print(
-            "This tool does not save changes to CMP. Review and copy the "
-            "replacement Schema JSON into the SmartCMP form editor manually."
-        )
+    print("\nApply Note:")
+    print(
+        "This tool does not save changes to CMP. Review and copy the "
+        "replacement Schema JSON into the SmartCMP form editor manually."
+    )
     visible_warnings = _visible_warnings(warnings)
     if visible_warnings:
         print("\nWarnings:")

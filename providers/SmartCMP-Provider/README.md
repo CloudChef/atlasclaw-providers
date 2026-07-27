@@ -8,7 +8,7 @@ cost optimization, form schema design, and resource compliance analysis.
 ## Embedded Assistant Context
 
 SmartCMP's AtlasClaw integration dynamically follows SmartCMP navigation and deterministically matches
-seven normalized page patterns through `assistant_context/routes.json`:
+twelve normalized page patterns through `assistant_context/routes.json`:
 
 - triggered alarm detail;
 - cost optimization recommendation detail;
@@ -16,7 +16,17 @@ seven normalized page patterns through `assistant_context/routes.json`:
 - service catalog request;
 - My Application request detail;
 - cloud resource detail;
-- virtual-machine detail.
+- virtual-machine detail;
+- form definition edit;
+- form definition design;
+- script definition edit;
+- cost-optimization policy edit;
+- blueprint component edit.
+
+The five editor routes bind one owning Domain Skill per page. Their current-object Tools read the
+exact server-owned Context object with the request user's Cookie. Each owning Skill uses that
+source to draft complete replacement content for manual copying. The Tools do not put editor
+content into the Context object, and the workflow does not call SmartCMP write APIs.
 
 The request-detail template is
 `/main/new-process/myApplication/{application_type}/{request_id}`. Every newer SmartCMP page generation
@@ -126,6 +136,9 @@ for the complete Cookie and message contract.
 - **Cost Optimization** - Review optimization recommendations or directly analyze a resource's optimization potential, execute SmartCMP-native fixes for existing findings, and track remediation progress
 - **Resource Compliance** - Resolve any CMP resource, build a bounded and redacted fact profile, and let the LLM perform one generic compliance analysis without configured CMP rules
 - **Form Designer** - Generate, read, normalize, and refine SmartCMP Angular form schemas without saving changes to CMP
+- **Script Designer** - Read the current script definition and return a complete same-language replacement for manual review
+- **Optimization Policy Designer** - Read the current cost-optimization policy and return complete replacement fields and rule content
+- **Component Script Designer** - Read one current component file, apply resource-type-specific rules, and return the complete file without changing the component
 
 ## Standalone and Script Quick Start
 
@@ -636,6 +649,16 @@ SmartCMP-Provider/
 │   │   ├── references/
 │   │   ├── scripts/
 │   │   └── SKILL.md
+│   ├── script-designer/             # Current script-definition replacement skill
+│   │   ├── scripts/
+│   │   └── SKILL.md
+│   ├── optimization-policy-designer/ # Current cost-optimization policy replacement skill
+│   │   ├── scripts/
+│   │   └── SKILL.md
+│   ├── component-script-designer/   # Resource-type-aware component file replacement skill
+│   │   ├── references/
+│   │   ├── scripts/
+│   │   └── SKILL.md
 │   ├── preapproval-agent/           # Pre-approval agent
 │   │   ├── references/
 │   │   └── SKILL.md
@@ -658,7 +681,8 @@ SmartCMP-Provider/
 │   │   └── SKILL.md
 │   └── shared/
 │       └── scripts/                 # Shared authentication module
-│           └── _common.py
+│           ├── _common.py
+│           └── _current_page_object.py
 ├── test/                            # Provider test suite
 ├── PROVIDER.md                      # Provider configuration docs
 └── README.md                        # This file
@@ -687,6 +711,7 @@ scripts are located in `datasource/scripts/`:
 7. **Localized Responses** - Scripts should return stable fields and metadata. Agents are responsible for explaining results in the current user's message language.
 8. **No Raw Day2 Dumps** - Resource operations should not print raw request payloads or raw SmartCMP response details after a successful submission.
 9. **Form Designer Is Read-Only** - `form-designer` outputs schema JSON for manual review/copy only. It must not save or update CMP forms.
+10. **Editor Skills Are Read-Only** - Script, optimization-policy, and component-script designers read only the exact Context-bound saved object and return manual replacement content; they do not save, publish, execute, or deploy it.
 
 ## Related Documentation
 

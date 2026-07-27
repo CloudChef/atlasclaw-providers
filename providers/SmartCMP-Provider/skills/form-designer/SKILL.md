@@ -23,6 +23,7 @@ triggers:
 
 use_when:
   - User wants to create a new SmartCMP Angular form schema from natural language or a field list
+  - User is interacting from a SmartCMP form editor page and wants the current saved form changed
   - User wants to inspect an existing SmartCMP form or regenerate a replacement form from a UI edit URL
   - User wants SmartCMP form JSON normalized before copying it into CMP manually
   - User asks for hidden fields, request visibility, approval visibility, labels, descriptions, selects, tables, or JavaScript behavior in a form
@@ -41,17 +42,31 @@ examples:
 related:
   - datasource
 
+tool_current_name: "smartcmp_read_current_form_schema"
+tool_current_description: "Read the exact saved form bound to the active SmartCMP form-editor Context. It takes no form URL or form ID from the model, uses the request user's session, verifies the returned object ID against the server-owned page scope, and never writes to CMP."
+tool_current_entrypoint: "scripts/read_current_form.py:read_current_form"
+tool_current_groups:
+  - cmp
+  - form-designer
+tool_current_capability_class: "provider:smartcmp"
+tool_current_priority: 115
+tool_current_result_mode: "llm"
+tool_current_parameters: |
+  {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  }
+
 tool_read_name: "smartcmp_read_form_schema"
 tool_read_description: "Read one existing SmartCMP form schema from a current-instance UI edit or design URL. This tool is read-only: it accepts URLs like #/main/service-model/forms/edit/<uuid> or #/main/service-model/forms/design/<uuid> and calls GET /forms/<uuid>. It also exposes source content.model/designMode/component counts as diagnostic context. It never saves, submits, updates, or deletes CMP data."
-tool_read_entrypoint: "scripts/read_form.py"
+tool_read_entrypoint: "scripts/read_form.py:read_form"
 tool_read_groups:
   - cmp
   - form-designer
 tool_read_capability_class: "provider:smartcmp"
 tool_read_priority: 105
 tool_read_result_mode: "llm"
-tool_read_cli_positional:
-  - form_url
 tool_read_parameters: |
   {
     "type": "object",
@@ -66,21 +81,13 @@ tool_read_parameters: |
 
 tool_design_name: "smartcmp_design_form_schema"
 tool_design_description: "Normalize and return a SmartCMP Angular form schema JSON draft. Use mode=new for new forms, regenerate after reading a URL source for full schema replacement, and modify for deterministic normalization, catalog insertions, or deterministic value-expression updates from a trusted complete JSON or form URL source. This tool never writes to CMP."
-tool_design_entrypoint: "scripts/design_form.py"
+tool_design_entrypoint: "scripts/design_form_handler.py:design_form"
 tool_design_groups:
   - cmp
   - form-designer
 tool_design_capability_class: "provider:smartcmp"
 tool_design_priority: 110
 tool_design_result_mode: "tool_only_ok"
-tool_design_cli_flag_overrides:
-  mode: "--mode"
-  schema_json: "--schema-json"
-  form_url: "--form-url"
-  change_summary: "--change-summary"
-  catalog_fields_json: "--catalog-fields-json"
-  value_expressions_json: "--value-expressions-json"
-  requested_fields_json: "--requested-fields-json"
 tool_design_parameters: |
   {
     "type": "object",
@@ -123,11 +130,22 @@ tool_design_parameters: |
 
 Design, read, and normalize SmartCMP Angular form schema JSON only. It does not submit requests or save changes.
 
+## Current Page Interaction
+
+When this Skill is selected by a SmartCMP form editor Context:
+
+1. Call `smartcmp_read_current_form_schema` before proposing any change. Do not ask the user for the page URL or form ID.
+2. Treat the returned saved schema as the source of truth. Apply only the user's requested changes and preserve unrelated fields, field order, JavaScript strings, unknown keys, visibility rules, and model dependencies.
+3. Pass the complete updated schema through `smartcmp_design_form_schema` with `mode=modify` before answering.
+4. Return the complete normalized replacement schema. Never use ellipses, snippets, diffs, or summaries in place of unchanged schema content.
+5. State that the output is for manual review and copying back to CMP. Do not claim that the form was saved, updated, or published.
+
 ## Boundaries
 
 - No submit/approve/status workflows.
 - No CMP form writes: no POST, PUT, PATCH, DELETE, publish, save, or delete.
 - Form URLs are read-only source material.
+- In an embedded form editor, any explicit `form_url` must identify the same form as the server-owned page Context. The URL tools reject a different form before issuing a Provider request. Ordinary non-embedded Chat URL workflows remain supported through the selected Provider instance.
 
 ## Workflow
 
@@ -199,6 +217,6 @@ Use the SmartCMP widget shape, not generic web-control names:
 
 ## Output
 
-Return the exact normalized schema text from `smartcmp_design_form_schema` as a fenced `json` block. All string values inside the returned JSON are opaque. Do not add, remove, rename, move, summarize, or abbreviate any property or string value. Do not summarize, abbreviate, reorder, rename, or replace long JavaScript strings with `...`.
+`smartcmp_design_form_schema` returns the final answer directly in six sections: current object name/ID, copy target `content.schema`, change summary, complete replacement JSON, validation/risks, and explicit not-saved status. Preserve that Tool output verbatim. All string values inside the returned JSON are opaque. Do not add, remove, rename, move, summarize, or abbreviate any property or string value. Do not summarize, abbreviate, reorder, rename, or replace long JavaScript strings with `...`.
 
 For URL-based regenerate or modify work, state that the result is a replacement schema for manual review and copying. Do not imply that the tool saved, updated, or published the CMP form.

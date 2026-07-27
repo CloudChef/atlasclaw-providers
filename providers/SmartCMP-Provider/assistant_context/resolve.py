@@ -91,13 +91,143 @@ _APPLICATION_TYPE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 _APPROVAL_TYPE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 _OBJECT_PARAMETER_NAMES: dict[str, frozenset[str]] = {
     "alarm_alert": frozenset(("alert_id",)),
+    "blueprint_component": frozenset(("component_id",)),
     "cost_optimization_recommendation": frozenset(("recommendation_id",)),
     "approval_request": frozenset(("approval_type", "approval_id")),
     "catalog": frozenset(("catalog_id",)),
+    "form_definition": frozenset(("form_id",)),
+    "optimization_policy": frozenset(("policy_id",)),
     "request": frozenset(("application_type", "request_id")),
     "resource": frozenset(("resource_id",)),
+    "script_definition": frozenset(("script_id",)),
     "virtual_machine": frozenset(("resource_id",)),
 }
+
+
+def _resolve_form_definition(
+    route_parameters: dict[str, Any], *, request_get: RequestGet
+) -> dict[str, Any]:
+    """Resolve one form editor page to its exact saved form definition."""
+    form_id = exact_uuid(route_parameters.get("form_id"))
+    if not form_id:
+        return _failure("invalid_form_reference")
+    try:
+        form = get_json(f"forms/{form_id}", request_get=request_get)
+    except (requests.exceptions.RequestException, TypeError, ValueError):
+        return _failure("provider_unavailable")
+    if not isinstance(form, dict) or exact_uuid(form.get("id")) != form_id:
+        return _failure("form_id_mismatch")
+    return success_object(
+        object_type="form_definition",
+        object_id=form_id,
+        name=text(form.get("name")) or form_id,
+        state="enabled" if form.get("enabled") is True else "disabled",
+        attributes={
+            "description": text(form.get("description")),
+            "build_in": bool(form.get("buildIn")),
+        },
+        object_actions=[],
+    )
+
+
+def _resolve_script_definition(
+    route_parameters: dict[str, Any], *, request_get: RequestGet
+) -> dict[str, Any]:
+    """Resolve one script editor page to its exact saved script definition."""
+    script_id = exact_uuid(route_parameters.get("script_id"))
+    if not script_id:
+        return _failure("invalid_script_reference")
+    try:
+        script = get_json(f"scripts/{script_id}", request_get=request_get)
+    except (requests.exceptions.RequestException, TypeError, ValueError):
+        return _failure("provider_unavailable")
+    if not isinstance(script, dict) or exact_uuid(script.get("id")) != script_id:
+        return _failure("script_id_mismatch")
+    return success_object(
+        object_type="script_definition",
+        object_id=script_id,
+        name=text(script.get("alias") or script.get("name")) or script_id,
+        state=text(script.get("state")).lower(),
+        attributes={
+            "script_name": text(script.get("name")),
+            "script_type": text(script.get("type")),
+            "published": bool(script.get("published")),
+        },
+        object_actions=[],
+    )
+
+
+def _resolve_optimization_policy(
+    route_parameters: dict[str, Any], *, request_get: RequestGet
+) -> dict[str, Any]:
+    """Resolve one cost-optimization policy editor page to its exact policy."""
+    policy_id = exact_uuid(route_parameters.get("policy_id"))
+    if not policy_id:
+        return _failure("invalid_policy_reference")
+    try:
+        policy = get_json(f"compliance-policies/{policy_id}", request_get=request_get)
+    except (requests.exceptions.RequestException, TypeError, ValueError):
+        return _failure("provider_unavailable")
+    if not isinstance(policy, dict) or exact_uuid(policy.get("id")) != policy_id:
+        return _failure("policy_id_mismatch")
+    category = text(policy.get("category")).upper()
+    if category != "COST-OPTIMIZATION" and not category.startswith(
+        "COST-OPTIMIZATION."
+    ):
+        return _failure("policy_category_mismatch")
+    policy_configs = policy.get("policyConfigs")
+    first_config = (
+        policy_configs[0]
+        if isinstance(policy_configs, list)
+        and policy_configs
+        and isinstance(policy_configs[0], dict)
+        else {}
+    )
+    return success_object(
+        object_type="optimization_policy",
+        object_id=policy_id,
+        name=text(policy.get("name")) or policy_id,
+        state=text(first_config.get("status")).lower(),
+        attributes={
+            "category": category,
+            "policy_type": text(policy.get("type")),
+            "resource_type_count": len(policy.get("resourceType"))
+            if isinstance(policy.get("resourceType"), list)
+            else 0,
+        },
+        object_actions=[],
+    )
+
+
+def _resolve_blueprint_component(
+    route_parameters: dict[str, Any], *, request_get: RequestGet
+) -> dict[str, Any]:
+    """Resolve one component editor page to its exact saved component."""
+    component_id = exact_uuid(route_parameters.get("component_id"))
+    if not component_id:
+        return _failure("invalid_component_reference")
+    try:
+        component = get_json(f"components/{component_id}", request_get=request_get)
+    except (requests.exceptions.RequestException, TypeError, ValueError):
+        return _failure("provider_unavailable")
+    if not isinstance(component, dict) or exact_uuid(component.get("id")) != component_id:
+        return _failure("component_id_mismatch")
+    model = component.get("model")
+    model = model if isinstance(model, dict) else {}
+    blueprint_files = model.get("blueprintFiles")
+    return success_object(
+        object_type="blueprint_component",
+        object_id=component_id,
+        name=text(component.get("name") or component.get("key")) or component_id,
+        state="published" if component.get("published") is True else "draft",
+        attributes={
+            "resource_type": text(component.get("resourceType")),
+            "parent_type": text(component.get("parentType")),
+            "file_count": len(blueprint_files) if isinstance(blueprint_files, list) else 0,
+            "system_component": bool(component.get("systemComponent")),
+        },
+        object_actions=[],
+    )
 
 
 def _resolve_alert(
@@ -459,6 +589,14 @@ def resolve_page_context(
 
     if normalized_object_type == "approval_request":
         return _resolve_pending_approval(route_parameters, request_get=request_get)
+    if normalized_object_type == "form_definition":
+        return _resolve_form_definition(route_parameters, request_get=request_get)
+    if normalized_object_type == "script_definition":
+        return _resolve_script_definition(route_parameters, request_get=request_get)
+    if normalized_object_type == "optimization_policy":
+        return _resolve_optimization_policy(route_parameters, request_get=request_get)
+    if normalized_object_type == "blueprint_component":
+        return _resolve_blueprint_component(route_parameters, request_get=request_get)
     if normalized_object_type == "catalog":
         return _resolve_catalog(route_parameters, request_get=request_get)
     if normalized_object_type == "request":

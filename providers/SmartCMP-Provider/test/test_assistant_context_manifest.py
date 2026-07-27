@@ -32,6 +32,31 @@ def test_routes_match_context_to_existing_skills_with_one_provider_resolver() ->
         for route in routes
     ] == [
         (
+            "form-definition-edit",
+            "/main/service-model/forms/edit/{form_id}",
+            "smartcmp:form-designer",
+        ),
+        (
+            "form-definition-design",
+            "/main/service-model/forms/design/{form_id}",
+            "smartcmp:form-designer",
+        ),
+        (
+            "script-definition-edit",
+            "/main/model-design/scripts/edit/{script_id}",
+            "smartcmp:script-designer",
+        ),
+        (
+            "optimization-policy-edit",
+            "/main/measurement-billing/cost-optimization/optimization-policy/edit/{policy_id}",
+            "smartcmp:optimization-policy-designer",
+        ),
+        (
+            "blueprint-component-edit",
+            "/main/model-design/blueprint-components/edit/{component_id}",
+            "smartcmp:component-script-designer",
+        ),
+        (
             "alarm-alert-detail",
             "/main/alarm-activity-management/alarm-triggered/edit/{alert_id}",
             "smartcmp:alarm",
