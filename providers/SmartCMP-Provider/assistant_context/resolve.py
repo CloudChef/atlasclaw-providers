@@ -318,6 +318,7 @@ def _resolve_catalog(
             "description": text(catalog.get("description")),
             "source_key": text(catalog.get("sourceKey")),
             "category": text(catalog.get("category") or catalog.get("serviceCategory")),
+            "instructions": text(catalog.get("instructions")),
         },
         object_actions=build_catalog_object_actions(
             BASE_URL,
