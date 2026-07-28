@@ -11,4 +11,5 @@ Used endpoints:
 
 Auth:
 
-- Basic auth with `username` + `token` from `atlasclaw.json`.
+- Basic auth with `username` + `password` from AtlasClaw provider
+  configuration. For Atlassian Cloud, store the API token in `password`.

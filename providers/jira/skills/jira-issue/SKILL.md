@@ -20,19 +20,15 @@ use_when:
   - User asks about issue details by issue key
 
 avoid_when:
-  - User wants to search multiple issues (use jira-search skill)
-  - User wants bulk operations (use jira-bulk skill)
-  - User asks about worklogs or time tracking (use jira-time skill)
+  - User wants to search multiple issues
+  - User wants bulk operations
+  - User asks about worklogs or time tracking
 
 examples:
   - "Create a Jira issue for the login bug"
   - "Get details for PROJ-123"
   - "Update the priority of PROJ-456 to High"
   - "Delete issue PROJ-789"
-
-related:
-  - jira-search
-  - jira-bulk
 
 # === Tool Registration ===
 tool_create_name: "jira_issue_create"

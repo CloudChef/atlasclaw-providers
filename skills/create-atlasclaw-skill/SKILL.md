@@ -357,8 +357,8 @@ tool_create_entrypoint: "scripts/create_issue.py:handler"
 - Include commonly confused scenarios
 
 **Good avoid_when:**
-- "User wants to search multiple issues (use jira-search skill)"
-- "User wants bulk operations (use jira-bulk skill)"
+- "User wants to search multiple records; use a provider search skill if one is available"
+- "User wants bulk operations; use a provider bulk-operation skill if one is available"
 
 ### Examples
 - Provide concrete, realistic examples
