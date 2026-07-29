@@ -89,6 +89,7 @@ tool_approve_entrypoint: "../approval/scripts/approve.py"
 tool_approve_groups:
   - cmp
   - approval
+  - mutation
 tool_approve_capability_class: "provider:smartcmp"
 tool_approve_priority: 124
 tool_approve_result_mode: "llm"
@@ -118,6 +119,7 @@ tool_reject_entrypoint: "../approval/scripts/reject.py"
 tool_reject_groups:
   - cmp
   - approval
+  - mutation
 tool_reject_capability_class: "provider:smartcmp"
 tool_reject_priority: 126
 tool_reject_result_mode: "llm"

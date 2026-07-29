@@ -1,8 +1,9 @@
 ---
 name: "datasource"
-description: "Discovery skill. Browse SmartCMP reference data such as service catalogs, business groups, tenant/租户/部门/BU/项目 scopes, applications, OS templates, images, and generic resource details before submitting a request. Standalone business-group discovery belongs here; standalone resource-pool and resource browsing still use their dedicated skills."
+description: "Read-only discovery skill. Browse SmartCMP reference data such as service catalogs, business groups, tenant and project scopes, applications, OS templates, images, and generic resource details. Request, apply, create VM, or provisioning intent belongs to the request skill, whose request-projected aliases reuse the same logical-template and image scripts."
 provider_type: "smartcmp"
 instance_required: "true"
+routing_visibility: "internal"
 
 # === LLM Context Fields ===
 triggers:
@@ -98,7 +99,7 @@ tool_list_applications_parameters: |
     "required": ["business_group_id"]
   }
 tool_list_components_name: "smartcmp_list_components"
-tool_list_components_description: "List SmartCMP component metadata for a catalog source key such as resource.windows. Use sourceKey, not catalogId."
+tool_list_components_description: "List SmartCMP component metadata for a catalog source key such as resource.windows. Use sourceKey, not catalogId. Do not use this tool for logical templates, OS templates, or cloud images."
 tool_list_components_entrypoint: "../shared/scripts/list_components.py"
 tool_list_components_groups:
   - cmp
@@ -119,20 +120,66 @@ tool_list_components_parameters: |
     },
     "required": ["source_key"]
   }
-tool_list_images_name: "smartcmp_list_images"
-tool_list_images_description: "List SmartCMP image options for a selected resource pool, logic template, and cloud entry type. Use this as shared read-only reference data when preparing VM requests."
-tool_list_images_entrypoint: "../shared/scripts/list_images.py"
-tool_list_images_groups:
+tool_query_logical_templates_name: "smartcmp_query_logical_templates"
+tool_query_logical_templates_description: "Query SmartCMP logical templates globally or filter them by resource pool, catalog node, OS type, or template name. Omit resource_bundle_id for a global query."
+tool_query_logical_templates_entrypoint: "scripts/list_logical_templates.py"
+tool_query_logical_templates_groups:
   - cmp
   - datasource
-tool_list_images_capability_class: "provider:smartcmp"
-tool_list_images_priority: 95
-tool_list_images_result_mode: "tool_only_ok"
-tool_list_images_cli_positional:
+tool_query_logical_templates_capability_class: "provider:smartcmp"
+tool_query_logical_templates_priority: 95
+tool_query_logical_templates_result_mode: "tool_only_ok"
+tool_query_logical_templates_use_when:
+  - "User asks to list logical templates or OS templates"
+tool_query_logical_templates_cli_positional:
+  - query
+tool_query_logical_templates_cli_flag_overrides:
+  resource_bundle_id: "--resource-bundle-id"
+  catalog_id: "--catalog-id"
+  node_template_name: "--node-template-name"
+  os_type: "--os-type"
+tool_query_logical_templates_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Optional logical-template-name filter."
+      },
+      "resource_bundle_id": {
+        "type": "string",
+        "description": "Optional resource pool ID. Omit for a global query."
+      },
+      "catalog_id": {
+        "type": "string",
+        "description": "Optional catalog UUID."
+      },
+      "node_template_name": {
+        "type": "string",
+        "description": "Optional catalog node template name."
+      },
+      "os_type": {
+        "type": "string",
+        "description": "Optional OS type, for example Linux or Windows."
+      }
+    }
+  }
+tool_query_images_name: "smartcmp_query_images"
+tool_query_images_description: "Query SmartCMP image options for a selected resource pool, logical template, and cloud entry type. A selected image id is a templateId, never a physicalTemplateId."
+tool_query_images_entrypoint: "scripts/list_images.py"
+tool_query_images_groups:
+  - cmp
+  - datasource
+tool_query_images_capability_class: "provider:smartcmp"
+tool_query_images_priority: 95
+tool_query_images_result_mode: "tool_only_ok"
+tool_query_images_use_when:
+  - "User asks to list cloud images for a selected resource pool and logical template"
+tool_query_images_cli_positional:
   - resource_bundle_id
   - logic_template_id
   - cloud_entry_type
-tool_list_images_parameters: |
+tool_query_images_parameters: |
   {
     "type": "object",
     "properties": {
@@ -146,7 +193,7 @@ tool_list_images_parameters: |
       },
       "cloud_entry_type": {
         "type": "string",
-        "description": "REQUIRED. Cloud entry type or shorthand, for example vsphere or yacmp:cloudentry:type:vsphere."
+        "description": "REQUIRED. Full cloudEntryTypeId from the selected resource pool, for example yacmp:cloudentry:type:vsphere."
       }
     },
     "required": ["resource_bundle_id", "logic_template_id", "cloud_entry_type"]
@@ -211,7 +258,8 @@ Most scripts are located in `scripts/`.
 | `scripts/list_resource.py` | List resource evidence by resource ID from `/nodes/{resourceId}/view` first, with legacy resource fallback | `<RESOURCE_ID> [RESOURCE_ID ...]` |
 | `../shared/scripts/list_applications.py` | List applications for a selected business group | `<BUSINESS_GROUP_ID>` |
 | `../shared/scripts/list_components.py` | List component metadata for a catalog `sourceKey` | `<SOURCE_KEY>` |
-| `../shared/scripts/list_images.py` | List image options for a selected resource pool and logic template | `<RESOURCE_BUNDLE_ID> <LOGIC_TEMPLATE_ID> <CLOUD_ENTRY_TYPE>` |
+| `scripts/list_logical_templates.py` | List logical templates globally or filter by resource pool, catalog node, OS type, or name | `[QUERY] [--resource-bundle-id ID] [--catalog-id ID] [--node-template-name NAME] [--os-type TYPE]` |
+| `scripts/list_images.py` | List image options for a selected resource pool and logical template | `<RESOURCE_BUNDLE_ID> <LOGIC_TEMPLATE_ID> <CLOUD_ENTRY_TYPE>` |
 
 `scripts/list_resource.py` emits `resource.data` as the canonical SmartCMP
 resource evidence pack and also emits a normalized `type + properties` view per
@@ -278,7 +326,21 @@ python scripts/list_services.py
 
 **Output:** Numbered list + `##CATALOG_META_START## ... ##CATALOG_META_END##`
 
-### Example 3: Show Resource Details
+### Example 3: List Logical Templates and Cloud Images
+
+```bash
+python scripts/list_logical_templates.py --os-type Linux
+python scripts/list_logical_templates.py --resource-bundle-id <resource_bundle_id> --os-type Linux
+python scripts/list_images.py <resource_bundle_id> <logic_template_id> <cloud_entry_type>
+```
+
+Omit `--resource-bundle-id` for a global logical-template directory query; pass
+it to show only templates supported by one resource pool. The request skill
+registers request-projected aliases backed by these same read-only scripts. A
+selected image `id` is a `templateId`; it must never be serialized as
+`physicalTemplateId`.
+
+### Example 4: Show Resource Details
 
 **User:** "Show resource details for ID X"
 

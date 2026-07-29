@@ -10,8 +10,8 @@ import sys
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-import requests
 import pytest
+import requests
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -1193,17 +1193,20 @@ def test_list_components_rejects_catalog_id_like_input(monkeypatch):
 
 def test_list_images_builds_dynamic_body_from_selected_resource_pool(monkeypatch):
     captured = {}
+    monkeypatch.setenv("INTERNAL_REQUEST_TRACE_ID", "trace-test")
 
     def fake_post(url, headers=None, json=None, verify=None, timeout=None):
         captured["url"] = url
         captured["headers"] = headers
         captured["json"] = json
         return FakeResponse(
-            {
-                "content": [
-                    {"id": "img-1", "nameZh": "CentOS 7"},
-                ]
-            }
+            [
+                {
+                    "id": "physical-template-1",
+                    "nameZh": "CentOS 7",
+                    "properties": {"extra": {"templateId": "img-1"}},
+                },
+            ]
         )
 
     stdout, stderr = run_script(
@@ -1211,11 +1214,13 @@ def test_list_images_builds_dynamic_body_from_selected_resource_pool(monkeypatch
         "list_images.py",
         ["rb-1", "lt-1", "yacmp:cloudentry:type:vsphere"],
         fake_post=fake_post,
+        scripts_dir=DATASOURCE_SCRIPTS_DIR,
     )
     payload = extract_meta(stderr, "IMAGE_META")
 
     assert captured["url"] == "https://cmp.example.com/platform-api/cloudprovider?action=queryCloudResource"
     assert captured["json"]["cloudResourceType"] == "yacmp:cloudentry:type:vsphere::images"
+    assert captured["json"]["limit"] == 500
     assert captured["json"]["queryProperties"] == {
         "resourceBundleId": "rb-1",
         "logicTemplateId": "lt-1",
@@ -1223,54 +1228,239 @@ def test_list_images_builds_dynamic_body_from_selected_resource_pool(monkeypatch
     }
     assert "instanceType" not in captured["json"]["queryProperties"]
     assert "Found 1 image(s):" in stdout
-    assert payload[0]["id"] == "img-1"
-    assert payload[0]["name"] == "CentOS 7"
+    assert payload["internal_request_trace_id"] == "trace-test"
+    assert payload["images"][0]["id"] == "img-1"
+    assert payload["images"][0]["templateId"] == "img-1"
+    assert payload["images"][0]["name"] == "CentOS 7"
 
 
-def test_list_images_normalizes_shorthand_platform_and_allows_overrides(monkeypatch):
-    captured = {}
-    monkeypatch.setenv("IMAGE_QUERY_LIMIT", "99")
-    monkeypatch.setenv("IMAGE_QUERY_PROPERTIES_JSON", json.dumps({"region": "cn-east-1"}))
-    monkeypatch.setenv(
-        "IMAGE_QUERY_BODY_JSON",
-        json.dumps(
-            {
-                "businessGroupId": "bg-1",
-                "queryProperties": {
-                    "providerScope": "tenant-default",
-                },
-            }
-        ),
+def test_list_images_requires_resource_pool_cloud_entry_type(monkeypatch):
+    exit_code, stdout, _stderr = run_script(
+        monkeypatch,
+        "list_images.py",
+        ["rb-2", "lt-2", "vsphere"],
+        scripts_dir=DATASOURCE_SCRIPTS_DIR,
+        expect_exit=True,
     )
 
+    assert exit_code == 1
+    assert "must come from the selected resource pool" in stdout
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_error"),
+    [
+        ("http", "Image query request failed"),
+        ("json", "Image query returned invalid JSON"),
+        ("shape", "Image query returned an unexpected JSON shape"),
+    ],
+)
+def test_list_images_reports_transport_and_json_failures(
+    monkeypatch, failure, expected_error
+):
     def fake_post(url, headers=None, json=None, verify=None, timeout=None):
-        captured["json"] = json
+        if failure == "http":
+            return FakeResponse({}, status_code=500)
+        if failure == "shape":
+            return FakeResponse({"content": []})
+        response = FakeResponse({})
+
+        def invalid_json():
+            raise ValueError("invalid JSON")
+
+        response.json = invalid_json
+        return response
+
+    exit_code, stdout, _stderr = run_script(
+        monkeypatch,
+        "list_images.py",
+        ["rb-1", "lt-1", "yacmp:cloudentry:type:vsphere"],
+        fake_post=fake_post,
+        scripts_dir=DATASOURCE_SCRIPTS_DIR,
+        expect_exit=True,
+    )
+
+    assert exit_code == 1
+    assert expected_error in stdout
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected_pool"),
+    [
+        (["--os-type", "Linux"], ""),
+        (
+            [
+                "--resource-bundle-id",
+                "rb-1",
+                "--catalog-id",
+                "catalog-linux",
+                "--node-template-name",
+                "Compute",
+                "--os-type",
+                "Linux",
+            ],
+            "rb-1",
+        ),
+    ],
+)
+def test_list_logical_templates_supports_global_and_resource_pool_filters(
+    monkeypatch, argv, expected_pool
+):
+    captured = {}
+    monkeypatch.setenv("INTERNAL_REQUEST_TRACE_ID", "trace-test")
+
+    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        captured["url"] = url
+        captured["params"] = params
         return FakeResponse(
-            {
-                "content": [
-                    {"id": "img-2", "name": "Ubuntu 22.04"},
-                ]
-            }
+            [
+                {
+                    "id": "lt-centos",
+                    "name": "Centos",
+                    "osType": "Linux",
+                    "patternImageName": "centos",
+                }
+            ]
         )
 
     stdout, stderr = run_script(
         monkeypatch,
-        "list_images.py",
-        ["rb-2", "lt-2", "vsphere"],
-        fake_post=fake_post,
+        "list_logical_templates.py",
+        argv,
+        fake_get=fake_get,
+        scripts_dir=DATASOURCE_SCRIPTS_DIR,
     )
-    payload = extract_meta(stderr, "IMAGE_META")
+    payload = extract_meta(stderr, "LOGICAL_TEMPLATE_META")
 
-    assert captured["json"]["cloudResourceType"] == "yacmp:cloudentry:type:vsphere::images"
-    assert captured["json"]["businessGroupId"] == "bg-1"
-    assert captured["json"]["limit"] == 99
-    assert captured["json"]["queryProperties"] == {
-        "resourceBundleId": "rb-2",
-        "logicTemplateId": "lt-2",
-        "queryResourceBundle": False,
-        "region": "cn-east-1",
-        "providerScope": "tenant-default",
+    assert captured["url"] == (
+        "https://cmp.example.com/platform-api/logic-templates/search"
+    )
+    assert captured["params"]["expand"] == ""
+    assert captured["params"]["resourceBundleId"] == expected_pool
+    assert captured["params"]["osType"] == "Linux"
+    assert payload["internal_request_trace_id"] == "trace-test"
+    assert [item["id"] for item in payload["logicalTemplates"]] == ["lt-centos"]
+    assert [item["logicTemplateId"] for item in payload["logicalTemplates"]] == [
+        "lt-centos"
+    ]
+    assert "Found 1 logical template(s):" in stdout
+
+
+def test_list_physical_templates_keeps_request_ids_without_static_template(
+    monkeypatch,
+):
+    captured = {}
+    monkeypatch.setenv("INTERNAL_REQUEST_TRACE_ID", "trace-test")
+
+    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        captured["url"] = url
+        captured["params"] = params
+        return FakeResponse(
+            [
+                {
+                    "id": "pt-centos",
+                    "alias": "CentOS 7",
+                    "default": True,
+                }
+            ]
+        )
+
+    stdout, stderr = run_script(
+        monkeypatch,
+        "list_physical_templates.py",
+        ["rb-1", "lt-centos"],
+        fake_get=fake_get,
+        scripts_dir=REQUEST_SCRIPTS_DIR,
+    )
+    payload = extract_meta(stderr, "PHYSICAL_TEMPLATE_META")
+
+    assert (captured["url"], captured["params"]) == (
+        "https://cmp.example.com/platform-api/logic-templates/"
+        "lt-centos/physical-templates",
+        {"resourceBundleId": "rb-1"},
+    )
+    assert payload["internal_request_trace_id"] == "trace-test"
+    assert payload["physicalTemplates"] == [
+        {
+            "index": 1,
+            "id": "pt-centos",
+            "physicalTemplateId": "pt-centos",
+            "logicTemplateId": "lt-centos",
+            "name": "CentOS 7",
+            "default": True,
+        }
+    ]
+    assert "templateId" not in payload["physicalTemplates"][0]
+    assert "Found 1 physical template(s):" in stdout
+
+
+def test_list_physical_templates_returns_empty_meta_for_branch_selection(monkeypatch):
+    monkeypatch.setenv("INTERNAL_REQUEST_TRACE_ID", "trace-test")
+    stdout, stderr = run_script(
+        monkeypatch,
+        "list_physical_templates.py",
+        ["rb-1", "lt-centos"],
+        fake_get=lambda *args, **kwargs: FakeResponse([]),
+        scripts_dir=REQUEST_SCRIPTS_DIR,
+    )
+
+    assert extract_meta(stderr, "PHYSICAL_TEMPLATE_META") == {
+        "internal_request_trace_id": "trace-test",
+        "physicalTemplates": [],
     }
-    assert "Found 1 image(s):" in stdout
-    assert payload[0]["id"] == "img-2"
-    assert payload[0]["name"] == "Ubuntu 22.04"
+    assert "Found 0 physical template(s)." in stdout
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected_pool"),
+    [
+        ([], ""),
+        (
+            [
+                "--resource-bundle-id",
+                "rb-1",
+                "--catalog-id",
+                "catalog-linux",
+                "--node-template-name",
+                "Compute",
+            ],
+            "rb-1",
+        ),
+    ],
+)
+def test_list_flavors_supports_global_and_resource_pool_filters(
+    monkeypatch, argv, expected_pool
+):
+    captured = {}
+
+    def fake_get(url, headers=None, params=None, verify=None, timeout=None):
+        captured["url"] = url
+        captured["params"] = params
+        return FakeResponse(
+            {
+                "content": [
+                    {
+                        "id": "flavor-tiny",
+                        "name": "Tiny",
+                        "specType": "FIXED",
+                        "flavors": [],
+                    }
+                ]
+            }
+        )
+
+    exit_code, stdout, _stderr = run_main_script(
+        monkeypatch,
+        REQUEST_SCRIPTS_DIR / "list_flavors.py",
+        argv,
+        fake_get=fake_get,
+    )
+    payload = extract_meta(stdout, "FLAVOR_META")
+
+    assert exit_code == 0
+    assert captured["url"] == "https://cmp.example.com/platform-api/flavors/provision"
+    assert captured["params"]["query"] == ""
+    assert captured["params"]["flavorType"] == "MACHINE"
+    assert captured["params"]["resourceBundleId"] == expected_pool
+    assert payload[0]["id"] == "flavor-tiny"
+    assert payload[0]["computeProfileId"] == "flavor-tiny"

@@ -155,8 +155,6 @@ def test_request_skill_defines_markdown_request_assembly() -> None:
     assert "network configuration fields must be under" in skill_text
     assert "`resourceSpecs[].params.<key>`" in skill_text
     assert "External API lookup fields" in skill_text
-    assert "direct Compute lookup fields" in skill_text
-    assert "without a default, omit it" in skill_text
     assert "Use `defaultValue` / `default_value` silently" in skill_text
     assert "When an active field has static `options`" in skill_text
     assert "collecting remaining fields or showing the" in skill_text

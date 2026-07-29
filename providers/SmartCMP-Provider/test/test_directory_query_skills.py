@@ -128,11 +128,13 @@ def test_datasource_skill_registers_shared_request_reference_tools():
     datasource_skill = (PROVIDER_ROOT / "skills" / "datasource" / "SKILL.md").read_text(
         encoding="utf-8"
     )
+    assert 'routing_visibility: "internal"' in datasource_skill
 
     expected_tools = {
         "smartcmp_list_applications": "../shared/scripts/list_applications.py",
         "smartcmp_list_components": "../shared/scripts/list_components.py",
-        "smartcmp_list_images": "../shared/scripts/list_images.py",
+        "smartcmp_query_logical_templates": "scripts/list_logical_templates.py",
+        "smartcmp_query_images": "scripts/list_images.py",
     }
     for tool_name, entrypoint in expected_tools.items():
         assert f'"{tool_name}"' in datasource_skill
@@ -144,6 +146,9 @@ def test_datasource_skill_registers_shared_request_reference_tools():
         line for line in provider_doc.splitlines() if line.startswith("| `request` |")
     )
     assert "list_components" not in request_row
+    assert "smartcmp_list_physical_templates" in request_row
+    assert "smartcmp_list_logical_templates" in request_row
+    assert "smartcmp_list_images" in request_row
 
 
 def test_list_all_resource_pools_supports_keyword_filter(monkeypatch):
