@@ -88,13 +88,17 @@ error. If both primary and fallback paths fail, the output must expose
 | "查看资源详情" | `scripts/list_resource.py <resourceId>` |
 | "查看应用" | `../shared/scripts/list_applications.py <businessGroupId>` |
 | "查看组件 / 模板元数据" | `../shared/scripts/list_components.py <sourceKey>` |
-| "查看镜像" | `../shared/scripts/list_images.py <resourceBundleId> <logicTemplateId> <cloudEntryType>` |
+| "List all logical or OS templates" | `scripts/list_logical_templates.py [name] [--os-type Linux|Windows]` |
+| "List logical templates for a resource pool" | `scripts/list_logical_templates.py --resource-bundle-id <resourceBundleId> [--os-type Linux|Windows]` |
+| "List images" | `scripts/list_images.py <resourceBundleId> <logicTemplateId> <cloudEntryType>` |
 
 ---
 
 ## Notes
 
 - All scripts are **read-only** — no data is modified.
-- Scripts are **shared** with the request skill.
+- Logical-template and image scripts are read-only. The request skill registers
+  request-projected aliases backed by the same scripts. An image ID is always
+  serialized as `templateId`, never as `physicalTemplateId`.
 - Standalone business-group scope discovery is owned by `datasource`.
 - Always parse `##BLOCK##` markers silently, do NOT display raw JSON to user.

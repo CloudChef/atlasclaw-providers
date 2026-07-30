@@ -1,29 +1,34 @@
 # -*- coding: utf-8 -*-
 # Copyright 2026  Qianyun, Inc., www.cloudchef.io, All rights reserved.
 
-"""List available compute flavors (specifications) from SmartCMP.
+"""List SmartCMP compute flavors with optional provisioning filters.
 
 Usage:
-  python list_flavors.py [--query QUERY] [--page PAGE] [--size SIZE]
+  python list_flavors.py [--query QUERY] [--resource-bundle-id ID]
+      [--catalog-id ID] [--node-template-name NAME]
 
 Arguments:
-  --query, -q   Optional search keyword to filter flavors
-  --page, -p    Page number (default: 1)
-  --size, -s    Page size (default: 100)
+  --query, -q            Optional search keyword.
+  --resource-bundle-id  Optional resource pool filter.
+  --catalog-id          Optional catalog filter.
+  --node-template-name  Optional catalog node filter.
 
 Output:
-  - Flavor list with id, name, and spec details
+  - Numbered compute-flavor list
+  - ##FLAVOR_META_START## ... ##FLAVOR_META_END##
 
 Environment:
   CMP_URL    - Base URL (IP, hostname, or full path; auto-normalized)
   CMP_COOKIE - Session cookie string
 
 API Reference:
-  GET /flavors?query&page=1&size=100&queryValue=&sort=createdDate,desc
+  GET /flavors/provision?query&flavorType=MACHINE
 """
-import sys
-import json
+from __future__ import annotations
+
 import argparse
+import json
+import sys
 
 import requests
 
@@ -35,34 +40,73 @@ except ImportError:
     from _common import request_timeout, render_markdown_table, require_config
 
 
-def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description='List available compute flavors from SmartCMP')
-    parser.add_argument('--query', '-q', default='', help='Optional search keyword')
-    parser.add_argument('--page', '-p', type=int, default=1, help='Page number (default: 1)')
-    parser.add_argument('--size', '-s', type=int, default=100, help='Page size (default: 100)')
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse compute-flavor lookup arguments.
+
+    Args:
+        argv: Optional command-line arguments.
+
+    Returns:
+        Parsed argument namespace.
+    """
+    parser = argparse.ArgumentParser(description="List available compute flavors from SmartCMP")
+    parser.add_argument("--query", "-q", default="", help="Optional search keyword")
+    parser.add_argument(
+        "--resource-bundle-id",
+        default="",
+        help="Optional resource pool ID",
+    )
+    parser.add_argument("--catalog-id", default="", help="Optional catalog ID")
+    parser.add_argument(
+        "--node-template-name",
+        default="",
+        help="Optional catalog node template name",
+    )
+    parser.add_argument("--page", "-p", type=int, default=1, help="Page number (default: 1)")
+    parser.add_argument("--size", "-s", type=int, default=100, help="Page size (default: 100)")
     return parser.parse_args(argv)
 
 
-def fetch_flavors(*, base_url, headers, query="", page=1, size=100):
+def fetch_flavors(
+    *,
+    base_url: str,
+    headers: dict,
+    query: str = "",
+    resource_bundle_id: str = "",
+    catalog_id: str = "",
+    node_template_name: str = "",
+    page: int = 1,
+    size: int = 100,
+) -> list[dict]:
     """Fetch available compute flavors from SmartCMP API.
 
     Args:
         base_url: SmartCMP platform-api base URL
         headers: HTTP headers with auth token
         query: Optional search keyword
+        resource_bundle_id: Optional resource pool ID
+        catalog_id: Optional catalog ID
+        node_template_name: Optional node template name
         page: Page number
         size: Page size
 
     Returns:
         List of flavor objects
+
+    Raises:
+        RuntimeError: If SmartCMP returns an unsuccessful response or violates
+            the paged flavor response contract.
     """
-    url = f"{base_url}/flavors"
+    url = f"{base_url}/flavors/provision"
     params = {
         "query": "",
         "page": page,
         "size": size,
         "queryValue": query,
-        "sort": "createdDate,desc",
+        "flavorType": "MACHINE",
+        "resourceBundleId": resource_bundle_id,
+        "catalogId": catalog_id,
+        "nodeTemplateName": node_template_name,
     }
 
     resp = requests.get(url, headers=headers, params=params, verify=False, timeout=request_timeout())
@@ -74,18 +118,23 @@ def fetch_flavors(*, base_url, headers, query="", page=1, size=100):
     except ValueError as exc:
         raise RuntimeError("Response did not contain valid JSON.") from exc
 
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict):
-        for key in ("content", "items", "result", "data"):
-            value = data.get(key)
-            if isinstance(value, list):
-                return value
-    return []
+    if not isinstance(data, dict) or not isinstance(data.get("content"), list):
+        raise RuntimeError("Flavor query returned an unexpected JSON shape.")
+    flavors = data["content"]
+    if any(not isinstance(item, dict) for item in flavors):
+        raise RuntimeError("Flavor query returned a non-object item.")
+    return flavors
 
 
-def format_flavor_summary(flavor):
-    """Format a single flavor for display."""
+def format_flavor_summary(flavor: dict) -> str:
+    """Format a single flavor for user-facing display.
+
+    Args:
+        flavor: SmartCMP flavor record.
+
+    Returns:
+        Compact display summary.
+    """
     fid = flavor.get("id", "")
     name = flavor.get("name", "")
     spec_type = flavor.get("specType", "")
@@ -105,7 +154,28 @@ def format_flavor_summary(flavor):
     return f"{name} (id={fid}, type={spec_type}) [{spec_str}]"
 
 
-def main(argv=None) -> int:
+def _meta_item(index: int, flavor: dict) -> dict:
+    """Build compact machine-readable flavor metadata."""
+    flavor_id = flavor.get("id", "")
+    return {
+        "index": index,
+        "id": flavor_id,
+        "computeProfileId": flavor_id,
+        "name": flavor.get("name") or flavor_id or "N/A",
+        "specType": flavor.get("specType", ""),
+        "flavors": flavor.get("flavors", []),
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the compute-flavor lookup command.
+
+    Args:
+        argv: Optional command-line arguments.
+
+    Returns:
+        Process exit code.
+    """
     args = parse_args(argv)
     base_url, _, headers, _ = require_config()
 
@@ -114,6 +184,9 @@ def main(argv=None) -> int:
             base_url=base_url,
             headers=headers,
             query=args.query,
+            resource_bundle_id=args.resource_bundle_id,
+            catalog_id=args.catalog_id,
+            node_template_name=args.node_template_name,
             page=args.page,
             size=args.size,
         )
@@ -125,17 +198,21 @@ def main(argv=None) -> int:
         print("No flavors found.")
         return 0
 
+    meta = [_meta_item(index, flavor) for index, flavor in enumerate(flavors, start=1)]
     print(
         render_markdown_table(
             f"Found {len(flavors)} flavor(s):",
             ["#", "Flavor"],
-            [[index, format_flavor_summary(flavor)] for index, flavor in enumerate(flavors, start=1)],
+            [
+                [item["index"], format_flavor_summary(flavor)]
+                for item, flavor in zip(meta, flavors)
+            ],
         )
     )
 
     print()
     print("##FLAVOR_META_START##")
-    print(json.dumps(flavors, ensure_ascii=False))
+    print(json.dumps(meta, ensure_ascii=False, separators=(",", ":")))
     print("##FLAVOR_META_END##")
 
     return 0

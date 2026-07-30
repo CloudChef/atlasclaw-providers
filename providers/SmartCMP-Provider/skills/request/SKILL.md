@@ -1,6 +1,6 @@
 ---
 name: "request"
-description: "Self-service request skill. Request cloud resources, application environments, ticket/work order services, or check submitted request status by Request ID. Keywords: request, provision, deploy, create VM, apply resources, submit ticket, request status, 申请资源, 创建虚拟机, 提交工单, 申请状态."
+description: "Self-service request skill. Start and continue cloud-resource requests, including numbered or named follow-up selections that require the next live SmartCMP lookup. VM catalogs select a resource pool, flavor, logical OS template, and either a physical template or cloud image. Also handles application environments, ticket and work-order services, and submitted request status."
 provider_type: "smartcmp"
 instance_required: "true"
 workflow_role: "request_parent"
@@ -36,6 +36,8 @@ use_when:
   - User wants to submit a self-service request through the service catalog
   - User wants to create a ticket or work order
   - User already knows the service they want and is ready to provide request parameters
+  - User is provisioning from a catalog that requires a logical template, physical template, or cloud image
+  - User replies with a number or name to continue an active request choice; continue with the next required live SmartCMP lookup
   - User wants multiple instances of the same resource type under one service request with the same parameters
   - User wants to check the status of a submitted SmartCMP request by Request ID
   - User asks whether their submitted request has been approved
@@ -103,11 +105,12 @@ tool_catalog_detail_parameters: |
     "required": ["catalog_id"]
   }
 tool_submit_name: "smartcmp_submit_request"
-tool_submit_description: "Submit resource request to SmartCMP. RULES: (1) NEVER claim submitted without calling this tool. (2) Show JSON preview and wait for user confirmation BEFORE calling. (3) json_body is REQUIRED. (4) catalogId MUST be UUID from catalog metadata id field. (5) Same-type multi-instance requests must use the selected catalog's declared count field, or fallback top-level quantity when no such field exists, without duplicating resourceSpecs; per-instance differences belong in request-decomposition-agent. See Field Placement table in skill body for exact structure rules."
+tool_submit_description: "Submit resource request to SmartCMP. RULES: (1) NEVER claim submitted without calling this tool. (2) Reuse resolved workflow lookup evidence, build the preview from the exact generated instruction contract, mask credential secrets, and wait for user confirmation BEFORE calling. (3) json_body is REQUIRED. (4) catalogId MUST be UUID from catalog metadata id field. (5) Same-type multi-instance requests must use the selected catalog's declared count field, or fallback top-level quantity when no such field exists, without duplicating resourceSpecs; per-instance differences belong in request-decomposition-agent. See Field Placement table in skill body for exact structure rules."
 tool_submit_entrypoint: "scripts/submit.py"
 tool_submit_groups:
   - cmp
   - request
+  - mutation
 tool_submit_capability_class: "provider:smartcmp"
 tool_submit_priority: 160
 tool_submit_result_mode: "tool_only_ok"
@@ -185,7 +188,7 @@ tool_facets_parameters: |
     "required": ["business_group_id"]
   }
 tool_resource_bundles_name: "smartcmp_list_resource_bundles"
-tool_resource_bundles_description: "List request-flow resource pools from SmartCMP. Use only when generated Markdown declares an active resourceBundleId field without a default and no active resourceBundleTags field. Requires selected business_group_id, component_type from generated Markdown catalog/component metadata, and node_type from resourceSpecs[].type. Fixed API filters: strategy=RB_POLICY_STATIC, enabled=true, readOnly=false."
+tool_resource_bundles_description: "List request-flow resource pools from SmartCMP. Use when generated Markdown declares an active resourceBundleId field without a default and no active resourceBundleTags field. Requires selected business_group_id, component_type from generated Markdown catalog/component metadata, and node_type from resourceSpecs[].type. Fixed API filters: strategy=RB_POLICY_STATIC, enabled=true, readOnly=false. If resourceBundleId has ask:true, present the returned names and wait for the user's selection even when only one result exists. Ask the user to identify the resource-pool field and selected number when replying; never suggest that a bare number is sufficient."
 tool_resource_bundles_entrypoint: "scripts/list_resource_bundles.py"
 tool_resource_bundles_group: "cmp"
 tool_resource_bundles_capability_class: "provider:smartcmp"
@@ -239,11 +242,18 @@ tool_bgs_parameters: |
     "required": ["catalog_id"]
   }
 tool_flavors_name: "smartcmp_list_flavors"
-tool_flavors_description: "List available compute flavors (specifications) from SmartCMP. Call this to get available compute profiles. Match the user's spec (e.g. '2c4g') against the returned flavor name field. Use the matched flavor's name for computeProfileName or id for computeProfileId, depending on the catalog parameter key."
+tool_flavors_description: "List requestable MACHINE compute flavors from SmartCMP. Pass resource_bundle_id after resource-pool selection so SmartCMP filters by pool; also pass catalog_id and node_template_name when known so catalog alternatives apply. node_template_name is the literal resourceSpecs[].node value such as Compute, never resourceSpecs[].type. Omit resource_bundle_id only for an intentional global flavor query. Match the user's spec (for example 2c4g) against the returned name and use the selected id as computeProfileId. If computeProfileId has ask:true, show the filtered flavor names and ask the user to identify the flavor field and selected number instead of replying with a bare number or typed specification."
 tool_flavors_entrypoint: "scripts/list_flavors.py"
 tool_flavors_group: "cmp"
 tool_flavors_capability_class: "provider:smartcmp"
 tool_flavors_priority: 108
+tool_flavors_use_when:
+  - "Generated Markdown declares an active computeProfileId without a default, after resource pool selection and before any template lookup"
+tool_flavors_cli_flag_overrides:
+  query: "--query"
+  resource_bundle_id: "--resource-bundle-id"
+  catalog_id: "--catalog-id"
+  node_template_name: "--node-template-name"
 tool_flavors_parameters: |
   {
     "type": "object",
@@ -251,8 +261,134 @@ tool_flavors_parameters: |
       "query": {
         "type": "string",
         "description": "Optional search keyword to filter flavors"
+      },
+      "resource_bundle_id": {
+        "type": "string",
+        "description": "Optional selected resource pool ID. Provide it during request provisioning; omit it only for a global flavor query."
+      },
+      "catalog_id": {
+        "type": "string",
+        "description": "Optional selected catalog UUID."
+      },
+      "node_template_name": {
+        "type": "string",
+        "description": "Optional literal resourceSpecs[].node, for example Compute; never pass resourceSpecs[].type."
       }
     }
+  }
+tool_logical_templates_name: "smartcmp_list_logical_templates"
+tool_logical_templates_description: "List logical OS templates for a SmartCMP request. Call only after resource-pool and compute-profile selection when generated Markdown declares logicTemplateId. Pass resource_bundle_id and the required catalog OS family as os_type; also pass catalog_id and node_template_name when known. Use the selected id as logicTemplateId. The request-projected tool always presents the names as an explicit selection boundary, even when one result exists or generated ask is false."
+tool_logical_templates_entrypoint: "../datasource/scripts/list_logical_templates.py"
+tool_logical_templates_groups:
+  - cmp
+  - request
+tool_logical_templates_capability_class: "provider:smartcmp"
+tool_logical_templates_priority: 112
+tool_logical_templates_result_mode: "llm"
+tool_logical_templates_use_when:
+  - "Generated Markdown declares an active logicTemplateId without a default, after resource pool and compute-profile selection"
+tool_logical_templates_avoid_when:
+  - "An active computeProfileId without a default has not been selected yet"
+tool_logical_templates_cli_positional:
+  - query
+tool_logical_templates_cli_flag_overrides:
+  resource_bundle_id: "--resource-bundle-id"
+  catalog_id: "--catalog-id"
+  node_template_name: "--node-template-name"
+  os_type: "--os-type"
+tool_logical_templates_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Optional logical-template-name filter."
+      },
+      "resource_bundle_id": {
+        "type": "string",
+        "description": "REQUIRED during provisioning. Selected resource pool ID."
+      },
+      "catalog_id": {
+        "type": "string",
+        "description": "Optional selected catalog UUID."
+      },
+      "node_template_name": {
+        "type": "string",
+        "description": "Optional resourceSpecs[].node."
+      },
+      "os_type": {
+        "type": "string",
+        "description": "REQUIRED. Catalog OS family inferred from the selected catalog and user request, for example Linux or Windows."
+      }
+    },
+    "required": ["resource_bundle_id", "os_type"]
+  }
+tool_physical_templates_name: "smartcmp_list_physical_templates"
+tool_physical_templates_description: "List physical templates available to the selected SmartCMP resource pool and logical template. Use only when generated Markdown declares physicalTemplateId. Each result retains its logicTemplateId; use the selected physicalTemplateId together with logicTemplateId and omit templateId. If physicalTemplateId has ask:true, present names and ask the user to identify the physical-template field and selected number even when one result exists."
+tool_physical_templates_entrypoint: "scripts/list_physical_templates.py"
+tool_physical_templates_groups:
+  - cmp
+  - request
+tool_physical_templates_capability_class: "provider:smartcmp"
+tool_physical_templates_priority: 114
+tool_physical_templates_result_mode: "silent_ok"
+tool_physical_templates_use_when:
+  - "Generated Markdown declares an active physicalTemplateId without a default, after resource pool and logicTemplateId selection"
+tool_physical_templates_avoid_when:
+  - "An active computeProfileId or logicTemplateId without a default has not been selected yet"
+tool_physical_templates_cli_positional:
+  - resource_bundle_id
+  - logic_template_id
+tool_physical_templates_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "resource_bundle_id": {
+        "type": "string",
+        "description": "REQUIRED. Selected resource pool ID."
+      },
+      "logic_template_id": {
+        "type": "string",
+        "description": "REQUIRED. Selected logicTemplateId from the resource-pool-filtered logical-template lookup."
+      }
+    },
+    "required": ["resource_bundle_id", "logic_template_id"]
+  }
+tool_images_name: "smartcmp_list_images"
+tool_images_description: "List cloud images for a SmartCMP request. Call after resource-pool and logical-template selection only when generated Markdown declares templateId. Use the selected image id as templateId, never as physicalTemplateId. If templateId has ask:true, present image names and ask the user to identify the image field and selected number even when one result exists."
+tool_images_entrypoint: "../datasource/scripts/list_images.py"
+tool_images_groups:
+  - cmp
+  - request
+tool_images_capability_class: "provider:smartcmp"
+tool_images_priority: 113
+tool_images_result_mode: "llm"
+tool_images_use_when:
+  - "Generated Markdown declares an active templateId without a default, after resource pool and logicTemplateId selection"
+tool_images_avoid_when:
+  - "An active computeProfileId or logicTemplateId without a default has not been selected yet"
+tool_images_cli_positional:
+  - resource_bundle_id
+  - logic_template_id
+  - cloud_entry_type
+tool_images_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "resource_bundle_id": {
+        "type": "string",
+        "description": "REQUIRED. Selected resource pool ID."
+      },
+      "logic_template_id": {
+        "type": "string",
+        "description": "REQUIRED. Selected logicTemplateId."
+      },
+      "cloud_entry_type": {
+        "type": "string",
+        "description": "REQUIRED. Selected resource pool cloudEntryTypeId."
+      }
+    },
+    "required": ["resource_bundle_id", "logic_template_id", "cloud_entry_type"]
   }
 ---
 
@@ -262,7 +398,10 @@ Submit cloud resource, application environment, or ticket/work order requests th
 
 ## Flow
 
-Eight tools exist: `smartcmp_list_services`, `smartcmp_get_request_catalog`, `smartcmp_list_available_bgs`, `smartcmp_list_flavors`, `smartcmp_list_facets`, `smartcmp_list_resource_bundles`, `smartcmp_submit_request`, and `smartcmp_get_request_status`.
+The request workflow owns request-projected
+`smartcmp_list_logical_templates` and `smartcmp_list_images` tools. They reuse
+the same read-only scripts as the datasource global-query tools, but remain
+visible when AtlasClaw projects only the `cmp.request` capability.
 
 ### Multi-resource routing boundary
 
@@ -374,7 +513,8 @@ Status semantics:
    `instructions.topLevelFields`.
 6. Ask only for active required fields with no default, plus fields explicitly
    marked `ask: true`. Defaults are used silently.
-7. Show a JSON preview and ask for confirmation.
+7. Reuse resolved workflow lookup evidence, show a schema-exact JSON preview
+   with credential secrets masked, ask for confirmation, and stop.
 8. After the user confirms, call `smartcmp_submit_request` with the preview JSON.
 
 Steps 1 through 3 are mandatory for every new request. Never ask the user to type a
@@ -399,8 +539,36 @@ business group before calling `smartcmp_list_available_bgs`.
 
 ### Tool sequencing
 
-- One lookup tool call per turn.
-- Mandatory catalog discovery is the exception: when the initial list has one
+- Resolve request lookup fields in dependency order:
+  `resourceBundleId` -> compute profile -> `logicTemplateId` ->
+  `physicalTemplateId` or `templateId`. Do not call tools for two unresolved
+  `ask: true` fields in one model response.
+- After `resourceBundleId` is selected, `smartcmp_list_flavors` is the only
+  valid next lookup while an active `computeProfileId` remains unresolved. Do
+  not call any logical-template, physical-template, or image lookup first.
+- For each active generated field with `ask: true`, call only that field's
+  lookup, present only its current choices, ask the user to select one, and
+  stop. Do not ask for later lookup fields, request name, or credentials in the
+  same reply. A numbered or named answer paired with the pending field meaning
+  requires the next live lookup.
+- Phrase every selection reply with the pending field meaning so AtlasClaw
+  routes the follow-up back to this live workflow. Ask the user to identify the
+  resource pool, flavor, logical template, physical template, or image field
+  together with the selected number and intent to continue. Do not tell the
+  user that a bare number alone is sufficient.
+- Stop after a lookup whenever the user must choose among multiple unresolved
+  options. Ask at most one concise question and wait for the answer.
+- When all required choices already have one unambiguous match from the user's
+  wording, or a single returned option for a field that is not marked
+  `ask: true`, noninteractive request lookups may
+  chain in dependency order in the same turn. This includes
+  `smartcmp_list_resource_bundles`, `smartcmp_list_flavors`,
+  `smartcmp_list_physical_templates`, and `smartcmp_list_images`. A field marked
+  `ask: true` must show its choices and wait even when the lookup returns one
+  option. The request-projected `smartcmp_list_logical_templates` is a
+  deliberate stricter boundary: it always ends the turn with a displayed list
+  so logical-template IDs cannot be silently confused with flavor or image IDs.
+- During mandatory catalog discovery, when the initial list has one
   clear automatic match, `smartcmp_list_services` may be followed by
   `smartcmp_get_request_catalog` and then `smartcmp_list_available_bgs` in the
   same user turn. When the user must choose a catalog, stop after the list and
@@ -408,8 +576,9 @@ business group before calling `smartcmp_list_available_bgs`.
 - `smartcmp_get_request_catalog` is a schema-loading step, not a user-facing
   lookup. It may be followed by `smartcmp_list_available_bgs` in the same turn
   so catalog selection does not create an empty conversational round trip.
-- After a lookup tool result, summarize the resolved result in natural language
-  and ask at most one next question.
+- After a lookup result that needs user input, summarize the selectable result
+  in natural language and ask at most one next question. When no user choice is
+  needed, preserve the compact lookup evidence and continue the resolver chain.
 - Do not paste raw tool output, `_internal` metadata, UUID dumps, or JSON meta
   blocks into the reply.
 - If the previous assistant message asked the user to choose a business group
@@ -420,10 +589,9 @@ business group before calling `smartcmp_list_available_bgs`.
   refresh the business group list, resolve the user's selection against that
   result, then continue with generated Markdown, Compute fallback, or the JSON
   preview.
-- During request building, do not call datasource-only tools such as
-  `smartcmp_list_components`, `smartcmp_list_applications`, or
-  `smartcmp_list_images`. The selected catalog metadata and generated Markdown
-  are the request contract.
+- During request building, do not call unrelated discovery tools such as
+  `smartcmp_list_components` or `smartcmp_list_applications`. Use the
+  request-projected logical-template and image tools declared above.
 
 ## User Response Language
 
@@ -504,7 +672,10 @@ scope.
   invent fields that are not declared in `# Request Parameter Instructions`."
   Treat the body as generic request guidance only.
 - If `topLevelFields.name.ask: true` and the user has not supplied a name, ask
-  for the request/resource name. Do not auto-generate it.
+  for the request/resource name. Do not auto-generate it. For a resource request
+  with unresolved live lookup fields, defer this question until the generated
+  `resourceSpecs[]` lookup sequence is complete; in particular, never ask for
+  `name` before an unresolved `resourceBundleId`.
 - Do not include `userLoginId`; `submit.py` injects it.
 - Put root request fields declared in `instructions.params.<key>` under the
   top-level JSON object `params.<key>`. These are catalog form fields from
@@ -532,6 +703,7 @@ scope.
   active value directly on the same `resourceSpecs[]` item as `<key>`. These
   fields are for special resources such as Compute/VM, where SmartCMP expects
   values like `computeProfileId`, `flavorId`, `logicTemplateId`, `templateId`,
+  `physicalTemplateId`,
   `credentialUser`, `credentialPassword`, `networkId`, `securityGroupIds`, or
   `systemDisk` at `resourceSpecs[]` level rather than under `params`.
 - Preserve each direct field's declared type from Markdown. In particular,
@@ -581,10 +753,28 @@ scope.
   the resource spec, such as Compute `networkId` and `securityGroupIds`.
 - Put `params.<key>` values under `resourceSpecs[].params.<key>`.
 - External API lookup fields such as VPC, VSwitch, subnet, security group, and
-  table-async selections, including direct Compute lookup fields, should appear
-  in generated Markdown only when they already have a non-empty default. If old
-  Markdown still declares one of these lookup fields without a default, omit it
-  and do not ask the user for an internal id.
+  table-async selections should appear in generated Markdown only when they
+  already have a non-empty default. If old Markdown still declares one of
+  these lookup fields without a default, omit it and do not ask the user for an
+  internal id.
+- `logicTemplateId` is the independent logical OS-template field. When it is
+  active without a default, query logical templates with the selected
+  `resourceBundleId` plus catalog/node/OS filters and serialize the selected
+  logical-template `id` as `resourceSpecs[].logicTemplateId`.
+- `physicalTemplateId` and `templateId` are alternative concrete-template
+  branches, not aliases. Follow only fields declared by generated Markdown:
+  select a physical template for an active `physicalTemplateId`, or select a
+  cloud image for an active `templateId`.
+- The physical branch serializes `logicTemplateId + physicalTemplateId` and
+  omits `templateId`. The image branch serializes
+  `logicTemplateId + templateId` and omits `physicalTemplateId`. Never
+  serialize both concrete-template fields and never put a cloud-image ID in
+  `physicalTemplateId`.
+- When generated Markdown declares both concrete-template branches, prefer a
+  configured physical template. If none exists, use the image branch only when
+  `templateId` is also active. When only `physicalTemplateId` is active and no
+  physical template exists, stop and report the catalog/resource-pool
+  configuration issue.
 - Use `defaultValue` / `default_value` silently. Do not ask the user whether to
   modify a default.
 - When an active field has static `options`, always show the option labels and
@@ -715,8 +905,37 @@ for a value that cannot be taken from the user or a default.
 - `smartcmp_list_flavors`: use only when generated Markdown declares an active
   required compute-profile field without a default and the value must be chosen
   from SmartCMP flavor data, or when the selected catalog is a no-Markdown
-  Compute fallback and the user provided a spec such as `2c4g`.
-- Do not call those tools for fields that already have active defaults.
+  Compute fallback and the user provided a spec such as `2c4g`. During normal
+  provisioning, pass the selected `resource_bundle_id`, selected `catalog_id`,
+  and `resourceSpecs[].node`; omit the pool only for an intentional global
+  query. If the compute-profile field has `ask: true`, show the filtered choices
+  and wait even when only one is returned.
+- `smartcmp_list_logical_templates`: use after an explicit
+  `resourceBundleId` is selected when generated Markdown declares an active
+  `logicTemplateId` without a default. Pass the resource pool ID, catalog ID,
+  resourceSpecs node, and catalog OS type when known. Omit the resource pool
+  only for an intentional global directory query. Use the selected `id` as
+  `logicTemplateId`.
+- `smartcmp_list_physical_templates`: use only after `logicTemplateId` is
+  resolved and generated Markdown declares an active `physicalTemplateId`
+  without a default. Pass both selected IDs. Each returned choice retains the
+  same `logicTemplateId`; use its `physicalTemplateId` in the physical branch.
+  If no physical template exists and `templateId` is active, continue with the
+  image lookup. Otherwise stop and report that the selected logical template
+  and resource pool have no requestable physical template.
+- `smartcmp_list_images`: use only after `logicTemplateId` is resolved and
+  generated Markdown declares an active `templateId` without a default. Pass
+  the selected resource pool ID and logical-template ID. Use
+  `cloudEntryTypeId` from the selected resource-pool metadata as
+  `cloud_entry_type`. If that metadata is absent, stop and report the invalid
+  resource-pool data. Use the selected image `id` as `templateId`.
+- Do not call request lookup tools for fields that already have active,
+  usable defaults.
+
+Never ask the user to type `logicTemplateId`, `templateId`,
+`physicalTemplateId`, or any template UUID. Present logical-template,
+physical-template, and image display names while keeping their IDs as internal
+lookup evidence. Serialize the exact branch declared by generated Markdown.
 
 ### Facet lookup result handling
 
@@ -765,9 +984,10 @@ Compute fallback sequence:
 2. Call `smartcmp_list_facets` with the selected `businessGroupId` to choose
    resource pool tags. Use returned `facet.key` and option key, not display
    labels.
-3. Call `smartcmp_list_flavors` when the user supplied a spec such as `2c4g`,
-   or ask the user to choose a flavor if no unambiguous match exists. Use the
-   flavor `id` as `computeProfileId`.
+3. Call `smartcmp_list_flavors` when the user supplied a spec such as `2c4g`
+   only if the active workflow does not already contain an unambiguous flavor
+   match. Ask the user to choose a flavor if no unambiguous match exists. Use
+   the flavor `id` as `computeProfileId`.
 4. Build one `resourceSpecs[]` item using selected catalog `node` and `type`
    when present.
 

@@ -304,8 +304,8 @@ CMP_URL=https://cmp.example.com
 |-------|------|-------------|----------------|
 | `resource-pool` | Directory Query | Standalone listing of all resource pools from the CMP UI directory endpoint | `smartcmp_list_all_resource_pools` |
 | `resource` | Directory Query + Day2 Operation | Standalone listing of all resources or all cloud hosts, one-host detail analysis via `PATCH /nodes/{id}/view`, current-user executable operation discovery, and no-parameter resource operation execution | `smartcmp_list_all_resource`, `smartcmp_resource_detail`, `smartcmp_list_resource_operations`, `smartcmp_operate_resource` |
-| `datasource` | Data Query | Read-only reference data queries, standalone business-group scope discovery, request reference lookups, and resource lookup by ID for service discovery and analysis workflows | `smartcmp_list_all_business_groups`, `smartcmp_list_applications`, `smartcmp_list_components`, `smartcmp_list_images`, `list_services`, `list_resource` |
-| `request` | Provisioning | Cloud resource provisioning requests that use datasource lookups for reference data before submission | `submit`, `status` |
+| `datasource` | Data Query | Read-only reference data queries, standalone business-group scope discovery, request reference lookups, and resource lookup by ID for service discovery and analysis workflows | `smartcmp_list_all_business_groups`, `smartcmp_list_applications`, `smartcmp_list_components`, `smartcmp_query_logical_templates`, `smartcmp_query_images`, `list_services`, `list_resource` |
+| `request` | Provisioning | Cloud resource provisioning requests that select a logical template, then follow the generated instruction's physical-template or cloud-image branch | `smartcmp_list_logical_templates`, `smartcmp_list_physical_templates`, `smartcmp_list_images`, `submit`, `status` |
 | `approval` | Workflow | Approval workflow management | `list_pending`, `approve`, `reject` |
 | `alarm` | Monitoring | Alarm workflows plus component-model-driven resource health evidence | `list_alerts`, `analyze_alert`, `analyze_resource_health`, `operate_alert` |
 | `preapproval-agent` | Agent | Autonomous approval pre-review | Webhook-triggered, policy-based decisions |
@@ -369,7 +369,8 @@ python skills/datasource/scripts/list_services.py                    # List serv
 python skills/datasource/scripts/list_resource.py <resource_id>          # Resource details + normalized view
 python skills/shared/scripts/list_applications.py <business_group_id>    # List applications
 python skills/shared/scripts/list_components.py <source_key>             # List component metadata
-python skills/shared/scripts/list_images.py <resource_bundle_id> <logic_template_id> <cloud_entry_type>
+python skills/datasource/scripts/list_logical_templates.py [linux|windows|name] [--resource-bundle-id <id>]
+python skills/datasource/scripts/list_images.py <resource_bundle_id> <logic_template_id> <cloud_entry_type>
 ```
 
 #### request
