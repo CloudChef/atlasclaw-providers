@@ -23,7 +23,7 @@ Use this file when a descriptive requirement needs to be turned into multiple CM
 
 ## Stop And Leave For Manual Review When
 
-- Core business purpose is unclear.
+- Primary business purpose is unclear.
 - No matching CMP catalog item can be found.
 - Required identifiers such as business group or application are unavailable.
 - High-cost or production-sensitive components depend on guessed values.

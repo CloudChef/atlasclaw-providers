@@ -71,7 +71,7 @@ related:
 # === Tool Registration ===
 tool_list_services_name: "smartcmp_list_services"
 tool_list_services_description: "List available service catalog choices from SmartCMP. Call this tool ONLY ONCE at the beginning of a new request workflow. It returns compact catalog identity metadata, not request-field instructions. After receiving the list, check whether the user's original message clearly matches a specific catalog. If so, auto-select it; otherwise show the numbered list. Displayed numbers are conversation choices only. Resolve the selected number to the catalog metadata UUID, then call smartcmp_get_request_catalog before inspecting fields or calling any catalog-dependent lookup. Keep returned _internal metadata for workflow use only; do not show those fields to the user."
-tool_list_services_entrypoint: "scripts/list_request_catalogs.py"
+tool_list_services_entrypoint: "scripts/adapter.py:list_services"
 tool_list_services_group: "cmp"
 tool_list_services_capability_class: "provider:smartcmp"
 tool_list_services_priority: 100
@@ -87,7 +87,7 @@ tool_list_services_parameters: |
   }
 tool_catalog_detail_name: "smartcmp_get_request_catalog"
 tool_catalog_detail_description: "Load the normalized request-field instructions for exactly one catalog selected from smartcmp_list_services. catalog_id MUST be the selected catalog metadata UUID, never a displayed number or sourceKey. Call once immediately after catalog selection and before smartcmp_list_available_bgs or request-field assembly. Keep returned _internal metadata for workflow use only."
-tool_catalog_detail_entrypoint: "scripts/get_request_catalog.py"
+tool_catalog_detail_entrypoint: "scripts/adapter.py:get_request_catalog"
 tool_catalog_detail_group: "cmp"
 tool_catalog_detail_capability_class: "provider:smartcmp"
 tool_catalog_detail_priority: 105
@@ -106,7 +106,7 @@ tool_catalog_detail_parameters: |
   }
 tool_submit_name: "smartcmp_submit_request"
 tool_submit_description: "Submit resource request to SmartCMP. RULES: (1) NEVER claim submitted without calling this tool. (2) Reuse resolved workflow lookup evidence, build the preview from the exact generated instruction contract, mask credential secrets, and wait for user confirmation BEFORE calling. (3) json_body is REQUIRED. (4) catalogId MUST be UUID from catalog metadata id field. (5) Same-type multi-instance requests must use the selected catalog's declared count field, or fallback top-level quantity when no such field exists, without duplicating resourceSpecs; per-instance differences belong in request-decomposition-agent. See Field Placement table in skill body for exact structure rules."
-tool_submit_entrypoint: "scripts/submit.py"
+tool_submit_entrypoint: "scripts/adapter.py:submit"
 tool_submit_groups:
   - cmp
   - request
@@ -137,7 +137,7 @@ tool_submit_success_contract:
   note: "Only user-facing SmartCMP Request IDs count as successful submit identifiers. Normalize source aliases to a single user-facing Request ID and never expose UUID-shaped internal identifiers as the submitted Request ID."
 tool_status_name: "smartcmp_get_request_status"
 tool_status_description: "Query a submitted SmartCMP request status by user-facing Request ID, e.g. REQ20260501000095, RES20260501000095, TIC20260316000001, or CHG20260413000011. Use only for submitted request status or approval-result questions. For recent-submission follow-ups without an explicit ID, reuse the most recent Request ID from this conversation; if none exists, ask for it. Do NOT pass internal UUIDs, approve, or reject requests."
-tool_status_entrypoint: "scripts/status.py"
+tool_status_entrypoint: "scripts/adapter.py:status"
 tool_status_groups:
   - cmp
   - request
@@ -165,7 +165,7 @@ tool_status_parameters: |
   }
 tool_facets_name: "smartcmp_list_facets"
 tool_facets_description: "List available resource pool tag facets from SmartCMP. REQUIRES businessGroupId — call this AFTER business group is selected and ONLY when request Markdown declares active resourceBundleTags without a default. After this tool returns, do not call datasource tools to interpret facets. Match or ask for a facet option, then build resourceBundleTags with facet key and option key (NOT display names). Never show raw facet metadata."
-tool_facets_entrypoint: "scripts/list_facets.py"
+tool_facets_entrypoint: "scripts/adapter.py:list_facets"
 tool_facets_group: "cmp"
 tool_facets_capability_class: "provider:smartcmp"
 tool_facets_priority: 110
@@ -189,7 +189,7 @@ tool_facets_parameters: |
   }
 tool_resource_bundles_name: "smartcmp_list_resource_bundles"
 tool_resource_bundles_description: "List request-flow resource pools from SmartCMP. Use when generated Markdown declares an active resourceBundleId field without a default and no active resourceBundleTags field. Requires selected business_group_id, component_type from generated Markdown catalog/component metadata, and node_type from resourceSpecs[].type. Fixed API filters: strategy=RB_POLICY_STATIC, enabled=true, readOnly=false. If resourceBundleId has ask:true, present the returned names and wait for the user's selection even when only one result exists. Ask the user to identify the resource-pool field and selected number when replying; never suggest that a bare number is sufficient."
-tool_resource_bundles_entrypoint: "scripts/list_resource_bundles.py"
+tool_resource_bundles_entrypoint: "scripts/adapter.py:list_resource_bundles"
 tool_resource_bundles_group: "cmp"
 tool_resource_bundles_capability_class: "provider:smartcmp"
 tool_resource_bundles_priority: 112
@@ -224,7 +224,7 @@ tool_resource_bundles_parameters: |
   }
 tool_bgs_name: "smartcmp_list_available_bgs"
 tool_bgs_description: "List available business groups for a specific service catalog. Call this AFTER selecting a catalog to get the list of business groups the user can choose from. catalog_id MUST be the selected catalog metadata UUID, never the displayed list number. Use the returned id or name (depending on the catalog parameter key) for the business group field in the request body."
-tool_bgs_entrypoint: "scripts/list_available_bgs.py"
+tool_bgs_entrypoint: "scripts/adapter.py:list_available_bgs"
 tool_bgs_group: "cmp"
 tool_bgs_capability_class: "provider:smartcmp"
 tool_bgs_priority: 105
@@ -243,7 +243,7 @@ tool_bgs_parameters: |
   }
 tool_flavors_name: "smartcmp_list_flavors"
 tool_flavors_description: "List requestable MACHINE compute flavors from SmartCMP. Pass resource_bundle_id after resource-pool selection so SmartCMP filters by pool; also pass catalog_id and node_template_name when known so catalog alternatives apply. node_template_name is the literal resourceSpecs[].node value such as Compute, never resourceSpecs[].type. Omit resource_bundle_id only for an intentional global flavor query. Match the user's spec (for example 2c4g) against the returned name and use the selected id as computeProfileId. If computeProfileId has ask:true, show the filtered flavor names and ask the user to identify the flavor field and selected number instead of replying with a bare number or typed specification."
-tool_flavors_entrypoint: "scripts/list_flavors.py"
+tool_flavors_entrypoint: "scripts/adapter.py:list_flavors"
 tool_flavors_group: "cmp"
 tool_flavors_capability_class: "provider:smartcmp"
 tool_flavors_priority: 108
@@ -278,7 +278,7 @@ tool_flavors_parameters: |
   }
 tool_logical_templates_name: "smartcmp_list_logical_templates"
 tool_logical_templates_description: "List logical OS templates for a SmartCMP request. Call only after resource-pool and compute-profile selection when generated Markdown declares logicTemplateId. Pass resource_bundle_id and the required catalog OS family as os_type; also pass catalog_id and node_template_name when known. Use the selected id as logicTemplateId. The request-projected tool always presents the names as an explicit selection boundary, even when one result exists or generated ask is false."
-tool_logical_templates_entrypoint: "../datasource/scripts/list_logical_templates.py"
+tool_logical_templates_entrypoint: "../datasource/scripts/adapter.py:list_logical_templates"
 tool_logical_templates_groups:
   - cmp
   - request
@@ -325,7 +325,7 @@ tool_logical_templates_parameters: |
   }
 tool_physical_templates_name: "smartcmp_list_physical_templates"
 tool_physical_templates_description: "List physical templates available to the selected SmartCMP resource pool and logical template. Use only when generated Markdown declares physicalTemplateId. Each result retains its logicTemplateId; use the selected physicalTemplateId together with logicTemplateId and omit templateId. If physicalTemplateId has ask:true, present names and ask the user to identify the physical-template field and selected number even when one result exists."
-tool_physical_templates_entrypoint: "scripts/list_physical_templates.py"
+tool_physical_templates_entrypoint: "scripts/adapter.py:list_physical_templates"
 tool_physical_templates_groups:
   - cmp
   - request
@@ -356,7 +356,7 @@ tool_physical_templates_parameters: |
   }
 tool_images_name: "smartcmp_list_images"
 tool_images_description: "List cloud images for a SmartCMP request. Call after resource-pool and logical-template selection only when generated Markdown declares templateId. Use the selected image id as templateId, never as physicalTemplateId. If templateId has ask:true, present image names and ask the user to identify the image field and selected number even when one result exists."
-tool_images_entrypoint: "../datasource/scripts/list_images.py"
+tool_images_entrypoint: "../datasource/scripts/adapter.py:list_images"
 tool_images_groups:
   - cmp
   - request
@@ -676,7 +676,8 @@ scope.
   with unresolved live lookup fields, defer this question until the generated
   `resourceSpecs[]` lookup sequence is complete; in particular, never ask for
   `name` before an unresolved `resourceBundleId`.
-- Do not include `userLoginId`; `submit.py` injects it.
+- Do not include `userLoginId`; SmartCMP Provider resolves the acting
+  SmartCMP user from the selected credential.
 - Put root request fields declared in `instructions.params.<key>` under the
   top-level JSON object `params.<key>`. These are catalog form fields from
   `catalog.form_definition_id`, not resource spec fields.

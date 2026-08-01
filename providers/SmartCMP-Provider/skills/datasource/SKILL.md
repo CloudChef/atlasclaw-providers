@@ -59,7 +59,7 @@ related:
 
 tool_list_all_business_groups_name: "smartcmp_list_all_business_groups"
 tool_list_all_business_groups_description: "List SmartCMP business groups from the standalone UI directory endpoint. Treat 'business group' as the same scope concept users may call tenant, 租户, 部门, BU, Department, 项目, or Project. Use this for standalone discovery only; do not switch to the request workflow unless the user is actually preparing a request."
-tool_list_all_business_groups_entrypoint: "scripts/list_all_business_groups.py"
+tool_list_all_business_groups_entrypoint: "scripts/adapter.py:list_all_business_groups"
 tool_list_all_business_groups_groups:
   - cmp
   - datasource
@@ -78,7 +78,7 @@ tool_list_all_business_groups_parameters: |
   }
 tool_list_applications_name: "smartcmp_list_applications"
 tool_list_applications_description: "List SmartCMP applications for a selected business group. Use this as shared read-only reference data for request preparation or provider-native analysis workflows."
-tool_list_applications_entrypoint: "../shared/scripts/list_applications.py"
+tool_list_applications_entrypoint: "scripts/adapter.py:list_applications"
 tool_list_applications_groups:
   - cmp
   - datasource
@@ -100,7 +100,7 @@ tool_list_applications_parameters: |
   }
 tool_list_components_name: "smartcmp_list_components"
 tool_list_components_description: "List SmartCMP component metadata for a catalog source key such as resource.windows. Use sourceKey, not catalogId. Do not use this tool for logical templates, OS templates, or cloud images."
-tool_list_components_entrypoint: "../shared/scripts/list_components.py"
+tool_list_components_entrypoint: "scripts/adapter.py:list_components"
 tool_list_components_groups:
   - cmp
   - datasource
@@ -122,7 +122,7 @@ tool_list_components_parameters: |
   }
 tool_query_logical_templates_name: "smartcmp_query_logical_templates"
 tool_query_logical_templates_description: "Query SmartCMP logical templates globally or filter them by resource pool, catalog node, OS type, or template name. Omit resource_bundle_id for a global query."
-tool_query_logical_templates_entrypoint: "scripts/list_logical_templates.py"
+tool_query_logical_templates_entrypoint: "scripts/adapter.py:list_logical_templates"
 tool_query_logical_templates_groups:
   - cmp
   - datasource
@@ -166,7 +166,7 @@ tool_query_logical_templates_parameters: |
   }
 tool_query_images_name: "smartcmp_query_images"
 tool_query_images_description: "Query SmartCMP image options for a selected resource pool, logical template, and cloud entry type. A selected image id is a templateId, never a physicalTemplateId."
-tool_query_images_entrypoint: "scripts/list_images.py"
+tool_query_images_entrypoint: "scripts/adapter.py:list_images"
 tool_query_images_groups:
   - cmp
   - datasource
@@ -236,148 +236,57 @@ Activate this skill when user intent matches:
 
 | Intent | Keywords |
 |--------|----------|
-| View catalogs | "show catalogs", "list services", "available services" |
 | View business-group scopes | "show business groups", "show tenants", "查看租户", "查看部门", "查看项目" |
 | List applications | "list applications", "show apps" |
 | List OS templates | "list OS templates", "available OS" |
 | List images | "list images", "available images" |
-| Show resource details | "resource details", "show resource", "analyze resource data" |
 
 **NOT for**: Resource provisioning -> use `request` skill instead.
+**NOT for**: Catalog discovery -> use `request`.
 **NOT for**: Direct "查询资源池", "查看所有资源", "查看所有云主机", or
 "查看某个云主机详情" requests -> use `resource-pool` or `resource`.
 
-## Scripts
+## Handlers
 
-Most scripts are located in `scripts/`.
+All five datasource Tool commands are co-located in `scripts/adapter.py`:
 
-| Script | Description | Arguments |
-|--------|-------------|-----------|
-| `scripts/list_all_business_groups.py` | List all business-group scopes (tenant / 租户 / 部门 / BU / 项目) from the standalone UI directory endpoint | `[QUERY_VALUE]` |
-| `scripts/list_services.py` | List published service catalogs; the request skill also uses its internal exact-detail mode | `[KEYWORD]` or `--catalog-id <CATALOG_ID>` |
-| `scripts/list_resource.py` | List resource evidence by resource ID from `/nodes/{resourceId}/view` first, with legacy resource fallback | `<RESOURCE_ID> [RESOURCE_ID ...]` |
-| `../shared/scripts/list_applications.py` | List applications for a selected business group | `<BUSINESS_GROUP_ID>` |
-| `../shared/scripts/list_components.py` | List component metadata for a catalog `sourceKey` | `<SOURCE_KEY>` |
-| `scripts/list_logical_templates.py` | List logical templates globally or filter by resource pool, catalog node, OS type, or name | `[QUERY] [--resource-bundle-id ID] [--catalog-id ID] [--node-template-name NAME] [--os-type TYPE]` |
-| `scripts/list_images.py` | List image options for a selected resource pool and logical template | `<RESOURCE_BUNDLE_ID> <LOGIC_TEMPLATE_ID> <CLOUD_ENTRY_TYPE>` |
+| Handler | Tool | Purpose |
+|--------|------|---------|
+| `list_all_business_groups` | `smartcmp_list_all_business_groups` | List standalone business-group scopes |
+| `list_applications` | `smartcmp_list_applications` | List applications in a business group |
+| `list_components` | `smartcmp_list_components` | List component metadata for a catalog source key |
+| `list_logical_templates` | `smartcmp_query_logical_templates` | Query logical templates |
+| `list_images` | `smartcmp_query_images` | Query cloud images |
 
-`scripts/list_resource.py` emits `resource.data` as the canonical SmartCMP
-resource evidence pack and also emits a normalized `type + properties` view per
-resource. It currently calls `PATCH /nodes/{resourceId}/view` because SmartCMP
-exposes this read-only view through PATCH; switch to GET after the CMP API bug
-is fixed. If `/view` is unavailable or returns no data, fallback to
-`GET /nodes/{resourceId}` and `GET /nodes/{resourceId}/details`; preserve the
-primary `/view` error in `errors`. If fallback provides resource data, keep
-`fetchStatus=ok` and set `fallbackUsed=true`.
+Catalog list/detail belongs to the `request` Skill Adapter. Resource
+list/detail belongs to the `resource` Skill Adapter. The request Skill's
+logical-template and image Tools are aliases to the two owning datasource
+handlers; they do not create forwarding Python files.
 
-## Environment Setup
+The Adapter receives the selected instance and Authentication Context from
+AtlasClaw. SmartCMP Provider owns authentication, HTTP, pagination,
+normalization, and resource/catalog domain rules.
 
-### Option 1: Direct Cookie
+## Workflow examples
 
-```powershell
-# PowerShell - CMP_URL auto-normalizes (adds /platform-api if missing)
-$env:CMP_URL = "<your-cmp-host>"           # e.g., "cmp.example.com" or "https://cmp.example.com/platform-api"
-$env:CMP_COOKIE = '<full cookie string>'
-```
+- “Show available tenants or projects”: call
+  `smartcmp_list_all_business_groups`.
+- “List Linux logical templates”: call `smartcmp_query_logical_templates`
+  with `os_type=Linux`.
+- “List images for this pool and logical template”: call
+  `smartcmp_query_images` with the exact three IDs/types required by the Tool
+  schema.
 
-```bash
-# Bash
-export CMP_URL="<your-cmp-host>"
-export CMP_COOKIE="<full cookie string>"
-```
-
-### Option 2: Auto-Login (Recommended)
-
-Automatically obtains and caches cookies (30-minute TTL). Auth URL is auto-inferred.
-
-```powershell
-# PowerShell
-$env:CMP_URL = "<your-cmp-host>"
-$env:CMP_USERNAME = "<username>"
-$env:CMP_PASSWORD = "<password>"
-```
-
-```bash
-# Bash
-export CMP_URL="<your-cmp-host>"
-export CMP_USERNAME="<username>"
-export CMP_PASSWORD="<password>"
-```
-
-## Workflow Examples
-
-### Example 1: List Business-Group Scopes
-
-**User:** "Show available tenants or projects"
-
-```bash
-python scripts/list_all_business_groups.py
-```
-
-**Output:** Numbered list + `##BUSINESS_GROUP_DIRECTORY_META_START## ... ##BUSINESS_GROUP_DIRECTORY_META_END##`
-
-### Example 2: List Available Catalogs
-
-**User:** "Show available catalogs"
-
-```bash
-python scripts/list_services.py
-```
-
-**Output:** Numbered list + `##CATALOG_META_START## ... ##CATALOG_META_END##`
-
-### Example 3: List Logical Templates and Cloud Images
-
-```bash
-python scripts/list_logical_templates.py --os-type Linux
-python scripts/list_logical_templates.py --resource-bundle-id <resource_bundle_id> --os-type Linux
-python scripts/list_images.py <resource_bundle_id> <logic_template_id> <cloud_entry_type>
-```
-
-Omit `--resource-bundle-id` for a global logical-template directory query; pass
-it to show only templates supported by one resource pool. The request skill
-registers request-projected aliases backed by these same read-only scripts. A
-selected image `id` is a `templateId`; it must never be serialized as
-`physicalTemplateId`.
-
-### Example 4: Show Resource Details
-
-**User:** "Show resource details for ID X"
-
-```bash
-python scripts/list_resource.py <resource_id>
-```
-
-This calls `PATCH /nodes/{resourceId}/view` first. `resource.data` is the
-evidence pack passed to standalone IT Ops skills. If the primary view fails,
-the script falls back to the older resource/detail APIs. If fallback provides
-resource data, the result remains `fetchStatus=ok` with `fallbackUsed=true`.
-
-## Data Flow
-
-```
-scripts/list_all_business_groups.py [query_value]
-  -> standalone business-group scope discovery
-
-scripts/list_services.py [keyword]
-  -> (catalogId, sourceKey)
-
-scripts/list_services.py --catalog-id <catalog_id>
-  -> exactly one normalized catalog detail for internal request-skill use
-```
-
-## Output Meta Blocks
-
-| Script | Meta Block |
-|--------|------------|
-| `scripts/list_all_business_groups.py` | `##BUSINESS_GROUP_DIRECTORY_META_START## ... ##BUSINESS_GROUP_DIRECTORY_META_END##` |
-| `scripts/list_services.py` | `##CATALOG_META_START## ... ##CATALOG_META_END##` |
+Omit `resource_bundle_id` for a global logical-template directory query; pass
+it to show only templates supported by one resource pool. A selected image
+`id` is a `templateId`; it must never be serialized as `physicalTemplateId`.
 
 ## Critical Rules
 
 > All operations are **read-only** - no data is created or modified.
 
-> Scripts are shared with the `request` skill.
+> Request aliases reference the owning datasource handlers; no implementation
+> is copied or proxied through another Python process.
 
 > Standalone directory queries for all business-group scopes belong to
 > `datasource`. Standalone resource-pool and resource browsing belong to

@@ -6,7 +6,7 @@ instance_required: "true"
 
 tool_detail_name: "smartcmp_preapproval_get_request_detail"
 tool_detail_description: "Fetch a specific pending approval/request detail for the preapproval agent and return metadata for continued decision-making."
-tool_detail_entrypoint: "../approval/scripts/get_request_detail.py"
+tool_detail_entrypoint: "../approval/scripts/adapter.py:get_request_detail"
 tool_detail_groups:
   - cmp
   - approval
@@ -34,7 +34,7 @@ tool_detail_parameters: |
 
 tool_catalog_name: "smartcmp_preapproval_get_catalog_detail"
 tool_catalog_description: "Fetch SmartCMP catalog/card detail by catalog ID and return pre-approval instruction metadata."
-tool_catalog_entrypoint: "../shared/scripts/get_catalog_detail.py"
+tool_catalog_entrypoint: "../request/scripts/adapter.py:get_request_catalog"
 tool_catalog_groups:
   - cmp
   - catalog
@@ -57,7 +57,7 @@ tool_catalog_parameters: |
 
 tool_analyze_name: "smartcmp_preapproval_analyze_request"
 tool_analyze_description: "Run the shared read-only SmartCMP pre-approval analysis for one pending Request ID. This is the common evaluator used before the preapproval agent decides whether to call a mutating approval action."
-tool_analyze_entrypoint: "../approval/scripts/analyze_request.py"
+tool_analyze_entrypoint: "../approval/scripts/adapter.py:analyze_request"
 tool_analyze_groups:
   - cmp
   - approval
@@ -85,7 +85,7 @@ tool_analyze_parameters: |
 
 tool_approve_name: "smartcmp_preapproval_approve"
 tool_approve_description: "Approve one or more pending SmartCMP Request IDs for the preapproval agent. Use user-facing IDs such as RES20260505000010, TIC20260502000003, or CHG20260413000011; the shared approval script resolves them to currentActivity.id internally."
-tool_approve_entrypoint: "../approval/scripts/approve.py"
+tool_approve_entrypoint: "../approval/scripts/adapter.py:approve"
 tool_approve_groups:
   - cmp
   - approval
@@ -115,7 +115,7 @@ tool_approve_parameters: |
 
 tool_reject_name: "smartcmp_preapproval_reject"
 tool_reject_description: "Reject one or more pending SmartCMP Request IDs for the preapproval agent. Use user-facing IDs such as RES20260505000010, TIC20260502000003, or CHG20260413000011; the shared rejection script resolves them to currentActivity.id internally."
-tool_reject_entrypoint: "../approval/scripts/reject.py"
+tool_reject_entrypoint: "../approval/scripts/adapter.py:reject"
 tool_reject_groups:
   - cmp
   - approval
@@ -190,11 +190,20 @@ This skill activates when:
 
 ## Robot Admin Execution
 
-For webhook-driven backend execution, run this agent against an explicitly selected SmartCMP provider instance with a robot/admin credential. Set `ATLASCLAW_PROVIDER_INSTANCE` to the intended instance name; if that instance is not configured, execution must fail closed rather than falling back to `prod` or another instance.
+For webhook-driven backend execution, AtlasClaw must select an explicit
+SmartCMP provider instance and robot/admin credential in the Tool Context. If
+that instance is not configured, execution must fail closed rather than
+falling back to `prod` or another instance.
 
-The robot provider instance should use a SmartCMP `cmp_tk_*` provider token when available. The shared scripts send those tokens as `Authorization: Bearer <token>` and keep non-`cmp_tk_*` session tokens on the existing `CloudChef-Authenticate` header.
+The robot provider instance should use a SmartCMP `cmp_tk_*` provider token
+when available. SmartCMP Provider sends those tokens as
+`Authorization: Bearer <token>` and keeps non-`cmp_tk_*` session tokens on the
+existing `CloudChef-Authenticate` header.
 
-Treat `ATLASCLAW_USER_ID=webhook-*` as the AtlasClaw trigger identity, not as a CMP actor. Approval execution uses `../approval/scripts/approve.py` and `../approval/scripts/reject.py`, which load the selected robot credential through `_common.require_config()`.
+Treat the webhook user as the AtlasClaw trigger identity, not as a CMP actor.
+Approval execution uses `smartcmp_preapproval_approve` and
+`smartcmp_preapproval_reject`; SmartCMP Provider resolves the selected robot
+credential and SmartCMP actor.
 
 Use this mode only for robot profiles whose `allowed_skills` include `smartcmp:preapproval-agent`. The same SmartCMP robot profile may also allow `smartcmp:request-decomposition-agent` when the same robot/admin account is approved for both workflows.
 
@@ -331,7 +340,7 @@ Rejected by agent pre-review. Missing business justification, resource specs, an
   ],
   "improvement_suggestions": [],
   "provider_action": {
-    "skill": "../approval/scripts/approve.py",
+    "tool": "smartcmp_preapproval_approve",
     "success": true
   }
 }

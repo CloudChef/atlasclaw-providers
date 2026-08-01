@@ -41,7 +41,7 @@ related:
 
 tool_analyze_name: "smartcmp_analyze_resource_compliance"
 tool_analyze_description: "Collect a bounded, redacted SmartCMP fact profile for any cloud resource and hand it to the LLM for generic operational-state and compliance analysis. This tool does not use configured CMP compliance rules, external product adapters, or monitoring metrics. Prefer resource_name or resource_index with recent smartcmp_list_all_resource metadata; resource IDs are internal compatibility inputs only and must not be requested from or shown to users. The final LLM answer must distinguish confirmed facts, inference, and missing evidence; normal CMP state or absence of a rule is never proof of compliance."
-tool_analyze_entrypoint: "scripts/analyze_resource.py"
+tool_analyze_entrypoint: "scripts/adapter.py:analyze_resource"
 tool_analyze_groups:
   - cmp
   - compliance
@@ -91,25 +91,28 @@ generic, resource-aware compliance analysis.
 
 ## Purpose
 
-The script resolves an exact resource, reads its canonical CMP view, builds a
+The handler resolves an exact resource through SmartCMP Provider, reads its
+canonical CMP view, builds a
 bounded and redacted `resourceProfile`, and emits the LLM evidence contract.
 Every successfully fetched resource uses
 `analysisTargets: ["llm:generic_cloud_resource"]`; `componentType` is evidence
 context and never an analyzer gate.
 
-## Scripts
+## Handler
 
-| Script | Description | Location |
-|--------|-------------|----------|
-| `analyze_resource.py` | Collect generic resource compliance evidence by name, selected table `#`, or internal compatibility ID | `scripts/` |
+`scripts/adapter.py:analyze_resource` collects generic resource compliance
+evidence by name, selected table `#`, or internal compatibility ID. It is the
+only Tool command in this Skill, so retaining one direct handler file does not
+create a one-command forwarding layer.
 
 ## Examples
 
-```bash
-python scripts/analyze_resource.py --resource-name e2e-newrole-linux3-0501
-python scripts/analyze_resource.py --resource-index 2 --resource-directory-json '[{"index":2,"id":"internal-id","name":"resource-02"}]'
-python scripts/analyze_resource.py --payload-json '{"resourceIds":["id-1"],"triggerSource":"webhook"}'
-```
+- Interactive: call `smartcmp_analyze_resource_compliance` with
+  `resource_name`.
+- Recent list selection: pass `resource_index` and the prior internal directory
+  metadata.
+- Webhook compatibility: pass the authorized `payload_json`; never ask an
+  interactive user for resource UUIDs.
 
 ## Analysis contract
 

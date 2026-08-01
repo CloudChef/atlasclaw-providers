@@ -10,46 +10,28 @@ initialization so resolving presentation metadata cannot auto-login.
 
 from __future__ import annotations
 
-from urllib.parse import quote, urlparse, urlunparse
+from urllib.parse import quote
 
-
-_API_PATH = "/platform-api"
-
-
-def normalize_ui_base_url(url: str) -> str:
-    """Return the browser root for a SmartCMP API or UI URL."""
-    normalized = str(url or "").strip()
-    if not normalized:
-        return ""
-    if not normalized.startswith(("http://", "https://")):
-        normalized = f"https://{normalized}"
-
-    parsed = urlparse(normalized)
-    path = parsed.path.rstrip("/")
-    if path.endswith(_API_PATH):
-        path = path[: -len(_API_PATH)].rstrip("/")
-    return urlunparse((parsed.scheme, parsed.netloc, path, "", "", ""))
+from app.atlasclaw.core.object_actions import (
+    build_agent_prompt_action as build_core_agent_prompt_action,
+    build_localized_text as build_core_localized_text,
+    build_open_url_action as build_core_open_url_action,
+)
 
 
 def build_ui_hash_href(ui_base_url: str, hash_route: str) -> str:
     """Build an absolute SmartCMP hash-route URL."""
-    normalized_base_url = normalize_ui_base_url(ui_base_url)
+    normalized_base_url = str(ui_base_url or "").strip().rstrip("/")
     if not normalized_base_url:
         return ""
     route = str(hash_route or "").strip()
-    if not route:
-        return normalized_base_url
-    if route.startswith("/#/"):
-        return f"{normalized_base_url}{route}"
-    if route.startswith("#/"):
-        return f"{normalized_base_url}/{route}"
-    if route.startswith("/"):
-        return f"{normalized_base_url}/#{route}"
-    return f"{normalized_base_url}/#/{route}"
+    if not route.startswith("#/"):
+        return ""
+    return f"{normalized_base_url}/{route}"
 
 
 def build_resource_page_href(
-    base_url: str,
+    ui_base_url: str,
     resource_id: str,
     category: str = "virtual-machines",
 ) -> str:
@@ -60,19 +42,9 @@ def build_resource_page_href(
     normalized_category = str(category or "virtual-machines").strip("/")
     suffix = "/details" if normalized_category == "virtual-machines" else ""
     return build_ui_hash_href(
-        normalize_ui_base_url(base_url),
+        ui_base_url,
         f"#/main/{normalized_category}/{encoded_resource_id}{suffix}",
     )
-
-
-def _localized_text(default: str, *, zh_cn: str) -> dict[str, object]:
-    return {
-        "default": str(default or "").strip(),
-        "translations": {
-            "en-US": str(default or "").strip(),
-            "zh-CN": str(zh_cn or "").strip(),
-        },
-    }
 
 
 def build_object_open_action(
@@ -82,18 +54,15 @@ def build_object_open_action(
     label_en: str = "Open",
     label_zh: str = "打开",
 ) -> dict[str, object] | None:
-    """Build one navigation action for a verified object URL."""
-    normalized_href = str(href or "").strip()
-    if not normalized_href:
-        return None
-    return {
-        "action_id": str(action_id or "open_detail"),
-        "kind": "open_url",
-        "display_label": _localized_text(label_en, zh_cn=label_zh),
-        "href": normalized_href,
-        "effect": "navigate",
-        "tone": "default",
-    }
+    """Add SmartCMP labels to an AtlasClaw generic navigation action."""
+
+    return build_core_open_url_action(
+        action_id,
+        href,
+        effect="navigate",
+        tone="default",
+        display_label=_localized_text(label_en, label_zh),
+    )
 
 
 def build_object_prompt_action(
@@ -111,26 +80,33 @@ def build_object_prompt_action(
     prompt_template: bool = False,
     inputs: list[dict[str, object]] | None = None,
 ) -> dict[str, object] | None:
-    """Build one generic Agent prompt action without Provider side effects."""
-    normalized_action_id = str(action_id or "").strip()
-    if not normalized_action_id or not str(prompt_en or "").strip() or not str(prompt_zh or "").strip():
-        return None
-    action: dict[str, object] = {
-        "action_id": normalized_action_id,
-        "kind": "agent_prompt",
-        "display_label": _localized_text(label_en, zh_cn=label_zh),
-        "effect": str(effect or "read"),
-        "tone": str(tone or "default"),
-    }
-    prompt_key = "agent_prompt_template" if prompt_template else "agent_prompt"
-    action[prompt_key] = _localized_text(prompt_en, zh_cn=prompt_zh)
-    if requires_confirmation:
-        action["requires_confirmation"] = True
-        if confirmation_en or confirmation_zh:
-            action["confirmation_message"] = _localized_text(
-                confirmation_en or prompt_en,
-                zh_cn=confirmation_zh or prompt_zh,
-            )
-    if inputs:
-        action["inputs"] = list(inputs)
-    return action
+    """Add SmartCMP copy to an AtlasClaw generic Agent-prompt action."""
+
+    prompt = _localized_text(prompt_en, prompt_zh)
+    confirmation_message = None
+    if requires_confirmation and (confirmation_en or confirmation_zh):
+        confirmation_message = _localized_text(
+            confirmation_en or prompt_en,
+            confirmation_zh or prompt_zh,
+        )
+    return build_core_agent_prompt_action(
+        action_id,
+        prompt,
+        display_label=_localized_text(label_en, label_zh),
+        effect=effect,
+        tone=tone,
+        requires_confirmation=requires_confirmation,
+        confirmation_message=confirmation_message,
+        prompt_template=prompt_template,
+        inputs=inputs,
+    )
+
+
+def _localized_text(default: str, translated: str) -> dict[str, object] | None:
+    return build_core_localized_text(
+        default,
+        {
+            "en-US": default,
+            "zh-CN": translated,
+        },
+    )

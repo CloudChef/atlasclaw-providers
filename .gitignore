@@ -6,6 +6,7 @@ openspec/
 *.pyc
 *.pyo
 *.pyd
+*.egg-info/
 .atlasclaw-test/
 .atlasclaw/
 .worktrees/

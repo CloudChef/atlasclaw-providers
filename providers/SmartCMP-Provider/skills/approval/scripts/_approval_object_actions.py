@@ -6,14 +6,15 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 from urllib.parse import quote, urlencode
 
 from _object_actions_common import (
     build_object_open_action,
     build_object_prompt_action,
     build_ui_hash_href,
-    normalize_ui_base_url,
 )
+from smartcmp_provider.domain.approval_context import available_approval_operations
 
 
 _APPROVAL_DETAIL_FROM_PARAMS = {"from": "normal", "fromPagePartUrl": "SR_MY_APPROVAL"}
@@ -42,7 +43,7 @@ _REQUEST_ID_FIELD_NAMES = (
 
 
 def build_approval_object_actions(
-    base_url: str,
+    ui_base_url: str,
     item: dict,
     *,
     include_detail_actions: bool = False,
@@ -50,7 +51,7 @@ def build_approval_object_actions(
     """Build the actions currently available for one approval object.
 
     Args:
-        base_url: SmartCMP API or browser root.
+        ui_base_url: Browser root for the selected SmartCMP instance.
         item: Approval row or detail carrying a user-facing request ID.
         include_detail_actions: Whether the object contains enough detail for
             analysis and decision intents.
@@ -59,15 +60,23 @@ def build_approval_object_actions(
         Provider-agnostic actions for the current approval projection.
     """
     request_id = _approval_request_id(item)
+    available_action_ids = {
+        operation.operation_id
+        for operation in available_approval_operations(request_id)
+    }
     actions: list[dict[str, object]] = []
-    open_action = build_object_open_action(build_approval_page_href(base_url, item))
+    open_action = build_object_open_action(build_approval_page_href(ui_base_url, item))
     if open_action:
         actions.append(open_action)
 
     # Action availability follows the producing Tool projection, not merely the
     # object type: list rows expose detail lookup, while verified details expose
     # analysis and decision intents.
-    if request_id and not include_detail_actions:
+    if (
+        request_id
+        and not include_detail_actions
+        and "view_detail" in available_action_ids
+    ):
         detail_action = build_object_prompt_action(
             "view_detail",
             label_en="View details",
@@ -89,7 +98,7 @@ def build_approval_object_actions(
         prompt_en=f"Run read-only approval analysis for {request_id}",
         prompt_zh=f"只读分析审批请求 {request_id}",
     )
-    # Mutation actions are Agent intents, not direct SmartCMP writes. Core still
+    # Mutation actions are Agent intents, not direct SmartCMP writes. AtlasClaw still
     # applies its confirmation gate before the owning Skill may execute a Tool.
     approve_action = build_object_prompt_action(
         "approve",
@@ -136,17 +145,66 @@ def build_approval_object_actions(
     actions.extend(
         action
         for action in (analyze_action, approve_action, reject_action)
-        if action is not None
+        if action is not None and action["action_id"] in available_action_ids
     )
     return actions
 
 
-def build_approval_page_href(base_url: str, item: dict) -> str:
+def attach_approval_object_metadata(
+    projection: dict[str, Any],
+    *,
+    item: dict[str, Any],
+    ui_base_url: str,
+    include_detail_actions: bool,
+) -> dict[str, Any]:
+    """Attach AtlasClaw object rendering to one Provider approval projection.
+
+    Args:
+        projection: Safe approval result returned to AtlasClaw.
+        item: Raw SmartCMP row retained only for its verified UI route fields.
+        ui_base_url: Browser root of the selected SmartCMP instance.
+        include_detail_actions: Expose analysis and decision prompts for a
+            verified detail projection; list rows expose only detail lookup.
+
+    Returns:
+        A copy containing AtlasClaw identity and object-action metadata.
+    """
+
+    enriched = dict(projection)
+    nested_request = projection.get("request")
+    nested_request = nested_request if isinstance(nested_request, dict) else {}
+    request_id = _text(
+        projection.get("request_id")
+        or projection.get("requestId")
+        or nested_request.get("request_id")
+        or nested_request.get("requestId")
+    )
+    action_source = dict(item)
+    action_source["request_id"] = request_id
+    enriched.update(
+        {
+            "object_type": "approval_request",
+            "object_id": request_id,
+            "object_name": _text(
+                projection.get("name") or nested_request.get("name")
+            )
+            or request_id,
+            "object_actions": build_approval_object_actions(
+                ui_base_url,
+                action_source,
+                include_detail_actions=include_detail_actions,
+            ),
+        }
+    )
+    return enriched
+
+
+def build_approval_page_href(ui_base_url: str, item: dict) -> str:
     """Build the verified SmartCMP detail URL for one approval object."""
     hash_route = _build_approval_hash_route(item)
     if not hash_route:
         return ""
-    return build_ui_hash_href(normalize_ui_base_url(base_url), hash_route)
+    return build_ui_hash_href(ui_base_url, hash_route)
 
 
 def _approval_request_id(item: dict) -> str:

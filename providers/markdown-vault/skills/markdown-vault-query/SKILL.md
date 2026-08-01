@@ -42,7 +42,7 @@ related:
 
 tool_search_name: "markdown_vault_search"
 tool_search_description: "Search Markdown vault files directly. Use only for knowledge-base, internal-doc, runbook, wiki, or vault-note intent. Pass LLM-expanded keywords when available. Returns evidence only: cited file paths, heading paths, line ranges, snippets, bounded text, matched keywords, tags, and context-budget status. Never copy result blocks or Source lines into the final answer; synthesize them."
-tool_search_entrypoint: "scripts/search.py:handler"
+tool_search_entrypoint: "scripts/search.py"
 tool_search_groups:
   - markdown-vault
   - knowledge
@@ -83,7 +83,7 @@ tool_search_parameters: |
 
 tool_get_name: "markdown_vault_get"
 tool_get_description: "Read a safe line range from one Markdown vault file by vault-relative path. Use after search when the answer needs more surrounding context. The returned Markdown is evidence only; never paste retrieved headings, Source lines, or whole chunks as the final answer."
-tool_get_entrypoint: "scripts/get.py:handler"
+tool_get_entrypoint: "scripts/get.py"
 tool_get_groups:
   - markdown-vault
   - knowledge

@@ -3,35 +3,12 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
-from pathlib import Path
 
 import pytest
 
-
-PROVIDER_ROOT = Path(__file__).resolve().parents[1]
-SCRIPT_DIR = PROVIDER_ROOT / "skills" / "resource-compliance" / "scripts"
-
-
-def load_module(module_name: str, filename: str):
-    """Load one compliance helper under a collision-free test name."""
-    spec = importlib.util.spec_from_file_location(module_name, SCRIPT_DIR / filename)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    try:
-        spec.loader.exec_module(module)
-    finally:
-        sys.modules.pop(module_name, None)
-    return module
-
-
-analysis_module = load_module("test_generic_compliance_analysis", "_analysis.py")
-profile_module = load_module("test_generic_compliance_profile", "_resource_profile.py")
-
+from smartcmp_provider.analysis import compliance as analysis_module
+from smartcmp_provider.domain import resource_profiles as profile_module
 
 def make_record(component_type: str, *, name: str = "resource-01") -> dict:
     return {

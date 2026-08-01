@@ -62,7 +62,7 @@ related:
 
 tool_list_name: "smartcmp_list_alerts"
 tool_list_description: "List SmartCMP triggered alerts with optional filters through the CMP comprehensive-query mapping GET /alarm-alert?query. General mode preserves its status, time, level, deployment, entity, node, target, type, category, keyword, and paging filters. For comprehensive single-resource analysis, pass resource_name, resource_index with resource_directory_json, or internal resource_id and use resource_alert_scope=current_and_recent. Resource mode resolves one exact SmartCMP Resource.id, queries current ALERT_FIRING/ALERT_MUTED alerts without a time limit plus currently ALERT_RESOLVED alerts whose triggerAt is within the requested lookback, through the exact targetEntityId API filter. The CMP search API does not filter this query by resolveAt. The provider verifies the returned targetEntityId and emits association coverage. It does not associate alerts by resource name, nodeInstanceId, or entityInstanceId. Report incomplete association as partial or indeterminate according to the coverage block, never as proof that the resource has no alert."
-tool_list_entrypoint: "scripts/list_alerts.py"
+tool_list_entrypoint: "scripts/adapter.py:list_alerts"
 tool_list_groups:
   - cmp
   - alarm
@@ -155,7 +155,7 @@ tool_list_parameters: |
 
 tool_analyze_name: "smartcmp_analyze_alert"
 tool_analyze_description: "Analyze one SmartCMP alert with rule context, datasource-enriched resource facts, assessment, and remediation guidance. Always pass a real SmartCMP alertId as alert_id. If the user refers to a numbered result from a prior alert list, resolve that display index from the previous smartcmp_list_alerts metadata and pass that item's alertId, not the display index."
-tool_analyze_entrypoint: "scripts/analyze_alert.py"
+tool_analyze_entrypoint: "scripts/adapter.py:analyze_alert"
 tool_analyze_groups:
   - cmp
   - alarm
@@ -182,7 +182,7 @@ tool_analyze_parameters: |
 
 tool_resource_health_name: "analyze_resource_health"
 tool_resource_health_description: "Collect resource facts and real Prometheus time-series evidence using the exact monitoring model defined for the resource componentType, then use the LLM to determine healthy, abnormal, or indeterminate. Use this for resource health or runtime-normality questions, including VM, database, software, hardware, and virtualization resources. Do not substitute generic VM metrics, do not use alert rules or absence of alerts as health evidence, and do not expose internal resource IDs. Prefer resource_name or a visible resource_index resolved from recent smartcmp_list_all_resource metadata. After the tool returns, explain the health conclusion with metric evidence, confidence, missing evidence, and recommended next steps; never execute remediation automatically."
-tool_resource_health_entrypoint: "scripts/analyze_resource_health.py"
+tool_resource_health_entrypoint: "scripts/adapter.py:analyze_resource_health"
 tool_resource_health_groups:
   - cmp
   - monitoring
@@ -222,7 +222,7 @@ tool_resource_health_parameters: |
 
 tool_operate_name: "smartcmp_operate_alert"
 tool_operate_description: "Perform validated status operations (mute, resolve, reopen) on one or more SmartCMP alerts. Always pass real SmartCMP alert IDs; resolve numbered result references from prior smartcmp_list_alerts metadata before calling."
-tool_operate_entrypoint: "scripts/operate_alert.py"
+tool_operate_entrypoint: "scripts/adapter.py:operate_alert"
 tool_operate_groups:
   - cmp
   - alarm
@@ -264,14 +264,15 @@ Provide alarm-management capabilities:
 - Analyze one resource independently of alerts by handing component-specific monitoring evidence to the LLM
 - Perform validated status operations (`mute`, `resolve`, `reopen`)
 
-## Scripts
+## Handlers and helpers
 
-| Script | Description | Location |
-|--------|-------------|----------|
-| `list_alerts.py` | Query the CMP comprehensive-search mapping `/alarm-alert?query` for both general and exact-resource listing, then emit `##ALARM_META_START##` metadata | `scripts/` |
-| `analyze_alert.py` | Fetch alert + rule context, enrich related resources via datasource `list_resource.py`, and emit `##ALARM_ANALYSIS_START##` output | `scripts/` |
-| `analyze_resource_health.py` | Resolve one resource, load its component monitoring model, query scoped Prometheus series, and emit `##RESOURCE_HEALTH_CONTEXT_START##` evidence for LLM analysis | `scripts/` |
-| `operate_alert.py` | Call `/alarm-alert/operation` for validated status changes | `scripts/` |
+`scripts/adapter.py` contains the four Tool handlers: `list_alerts`,
+`analyze_alert`, `analyze_resource_health`, and `operate_alert`. It converts
+AtlasClaw Context and Tool parameters, then calls SmartCMP Provider.
+
+`scripts/_alarm_object_actions.py` remains separate because the embedded
+assistant Context resolver calls it to build alert page actions. It is not a
+one-command forwarding script.
 
 ## Workflow
 
@@ -279,14 +280,13 @@ See [references/WORKFLOW.md](references/WORKFLOW.md) for the supported workflow.
 
 ## Resource Enrichment
 
-During alert analysis, this skill should silently reuse the datasource skill's
-shared `../datasource/scripts/list_resource.py` flow when the alert exposes
-`entityInstanceId` or `nodeInstanceId`.
+During alert analysis, the Adapter uses SmartCMP Provider resource
+resolution when the alert exposes `entityInstanceId` or `nodeInstanceId`.
 
 - Resolve related SmartCMP resources before finalizing the analysis narrative.
 - Merge normalized `type + properties` resource facts into the alert analysis payload.
-- If resource lookup is unavailable, continue the alert analysis with core alert
-  and policy facts, and treat resource enrichment as best-effort context.
+- If resource lookup is unavailable, continue the alert analysis with alert and
+  policy facts, and treat resource enrichment as best-effort context.
 
 ## Resource Health Analysis
 

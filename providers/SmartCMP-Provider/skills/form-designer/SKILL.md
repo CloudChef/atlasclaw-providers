@@ -44,7 +44,7 @@ related:
 
 tool_current_name: "smartcmp_read_current_form_schema"
 tool_current_description: "Read the exact saved form bound to the active SmartCMP form-editor Context. It takes no form URL or form ID from the model, uses the request user's session, verifies the returned object ID against the server-owned page scope, and never writes to CMP."
-tool_current_entrypoint: "scripts/read_current_form.py:read_current_form"
+tool_current_entrypoint: "scripts/adapter.py:read_current_form"
 tool_current_groups:
   - cmp
   - form-designer
@@ -60,7 +60,7 @@ tool_current_parameters: |
 
 tool_read_name: "smartcmp_read_form_schema"
 tool_read_description: "Read one existing SmartCMP form schema from a current-instance UI edit or design URL. This tool is read-only: it accepts URLs like #/main/service-model/forms/edit/<uuid> or #/main/service-model/forms/design/<uuid> and calls GET /forms/<uuid>. It also exposes source content.model/designMode/component counts as diagnostic context. It never saves, submits, updates, or deletes CMP data."
-tool_read_entrypoint: "scripts/read_form.py:read_form"
+tool_read_entrypoint: "scripts/adapter.py:read_form"
 tool_read_groups:
   - cmp
   - form-designer
@@ -81,7 +81,7 @@ tool_read_parameters: |
 
 tool_design_name: "smartcmp_design_form_schema"
 tool_design_description: "Normalize and return a SmartCMP Angular form schema JSON draft. Use mode=new for new forms, regenerate after reading a URL source for full schema replacement, and modify for deterministic normalization, catalog insertions, or deterministic value-expression updates from a trusted complete JSON or form URL source. This tool never writes to CMP."
-tool_design_entrypoint: "scripts/design_form_handler.py:design_form"
+tool_design_entrypoint: "scripts/adapter.py:design_form"
 tool_design_groups:
   - cmp
   - form-designer
@@ -161,7 +161,7 @@ When this Skill is selected by a SmartCMP form editor Context:
 
 Use this skill for general SmartCMP form JavaScript extension work. The scripts provide generic validation, normalize structure, preserve unknown keys, and warn about JavaScript risk; they must not perform business semantic inference from field labels, expression substrings, or familiar variable names.
 
-Prefer explicit field-level JavaScript for dynamic behavior. When the user asks for computed values, visibility, linkage, validation, or non-catalog model reads, generate the requested JavaScript directly under the relevant SmartCMP key, usually `config.value.expression` with `source: "mock"` and `method: "mock"` for computed values. Service-catalog context reads are the exception: do not hand-write `sourceParams.<key>`, `sourceParams['<key>']`, or label-based guesses such as `sourceParams['业务组']`; use `value_expressions_json` with catalog aliases so `_catalog_fields.py` and the generated fallback paths decide the runtime source. The LLM owns the business meaning of the generated JavaScript; the script layer is not the source of business semantics.
+Prefer explicit field-level JavaScript for dynamic behavior. When the user asks for computed values, visibility, linkage, validation, or non-catalog model reads, generate the requested JavaScript directly under the relevant SmartCMP key, usually `config.value.expression` with `source: "mock"` and `method: "mock"` for computed values. Service-catalog context reads are the exception: do not hand-write `sourceParams.<key>`, `sourceParams['<key>']`, or label-based guesses such as `sourceParams['业务组']`; use `value_expressions_json` with catalog aliases so SmartCMP Provider catalog-field normalization and generated fallback paths decide the runtime source. The LLM owns the business meaning of the generated JavaScript; the Adapter layer is not the source of business semantics.
 
 Catalog context is reference/catalog metadata for generating JavaScript, not a fixed synchronization feature. catalog-provided context values are read-only inputs to the generated expression. Do not add projection source values as form fields unless the user explicitly asks to show or edit them. Do not rely on catalog_fields_json to satisfy catalog context needs; use it only when the user explicitly asks to insert or display a SmartCMP standard catalog field.
 

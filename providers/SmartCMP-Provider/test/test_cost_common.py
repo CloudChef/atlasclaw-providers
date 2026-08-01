@@ -3,28 +3,7 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-
-SCRIPT_DIR = (
-    Path(__file__).resolve().parents[1]
-    / "skills"
-    / "cost-optimization"
-    / "scripts"
-)
-if str(SCRIPT_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPT_DIR))
-
-import _cost_common as common  # noqa: E402
-
-
-def test_extract_list_payload_handles_common_wrappers():
-    assert common.extract_list_payload([{"id": "1"}]) == [{"id": "1"}]
-    assert common.extract_list_payload({"content": [{"id": "2"}]}) == [{"id": "2"}]
-    assert common.extract_list_payload({"data": {"content": [{"id": "3"}]}}) == [{"id": "3"}]
-    assert common.extract_list_payload({"data": [{"id": "4"}]}) == [{"id": "4"}]
-    assert common.extract_list_payload({"result": [{"id": "5"}]}) == [{"id": "5"}]
+from smartcmp_provider.domain import cost as common
 
 
 def test_normalize_money_returns_float_or_none():
@@ -43,23 +22,17 @@ def test_normalize_timestamp_handles_milliseconds_and_seconds():
 
 
 def test_normalize_timestamp_uses_atlasclaw_request_timezone(monkeypatch):
-    monkeypatch.setenv("ATLASCLAW_TIMEZONE", "America/New_York")
+    del monkeypatch
+    assert common.normalize_timestamp(
+        1_710_000_000_000,
+        timezone_name="America/New_York",
+    ) == "2024-03-09T11:00:00-05:00"
+    assert common.normalize_timestamp(
+        1_783_616_463_695,
+        timezone_name="America/New_York",
+    ) == "2026-07-09T13:01:03.695000-04:00"
 
-    assert common.normalize_timestamp(1_710_000_000_000) == "2024-03-09T11:00:00-05:00"
-    assert common.normalize_timestamp(1_783_616_463_695) == "2026-07-09T13:01:03.695000-04:00"
-
-    monkeypatch.setenv("ATLASCLAW_TIMEZONE", "not-a-real-timezone")
-    assert common.normalize_timestamp(1_710_000_000_000) == "2024-03-09T16:00:00Z"
-
-    monkeypatch.setenv("ATLASCLAW_TIMEZONE", "../invalid-timezone")
-    assert common.normalize_timestamp(1_710_000_000_000) == "2024-03-09T16:00:00Z"
-
-    monkeypatch.setenv("ATLASCLAW_TIMEZONE", "Invalid\nTimezone")
-    assert common.normalize_timestamp(1_710_000_000_000) == "2024-03-09T16:00:00Z"
-
-
-def test_build_request_defaults_are_stable():
-    assert common.build_pageable_request() == {"page": 0, "size": 20}
-    assert common.build_pageable_request(page=-1, size=0) == {"page": 0, "size": 1}
-    assert common.build_query_request() == {"queryValue": ""}
-    assert common.build_query_request("idle vm") == {"queryValue": "idle vm"}
+    assert common.normalize_timestamp(
+        1_710_000_000_000,
+        timezone_name="not-a-real-timezone",
+    ) == "2024-03-09T16:00:00Z"

@@ -23,9 +23,14 @@ def test_routes_match_context_to_existing_skills_with_one_provider_resolver() ->
     assert manifest["schema_version"] == 1
     assert manifest["provider_type"] == "smartcmp"
     assert manifest["context_resolver"] == {
-        "entrypoint": "assistant_context/resolve.py"
+        "entrypoint": "assistant_context/resolve.py:resolve_context"
     }
-    assert (PROVIDER_ROOT / manifest["context_resolver"]["entrypoint"]).is_file()
+    resolver_path, resolver_method = manifest["context_resolver"]["entrypoint"].split(
+        ":",
+        1,
+    )
+    assert (PROVIDER_ROOT / resolver_path).is_file()
+    assert resolver_method == "resolve_context"
     routes = manifest["routes"]
     assert [
         (route["id"], route["match"]["path_template"], route["result"]["skill_ref"])

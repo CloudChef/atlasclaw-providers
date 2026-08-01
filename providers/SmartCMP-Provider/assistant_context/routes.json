@@ -2,7 +2,7 @@
   "schema_version": 1,
   "provider_type": "smartcmp",
   "context_resolver": {
-    "entrypoint": "assistant_context/resolve.py"
+    "entrypoint": "assistant_context/resolve.py:resolve_context"
   },
   "routes": [
     {
