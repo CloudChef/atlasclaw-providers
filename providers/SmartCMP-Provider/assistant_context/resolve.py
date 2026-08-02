@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 # Copyright 2026 Qianyun, Inc., www.cloudchef.io, All rights reserved.
 
-"""Resolve SmartCMP Host pages through one Provider-level Context entrypoint.
+"""Resolve SmartCMP Host pages through one Provider-level Context callable.
 
-AtlasClaw invokes this script with a server-owned route contract. The resolver
+AtlasClaw invokes this module with a server-owned route contract. The resolver
 validates that contract, reads only the current user's page object, and returns
 the provider-neutral Context envelope. It never receives or selects a Skill;
 ``routes.json`` owns the independent page-to-Skill mapping.
@@ -11,15 +11,10 @@ the provider-neutral Context envelope. It never receives or selects a Skill;
 
 from __future__ import annotations
 
-import argparse
-import json
 import os
 import re
 import sys
 from typing import Any
-
-import requests
-
 
 ASSISTANT_CONTEXT_ROOT = os.path.dirname(os.path.abspath(__file__))
 SUPPORT_ROOT = os.path.join(ASSISTANT_CONTEXT_ROOT, "resolvers")
@@ -55,36 +50,59 @@ ALARM_SCRIPTS_ROOT = os.path.join(ASSISTANT_CONTEXT_ROOT, "..", "skills", "alarm
 COST_SCRIPTS_ROOT = os.path.join(
     ASSISTANT_CONTEXT_ROOT, "..", "skills", "cost-optimization", "scripts"
 )
-sys.path.insert(0, SUPPORT_ROOT)
-sys.path.insert(0, os.path.abspath(SHARED_SCRIPTS_ROOT))
-sys.path.insert(0, os.path.abspath(REQUEST_SCRIPTS_ROOT))
-sys.path.insert(0, os.path.abspath(APPROVAL_SCRIPTS_ROOT))
-sys.path.insert(0, os.path.abspath(RESOURCE_SCRIPTS_ROOT))
-sys.path.insert(0, os.path.abspath(ALARM_SCRIPTS_ROOT))
-sys.path.insert(0, os.path.abspath(COST_SCRIPTS_ROOT))
-
-from _context_resolver_common import (  # noqa: E402
-    BASE_URL,
-    CATALOG_ENTITY_CLASS,
-    RESOURCE_ENTITY_CLASS,
-    RequestGet,
-    exact_catalog_id,
-    exact_request_id,
-    exact_uuid,
-    get_json,
-    has_instance_permission,
-    success_object,
-    text,
-    write_result,
+_LOCAL_IMPORT_NAMES = (
+    "_provider_bootstrap",
+    "_alarm_object_actions",
+    "_approval_object_actions",
+    "_atlasclaw_adapter",
+    "_context_resolver_common",
+    "_cost_object_actions",
+    "_object_actions_common",
+    "_request_object_actions",
+    "_resource_object_actions",
 )
-from _approval_object_actions import build_approval_object_actions  # noqa: E402
-from _request_object_actions import (  # noqa: E402
-    build_catalog_object_actions,
-    build_request_object_actions,
-)
-from _resource_object_actions import build_resource_object_actions  # noqa: E402
-from _alarm_object_actions import build_alert_object_actions  # noqa: E402
-from _cost_object_actions import build_cost_object_actions  # noqa: E402
+_MISSING_MODULE = object()
+_original_sys_path = list(sys.path)
+_previous_local_modules = {
+    name: sys.modules.pop(name, _MISSING_MODULE) for name in _LOCAL_IMPORT_NAMES
+}
+try:
+    sys.path[:0] = [
+        os.path.abspath(COST_SCRIPTS_ROOT),
+        os.path.abspath(ALARM_SCRIPTS_ROOT),
+        os.path.abspath(RESOURCE_SCRIPTS_ROOT),
+        os.path.abspath(APPROVAL_SCRIPTS_ROOT),
+        os.path.abspath(REQUEST_SCRIPTS_ROOT),
+        os.path.abspath(SHARED_SCRIPTS_ROOT),
+        os.path.abspath(SUPPORT_ROOT),
+    ]
+    from _context_resolver_common import (  # noqa: E402
+        CATALOG_ENTITY_CLASS,
+        RESOURCE_ENTITY_CLASS,
+        ContextReader,
+        SmartCmpError,
+        exact_catalog_id,
+        exact_request_id,
+        exact_uuid,
+        load_context_reader_from_context,
+        success_object,
+        text,
+    )
+    from _approval_object_actions import build_approval_object_actions  # noqa: E402
+    from _request_object_actions import (  # noqa: E402
+        build_catalog_object_actions,
+        build_request_object_actions,
+    )
+    from _resource_object_actions import build_resource_object_actions  # noqa: E402
+    from _alarm_object_actions import build_alert_object_actions  # noqa: E402
+    from _cost_object_actions import build_cost_object_actions  # noqa: E402
+finally:
+    sys.path[:] = _original_sys_path
+    for _module_name, _previous_module in _previous_local_modules.items():
+        if _previous_module is _MISSING_MODULE:
+            sys.modules.pop(_module_name, None)
+        else:
+            sys.modules[_module_name] = _previous_module
 
 
 _APPLICATION_TYPE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
@@ -104,16 +122,16 @@ _OBJECT_PARAMETER_NAMES: dict[str, frozenset[str]] = {
 }
 
 
-def _resolve_form_definition(
-    route_parameters: dict[str, Any], *, request_get: RequestGet
+async def _resolve_form_definition(
+    route_parameters: dict[str, Any], *, reader: ContextReader
 ) -> dict[str, Any]:
     """Resolve one form editor page to its exact saved form definition."""
     form_id = exact_uuid(route_parameters.get("form_id"))
     if not form_id:
         return _failure("invalid_form_reference")
     try:
-        form = get_json(f"forms/{form_id}", request_get=request_get)
-    except (requests.exceptions.RequestException, TypeError, ValueError):
+        form = await reader.read_form_definition(form_id)
+    except (SmartCmpError, TypeError, ValueError):
         return _failure("provider_unavailable")
     if not isinstance(form, dict) or exact_uuid(form.get("id")) != form_id:
         return _failure("form_id_mismatch")
@@ -130,16 +148,16 @@ def _resolve_form_definition(
     )
 
 
-def _resolve_script_definition(
-    route_parameters: dict[str, Any], *, request_get: RequestGet
+async def _resolve_script_definition(
+    route_parameters: dict[str, Any], *, reader: ContextReader
 ) -> dict[str, Any]:
     """Resolve one script editor page to its exact saved script definition."""
     script_id = exact_uuid(route_parameters.get("script_id"))
     if not script_id:
         return _failure("invalid_script_reference")
     try:
-        script = get_json(f"scripts/{script_id}", request_get=request_get)
-    except (requests.exceptions.RequestException, TypeError, ValueError):
+        script = await reader.read_script_definition(script_id)
+    except (SmartCmpError, TypeError, ValueError):
         return _failure("provider_unavailable")
     if not isinstance(script, dict) or exact_uuid(script.get("id")) != script_id:
         return _failure("script_id_mismatch")
@@ -157,16 +175,16 @@ def _resolve_script_definition(
     )
 
 
-def _resolve_optimization_policy(
-    route_parameters: dict[str, Any], *, request_get: RequestGet
+async def _resolve_optimization_policy(
+    route_parameters: dict[str, Any], *, reader: ContextReader
 ) -> dict[str, Any]:
     """Resolve one cost-optimization policy editor page to its exact policy."""
     policy_id = exact_uuid(route_parameters.get("policy_id"))
     if not policy_id:
         return _failure("invalid_policy_reference")
     try:
-        policy = get_json(f"compliance-policies/{policy_id}", request_get=request_get)
-    except (requests.exceptions.RequestException, TypeError, ValueError):
+        policy = await reader.read_optimization_policy(policy_id)
+    except (SmartCmpError, TypeError, ValueError):
         return _failure("provider_unavailable")
     if not isinstance(policy, dict) or exact_uuid(policy.get("id")) != policy_id:
         return _failure("policy_id_mismatch")
@@ -199,16 +217,16 @@ def _resolve_optimization_policy(
     )
 
 
-def _resolve_blueprint_component(
-    route_parameters: dict[str, Any], *, request_get: RequestGet
+async def _resolve_blueprint_component(
+    route_parameters: dict[str, Any], *, reader: ContextReader
 ) -> dict[str, Any]:
     """Resolve one component editor page to its exact saved component."""
     component_id = exact_uuid(route_parameters.get("component_id"))
     if not component_id:
         return _failure("invalid_component_reference")
     try:
-        component = get_json(f"components/{component_id}", request_get=request_get)
-    except (requests.exceptions.RequestException, TypeError, ValueError):
+        component = await reader.read_component_definition(component_id)
+    except (SmartCmpError, TypeError, ValueError):
         return _failure("provider_unavailable")
     if not isinstance(component, dict) or exact_uuid(component.get("id")) != component_id:
         return _failure("component_id_mismatch")
@@ -230,16 +248,16 @@ def _resolve_blueprint_component(
     )
 
 
-def _resolve_alert(
-    route_parameters: dict[str, Any], *, request_get: RequestGet
+async def _resolve_alert(
+    route_parameters: dict[str, Any], *, reader: ContextReader
 ) -> dict[str, Any]:
     """Resolve one exact alarm alert with state-aware actions."""
     alert_id = exact_uuid(route_parameters.get("alert_id"))
     if not alert_id:
         return _failure("invalid_alert_reference")
     try:
-        alert = get_json(f"alarm-alert/{alert_id}", request_get=request_get)
-    except (requests.exceptions.RequestException, TypeError, ValueError):
+        alert = await reader.read_alert(alert_id)
+    except (SmartCmpError, TypeError, ValueError):
         return _failure("provider_unavailable")
     if not isinstance(alert, dict) or exact_uuid(alert.get("id")) != alert_id:
         return _failure("alert_id_mismatch")
@@ -262,19 +280,16 @@ def _resolve_alert(
     )
 
 
-def _resolve_cost_recommendation(
-    route_parameters: dict[str, Any], *, request_get: RequestGet
+async def _resolve_cost_recommendation(
+    route_parameters: dict[str, Any], *, reader: ContextReader
 ) -> dict[str, Any]:
     """Resolve one exact cost recommendation with remediation-aware actions."""
     recommendation_id = exact_uuid(route_parameters.get("recommendation_id"))
     if not recommendation_id:
         return _failure("invalid_recommendation_reference")
     try:
-        recommendation = get_json(
-            f"compliance-policies/violations/{recommendation_id}",
-            request_get=request_get,
-        )
-    except (requests.exceptions.RequestException, TypeError, ValueError):
+        recommendation = await reader.read_cost_recommendation(recommendation_id)
+    except (SmartCmpError, TypeError, ValueError):
         return _failure("provider_unavailable")
     if not isinstance(recommendation, dict) or exact_uuid(recommendation.get("id")) != recommendation_id:
         return _failure("recommendation_id_mismatch")
@@ -312,30 +327,15 @@ def _exact_application_type(value: Any) -> str:
     return normalized if _APPLICATION_TYPE.fullmatch(normalized) else ""
 
 
-def _pending_items(
+async def _pending_items(
     workflow_id: str,
     *,
-    request_get: RequestGet,
+    reader: ContextReader,
 ) -> list[dict[str, Any]]:
     normalized_id = exact_request_id(workflow_id)
     if not normalized_id:
         return []
-    payload = get_json(
-        "generic-request/current-activity-approval",
-        request_get=request_get,
-        params={
-            "page": 1,
-            "size": 100,
-            "stage": "pending",
-            "states": "APPROVAL_PENDING",
-            "sort": "updatedDate,desc",
-            "searchValues": normalized_id,
-        },
-    )
-    content = payload.get("content") if isinstance(payload, dict) else None
-    if not isinstance(content, list):
-        return []
-    return [item for item in content if isinstance(item, dict)]
+    return list(await reader.list_current_pending_approvals(normalized_id))
 
 
 def _matches_pending_row(
@@ -358,10 +358,10 @@ def _matches_pending_row(
     )
 
 
-def _resolve_pending_approval(
+async def _resolve_pending_approval(
     route_parameters: dict[str, Any],
     *,
-    request_get: RequestGet,
+    reader: ContextReader,
 ) -> dict[str, Any]:
     approval_type = str(route_parameters.get("approval_type") or "").strip().upper()
     approval_id = exact_uuid(route_parameters.get("approval_id"))
@@ -369,7 +369,7 @@ def _resolve_pending_approval(
         return _failure("invalid_approval_reference")
 
     try:
-        approval = get_json(f"approval/{approval_id}", request_get=request_get)
+        approval = await reader.read_approval(approval_id)
         if not isinstance(approval, dict):
             return _failure("not_found")
         if exact_uuid(approval.get("id")) != approval_id:
@@ -387,7 +387,7 @@ def _resolve_pending_approval(
         row = next(
             (
                 item
-                for item in _pending_items(workflow_id, request_get=request_get)
+                for item in await _pending_items(workflow_id, reader=reader)
                 if _matches_pending_row(
                     item,
                     approval_type=approval_type,
@@ -400,7 +400,7 @@ def _resolve_pending_approval(
         )
         if row is None:
             return _failure("not_in_current_user_pending_queue")
-    except (requests.exceptions.RequestException, TypeError, ValueError):
+    except (SmartCmpError, TypeError, ValueError):
         return _failure("provider_unavailable")
 
     return success_object(
@@ -410,33 +410,32 @@ def _resolve_pending_approval(
         state="pending",
         attributes={"approval_type": approval_type},
         object_actions=build_approval_object_actions(
-            BASE_URL,
+            reader.ui_base_url,
             row,
             include_detail_actions=True,
         ),
     )
 
 
-def _resolve_catalog(
+async def _resolve_catalog(
     route_parameters: dict[str, Any],
     *,
-    request_get: RequestGet,
+    reader: ContextReader,
 ) -> dict[str, Any]:
     catalog_id = exact_catalog_id(str(route_parameters.get("catalog_id") or ""))
     if not catalog_id:
         return _failure("invalid_catalog_id")
     try:
-        if not has_instance_permission(
+        if not await reader.has_instance_permission(
             CATALOG_ENTITY_CLASS,
             catalog_id,
             "READ",
-            request_get=request_get,
         ):
             return _failure("permission_denied")
-        catalog = get_json(f"catalogs/{catalog_id}", request_get=request_get)
+        catalog = await reader.read_catalog(catalog_id)
         if not isinstance(catalog, dict) or text(catalog.get("id")) != catalog_id:
             return _failure("catalog_id_mismatch")
-    except (requests.exceptions.RequestException, TypeError, ValueError):
+    except (SmartCmpError, TypeError, ValueError):
         return _failure("provider_unavailable")
 
     return success_object(
@@ -451,16 +450,16 @@ def _resolve_catalog(
             "instructions": text(catalog.get("instructions")),
         },
         object_actions=build_catalog_object_actions(
-            BASE_URL,
+            reader.ui_base_url,
             catalog,
         ),
     )
 
 
-def _resolve_request(
+async def _resolve_request(
     route_parameters: dict[str, Any],
     *,
-    request_get: RequestGet,
+    reader: ContextReader,
 ) -> dict[str, Any]:
     application_type = _exact_application_type(route_parameters.get("application_type"))
     request_id = exact_uuid(route_parameters.get("request_id"))
@@ -470,8 +469,8 @@ def _resolve_request(
         return _failure("invalid_request_id")
 
     try:
-        request = get_json(f"generic-request/{request_id}", request_get=request_get)
-    except (requests.exceptions.RequestException, TypeError, ValueError):
+        request = await reader.read_request(request_id)
+    except (SmartCmpError, TypeError, ValueError):
         return _failure("provider_unavailable")
     if not isinstance(request, dict) or exact_uuid(request.get("id")) != request_id:
         return _failure("request_id_mismatch")
@@ -490,7 +489,7 @@ def _resolve_request(
             "application_type": application_type,
             "catalog_name": text(request.get("catalogName")),
         },
-        object_actions=build_request_object_actions(BASE_URL, request),
+        object_actions=build_request_object_actions(reader.ui_base_url, request),
     )
 
 
@@ -500,27 +499,26 @@ def _is_virtual_machine(resource: dict[str, Any]) -> bool:
     return ".machine.instance." in component_type or resource_type.endswith(".nodes.server")
 
 
-def _resolve_resource(
+async def _resolve_resource(
     route_parameters: dict[str, Any],
     *,
     expected_kind: str,
-    request_get: RequestGet,
+    reader: ContextReader,
 ) -> dict[str, Any]:
     resource_id = exact_uuid(route_parameters.get("resource_id"))
     if not resource_id:
         return _failure("invalid_resource_reference")
     try:
-        if not has_instance_permission(
+        if not await reader.has_instance_permission(
             RESOURCE_ENTITY_CLASS,
             resource_id,
             "READ",
-            request_get=request_get,
         ):
             return _failure("permission_denied")
-        resource = get_json(f"nodes/{resource_id}", request_get=request_get)
+        resource = await reader.read_resource(resource_id)
         if not isinstance(resource, dict) or exact_uuid(resource.get("id")) != resource_id:
             return _failure("resource_id_mismatch")
-    except (requests.exceptions.RequestException, TypeError, ValueError):
+    except (SmartCmpError, TypeError, ValueError):
         return _failure("provider_unavailable")
     if expected_kind == "virtual_machine" and not _is_virtual_machine(resource):
         return _failure("resource_category_mismatch")
@@ -536,7 +534,7 @@ def _resolve_resource(
             "category": text(resource.get("category")),
         },
         object_actions=build_resource_object_actions(
-            BASE_URL,
+            reader.ui_base_url,
             resource_id,
             category="virtual-machines" if expected_kind == "virtual_machine" else "cloud-resource",
             resource_name=text(resource.get("name")),
@@ -545,14 +543,14 @@ def _resolve_resource(
     )
 
 
-def resolve_page_context(
+async def resolve_page_context(
     route_id: str,
     path: str,
     route_parameters: dict[str, Any],
     page_type: str,
     object_type: str,
     *,
-    request_get: RequestGet = requests.get,
+    reader: ContextReader,
 ) -> dict[str, Any]:
     """Resolve one server-matched page without receiving or branching on a Skill.
 
@@ -562,7 +560,7 @@ def resolve_page_context(
         route_parameters: Server-extracted path parameters.
         page_type: Page type declared by the matched route.
         object_type: Object type declared by the matched route.
-        request_get: Injectable GET transport used only by focused Provider tests.
+        reader: SmartCMP Provider read boundary; focused tests may supply a local fake.
 
     Returns:
         A strict success/object envelope or a fail-closed reason. No Provider
@@ -588,63 +586,59 @@ def resolve_page_context(
         return _failure("invalid_route_contract")
 
     if normalized_object_type == "approval_request":
-        return _resolve_pending_approval(route_parameters, request_get=request_get)
+        return await _resolve_pending_approval(route_parameters, reader=reader)
     if normalized_object_type == "form_definition":
-        return _resolve_form_definition(route_parameters, request_get=request_get)
+        return await _resolve_form_definition(route_parameters, reader=reader)
     if normalized_object_type == "script_definition":
-        return _resolve_script_definition(route_parameters, request_get=request_get)
+        return await _resolve_script_definition(route_parameters, reader=reader)
     if normalized_object_type == "optimization_policy":
-        return _resolve_optimization_policy(route_parameters, request_get=request_get)
+        return await _resolve_optimization_policy(route_parameters, reader=reader)
     if normalized_object_type == "blueprint_component":
-        return _resolve_blueprint_component(route_parameters, request_get=request_get)
+        return await _resolve_blueprint_component(route_parameters, reader=reader)
     if normalized_object_type == "catalog":
-        return _resolve_catalog(route_parameters, request_get=request_get)
+        return await _resolve_catalog(route_parameters, reader=reader)
     if normalized_object_type == "request":
-        return _resolve_request(route_parameters, request_get=request_get)
+        return await _resolve_request(route_parameters, reader=reader)
     if normalized_object_type == "alarm_alert":
-        return _resolve_alert(route_parameters, request_get=request_get)
+        return await _resolve_alert(route_parameters, reader=reader)
     if normalized_object_type == "cost_optimization_recommendation":
-        return _resolve_cost_recommendation(route_parameters, request_get=request_get)
-    return _resolve_resource(
+        return await _resolve_cost_recommendation(route_parameters, reader=reader)
+    return await _resolve_resource(
         route_parameters,
         expected_kind=normalized_object_type,
-        request_get=request_get,
+        reader=reader,
     )
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """Parse AtlasClaw's fixed Provider-level Context resolver protocol."""
-    parser = argparse.ArgumentParser(description="Resolve one SmartCMP page Context.")
-    parser.add_argument("route_id")
-    parser.add_argument("path")
-    parser.add_argument("route_parameters")
-    parser.add_argument("page_type")
-    parser.add_argument("object_type")
-    return parser.parse_args(argv)
+async def resolve_context(
+    ctx: Any,
+    route_id: str,
+    path: str,
+    route_parameters: dict[str, Any],
+    page_type: str,
+    object_type: str,
+) -> dict[str, Any]:
+    """Resolve one Host page with the request-scoped SmartCMP browser identity.
 
+    Args:
+        ctx: AtlasClaw execution context for the current embedded Host request.
+        route_id: Provider route identifier selected by AtlasClaw.
+        path: Normalized Host path that matched the route.
+        route_parameters: Server-extracted path parameters.
+        page_type: Page type declared by the matched route.
+        object_type: Object type declared by the matched route.
 
-def main(argv: list[str] | None = None) -> int:
-    """Resolve one page and print exactly one JSON envelope for AtlasClaw."""
-    args = parse_args(argv)
-    try:
-        route_parameters = json.loads(args.route_parameters)
-    except (json.JSONDecodeError, TypeError):
-        write_result(_failure("invalid_route_parameters"))
-        return 0
-    if not isinstance(route_parameters, dict):
-        write_result(_failure("invalid_route_parameters"))
-        return 0
-    write_result(
-        resolve_page_context(
-            args.route_id,
-            args.path,
+    Returns:
+        A strict Provider context envelope for AtlasClaw snapshot validation.
+    """
+
+    reader = await load_context_reader_from_context(ctx)
+    async with reader:
+        return await resolve_page_context(
+            route_id,
+            path,
             route_parameters,
-            args.page_type,
-            args.object_type,
+            page_type,
+            object_type,
+            reader=reader,
         )
-    )
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

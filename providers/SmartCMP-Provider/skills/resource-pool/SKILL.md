@@ -29,7 +29,7 @@ related:
 
 tool_list_name: "smartcmp_list_all_resource_pools"
 tool_list_description: "List SmartCMP resource pools from the standalone UI directory endpoint. ONLY for standalone browsing when user explicitly asks to view resource pools (查询资源池 / 列出资源池). NEVER call this tool during request or ticket submission workflows."
-tool_list_entrypoint: "scripts/list_all_resource_pools.py"
+tool_list_entrypoint: "scripts/adapter.py:list_resource_pools"
 tool_list_groups:
   - cmp
   - datasource
@@ -69,8 +69,8 @@ Provide a precise, read-only skill for direct resource-pool browsing.
 - Keep the user-visible output to the numbered list of resource-pool names.
 - Treat IDs and other metadata as hidden backend state unless the user explicitly asks for them.
 
-## Script
+## Handler
 
-| Script | Description |
-|--------|-------------|
-| `scripts/list_all_resource_pools.py` | Call the standalone resource-pool directory endpoint and emit `##RESOURCE_POOL_DIRECTORY_META_START## ... ##RESOURCE_POOL_DIRECTORY_META_END##` |
+`scripts/adapter.py:list_resource_pools` converts the optional Tool query and
+calls the SmartCMP Provider directory operation. This Skill has one Tool, so
+one direct handler file is appropriate; no extra forwarding Python is kept.

@@ -1,159 +1,53 @@
 # Approval Workflow Reference
 
-Detailed workflow for managing SmartCMP approvals.
+Use the five AtlasClaw approval Tools. Their handlers are co-located in
+`scripts/adapter.py`; do not run the file as a command-line program.
 
----
+## Execution rules
 
-## Setup (once per session)
+1. Call `smartcmp_list_pending` before approve or reject so the current
+   `request_id` is known.
+2. Resolve a displayed row number to the latest list result's `_internal.items[].request_id`.
+3. Never pass a display index, internal UUID, or placeholder as a Request ID.
+4. Ask for confirmation before a batch approval or rejection.
+5. Parse `_internal` metadata silently; do not display raw workflow JSON.
 
-```powershell
-$env:CMP_URL = "https://<host>/platform-api"
-$env:CMP_COOKIE = '<full cookie string>'   # MUST use single quotes
-```
+## Request ID contract
 
----
+`smartcmp_approve` and `smartcmp_reject` accept SmartCMP user-facing Request
+IDs in `request_id`, such as `RES20260505000010`, `TIC20260502000003`, or
+`CHG20260413000011`. SmartCMP Provider resolves those values to the internal
+approval action identifiers.
 
-## Execution Rules
+## Flow
 
-1. **Always list first** — Run `list_pending.py` before approve/reject operations.
-2. **Confirm batch operations** — Ask user before approving/rejecting multiple items.
-3. **NEVER create temp files** — Your context IS your memory.
-4. **NEVER redirect output** — Run scripts directly, read stdout.
-5. **Parse META blocks silently** — Do NOT display raw JSON to user.
+### List
 
-### Request ID Contract
+Call `smartcmp_list_pending`, optionally with `days`. Show the visible table
+and retain `{index, request_id, name, applicant}` from `_internal.items`.
 
-`approve.py` and `reject.py` accept only SmartCMP user-facing Request IDs from
-`APPROVAL_META.requestId`, such as `RES20260505000010`, `TIC20260502000003`,
-or `CHG20260413000011`. The scripts resolve those Request IDs to the SmartCMP
-approval action identifiers internally before calling SmartCMP action APIs.
+### Inspect or analyze
 
-Do not pass display row numbers, UUID-shaped internal IDs, or placeholder values
-such as `dummy-id-placeholder`.
+- Use `smartcmp_get_request_detail` for an explicit detail request.
+- Use `smartcmp_analyze_approval_request` for read-only review guidance.
 
----
+Neither operation changes CMP state.
 
-## Full Workflow
+### Approve
 
-### Step 1 — List pending approvals
+After resolving every selected row to `request_id`, call `smartcmp_approve`
+with `ids` and an optional `reason`.
 
-```
-ACTION: python scripts/list_pending.py
-SHOW:   Markdown table of pending items
-PARSE:  ##APPROVAL_META_START## silently → cache {index, requestId, name, requester}
-ASK:    "Would you like to approve or reject any of these?"
-STOP → wait for user selection
-```
+### Reject
 
-**Optional filters:**
-```bash
-# Query last 7 days only
-python scripts/list_pending.py --days 7
-```
+After resolving every selected row to `request_id`, call `smartcmp_reject`
+with `ids` and a rejection `reason`.
 
----
-
-### Step 2a — Approve (single item)
-
-When user says "approve #1", "approve the first one", "同意 1", or "批准 1":
-
-```
-LOOKUP: requestId from cached ##APPROVAL_META## by index
-ACTION: python scripts/approve.py <requestId>
-SHOW:   "[SUCCESS] Approval completed."
-```
-
-**With reason:**
-```bash
-python scripts/approve.py <requestId> --reason "Approved per policy"
-```
-
----
-
-### Step 2b — Approve (multiple items)
-
-When user says "approve all" or "approve #1, #2, #3":
-
-```
-LOOKUP: requestIds from cached ##APPROVAL_META##
-CONFIRM: "You are about to approve N items. Proceed? (yes/no)"
-STOP → wait for confirmation
-ACTION: python scripts/approve.py <requestId1> <requestId2> <requestId3>
-SHOW:   "[SUCCESS] Approval completed."
-```
-
----
-
-### Step 3a — Reject (single item)
-
-When user says "reject #2":
-
-```
-LOOKUP: requestId from cached ##APPROVAL_META## by index
-ASK:    "Would you like to provide a rejection reason?"
-STOP → wait for user input (optional)
-ACTION: python scripts/reject.py <requestId> [--reason "..."]
-SHOW:   "[SUCCESS] Rejection completed."
-```
-
----
-
-### Step 3b — Reject (multiple items)
-
-When user says "reject all" or "reject #1 and #2":
-
-```
-LOOKUP: requestIds from cached ##APPROVAL_META##
-CONFIRM: "You are about to reject N items. Proceed? (yes/no)"
-STOP → wait for confirmation
-ASK:    "Would you like to provide a rejection reason?"
-STOP → wait for user input (optional)
-ACTION: python scripts/reject.py <requestId1> <requestId2> [--reason "..."]
-SHOW:   "[SUCCESS] Rejection completed."
-```
-
----
-
-## Script Reference
-
-| Script | Purpose | Arguments |
-|--------|---------|-----------|
-| `list_pending.py` | List pending approvals | `[--days N]` |
-| `approve.py` | Approve items | `<requestId1> [requestId2...] [--reason "..."]` |
-| `reject.py` | Reject items | `<requestId1> [requestId2...] [--reason "..."]` |
-
----
-
-## API Reference
-
-### List pending approvals
-```
-GET /generic-request/current-activity-approval
-    ?page=1&size=50&stage=pending&sort=updatedDate,desc
-    &startAtMin=<timestamp>&startAtMax=<timestamp>
-    &rangeField=updatedDate&states=
-```
-
-### Approve batch
-```
-POST /approval-activity/approve/batch
-Body: {"reason": "<optional>"}
-```
-
-### Reject batch
-```
-POST /approval-activity/reject/batch
-Body: {"reason": "<optional>"}
-```
-
----
-
-## Error Handling
+## Error handling
 
 | Error | Action |
 |-------|--------|
-| `Invalid SmartCMP Request ID(s)` | Re-list pending approvals, then resolve the selected row to `APPROVAL_META.requestId` |
-| `401 Unauthorized` | Cookie expired → ask user to re-login |
-| `404 Not Found` | Invalid or stale Request ID → re-run list_pending.py |
-| `400 Bad Request` | Check API response for details |
-| Network timeout | Retry or check connectivity |
+| Invalid Request ID | Re-list pending approvals and resolve the selected row to `request_id` |
+| `401 Unauthorized` | Refresh the selected SmartCMP session or credential |
+| `404 Not Found` | Re-list because the approval may be stale or completed |
+| Timeout or unknown write result | Report the normalized Provider result; do not retry a write blindly |

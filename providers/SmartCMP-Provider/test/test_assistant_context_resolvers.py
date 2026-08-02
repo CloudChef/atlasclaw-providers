@@ -5,13 +5,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, Callable
 
 import pytest
-import requests
+
+from smartcmp_provider.auth import resolver as authentication_resolver
+from smartcmp_provider.transport.client import SmartCmpClient
 
 
 PROVIDER_ROOT = Path(__file__).resolve().parents[1]
@@ -36,10 +41,127 @@ class _Response:
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
-            raise requests.HTTPError(f"HTTP {self.status_code}", response=self)
+            raise RuntimeError(f"HTTP {self.status_code}")
 
     def json(self):
         return self.payload
+
+
+class _Reader:
+    """Expose a local SmartCMP Provider reader double without an HTTP fallback."""
+
+    ui_base_url = "https://cmp.example.com"
+    api_base_url = "https://cmp.example.com/platform-api"
+
+    def __init__(self, callback: Callable[..., _Response]) -> None:
+        self._callback = callback
+
+    async def __aenter__(self) -> _Reader:
+        return self
+
+    async def __aexit__(self, *_args: Any) -> None:
+        return None
+
+    async def read_form_definition(self, object_id: str) -> dict[str, Any]:
+        return self._read(f"/forms/{object_id}")
+
+    async def read_script_definition(self, object_id: str) -> dict[str, Any]:
+        return self._read(f"/scripts/{object_id}")
+
+    async def read_optimization_policy(self, object_id: str) -> dict[str, Any]:
+        return self._read(f"/compliance-policies/{object_id}")
+
+    async def read_component_definition(self, object_id: str) -> dict[str, Any]:
+        return self._read(f"/components/{object_id}")
+
+    async def read_alert(self, object_id: str) -> dict[str, Any]:
+        return self._read(f"/alarm-alert/{object_id}")
+
+    async def read_cost_recommendation(self, object_id: str) -> dict[str, Any]:
+        return self._read(f"/compliance-policies/violations/{object_id}")
+
+    async def read_approval(self, object_id: str) -> dict[str, Any]:
+        return self._read(f"/approval/{object_id}")
+
+    async def list_current_pending_approvals(
+        self,
+        workflow_id: str,
+    ) -> tuple[dict[str, Any], ...]:
+        payload = self._read(
+            "/generic-request/current-activity-approval",
+            params={
+                "page": 1,
+                "size": 100,
+                "stage": "pending",
+                "states": "APPROVAL_PENDING",
+                "sort": "updatedDate,desc",
+                "searchValues": workflow_id,
+            },
+        )
+        content = payload.get("content")
+        return (
+            tuple(item for item in content if isinstance(item, dict))
+            if isinstance(content, list)
+            else ()
+        )
+
+    async def read_catalog(self, object_id: str) -> dict[str, Any]:
+        return self._read(f"/catalogs/{object_id}")
+
+    async def read_request(self, object_id: str) -> dict[str, Any]:
+        return self._read(f"/generic-request/{object_id}")
+
+    async def read_resource(self, object_id: str) -> dict[str, Any]:
+        return self._read(f"/nodes/{object_id}")
+
+    async def has_instance_permission(
+        self,
+        entity_class: str,
+        entity_id: str,
+        permission: str,
+    ) -> bool:
+        payload = self._read(
+            "/acl/queryCurrentUserPermissions",
+            params={
+                "entityClassNames": entity_class,
+                "entityInstanceIds": entity_id,
+            },
+        )
+        if not isinstance(payload, list):
+            return False
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            entity = item.get("entityClass")
+            permissions = item.get("permissions")
+            if (
+                isinstance(entity, dict)
+                and entity.get("className") == entity_class
+                and entity.get("instanceId") in {entity_id, "", "-1"}
+                and isinstance(permissions, list)
+                and any(
+                    (
+                        value.get("id") if isinstance(value, dict) else value
+                    )
+                    == permission
+                    for value in permissions
+                )
+            ):
+                return True
+        return False
+
+    def _read(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+    ) -> Any:
+        response = self._callback(
+            f"{self.api_base_url}{path}",
+            params=params,
+        )
+        response.raise_for_status()
+        return response.json()
 
 
 def _configure(monkeypatch, *, cookies=None) -> None:
@@ -65,7 +187,6 @@ def _load(monkeypatch):
     original_path = list(sys.path)
     imported_names = (
         "_context_resolver_common",
-        "_request_user_transport",
         "_object_actions_common",
         "_approval_object_actions",
         "_request_object_actions",
@@ -88,6 +209,44 @@ def _load(monkeypatch):
             previous = previous_modules[name]
             if previous is not None:
                 sys.modules[name] = previous
+
+
+def _resolve_page_context(module: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Run the async production resolver from focused synchronous tests."""
+
+    return asyncio.run(module.resolve_page_context(*args, **kwargs))
+
+
+def test_resolver_import_restores_process_import_state(monkeypatch) -> None:
+    """Loading the cached callable must not expose Provider-local module names."""
+
+    _configure(monkeypatch)
+    local_names = (
+        "_provider_bootstrap",
+        "_alarm_object_actions",
+        "_approval_object_actions",
+        "_atlasclaw_adapter",
+        "_context_resolver_common",
+        "_cost_object_actions",
+        "_object_actions_common",
+        "_request_object_actions",
+        "_resource_object_actions",
+    )
+    original_path = list(sys.path)
+    original_modules = {name: sys.modules.get(name) for name in local_names}
+    spec = importlib.util.spec_from_file_location(
+        "smartcmp_context_import_isolation",
+        RESOLVER_PATH,
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert sys.path == original_path
+    assert {
+        name: sys.modules.get(name) for name in local_names
+    } == original_modules
+    assert callable(module.resolve_context)
 
 
 def _acl(entity_class: str, entity_id: str) -> list[dict]:
@@ -121,7 +280,11 @@ def test_resolver_import_never_auto_logs_in_with_configured_credentials(
         login_calls.append((args, kwargs))
         raise AssertionError("Context resolver must not auto-login")
 
-    monkeypatch.setattr(requests, "post", record_login)
+    monkeypatch.setattr(
+        authentication_resolver,
+        "login_with_password",
+        record_login,
+    )
 
     _load(monkeypatch)
 
@@ -144,31 +307,48 @@ def test_catalog_request_action_fails_closed_for_unpublished_states(
 ) -> None:
     resolver = _load(monkeypatch)
     actions = resolver.build_catalog_object_actions(
-        "https://cmp.example.com/platform-api",
+        "https://cmp.example.com",
         {"id": "CATALOG-1", "name": "Catalog", "status": state},
     )
     assert [action["action_id"] for action in actions] == expected_actions
 
 
-def test_missing_request_cookie_fails_before_provider_io(monkeypatch) -> None:
-    _configure(monkeypatch, cookies={})
-    calls = 0
+@pytest.mark.asyncio
+async def test_callable_resolver_uses_request_scoped_context(monkeypatch) -> None:
+    """The production entrypoint reads identity from ctx without a child process."""
 
-    def fail_http(*_args, **_kwargs):
-        nonlocal calls
-        calls += 1
+    module = _load(monkeypatch)
+    resource = {
+        "id": RESOURCE_ID,
+        "name": "VM 01",
+        "status": "RUNNING",
+        "componentType": "cloud.machine.instance.vm",
+    }
 
-    monkeypatch.setattr(requests, "get", fail_http)
-    with pytest.raises(RuntimeError, match="request-scoped CloudChef-Authenticate"):
-        path = RESOLVER_ROOT / "_context_resolver_common.py"
-        spec = importlib.util.spec_from_file_location(
-            "context_resolver_common_missing_cookie",
-            path,
-        )
-        assert spec is not None and spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-    assert calls == 0
+    def fake_get(url, **_kwargs):
+        if url.endswith("/acl/queryCurrentUserPermissions"):
+            return _Response(_acl(module.RESOURCE_ENTITY_CLASS, RESOURCE_ID))
+        assert url.endswith(f"/nodes/{RESOURCE_ID}")
+        return _Response(resource)
+
+    expected_ctx = SimpleNamespace(deps=SimpleNamespace())
+
+    async def load_reader(ctx):
+        assert ctx is expected_ctx
+        return _Reader(fake_get)
+
+    monkeypatch.setattr(module, "load_context_reader_from_context", load_reader)
+    result = await module.resolve_context(
+        expected_ctx,
+        "virtual-machine-detail",
+        f"/main/virtual-machines/{RESOURCE_ID}/details",
+        {"resource_id": RESOURCE_ID},
+        "virtual-machine-detail",
+        "virtual_machine",
+    )
+
+    assert result["success"] is True
+    assert result["object"]["id"] == RESOURCE_ID
 
 
 def test_pending_approval_resolves_exact_three_id_shape(monkeypatch) -> None:
@@ -200,13 +380,14 @@ def test_pending_approval_resolves_exact_three_id_shape(monkeypatch) -> None:
         assert kwargs["params"]["searchValues"] == WORKFLOW_ID
         return _Response({"content": [pending_row]})
 
-    result = module.resolve_page_context(
+    result = _resolve_page_context(
+        module,
         "pending-approval-detail",
         f"/main/new-application/pendingApproval/PROVISION_BP/{APPROVAL_ID}",
         {"approval_type": "PROVISION_BP", "approval_id": APPROVAL_ID},
         "approval-detail",
         "approval_request",
-        request_get=fake_get,
+        reader=_Reader(fake_get),
     )
     assert result["success"] is True
     assert result["object"]["id"] == WORKFLOW_ID
@@ -245,13 +426,14 @@ def test_alert_and_cost_context_return_state_aware_actions(monkeypatch) -> None:
             }
         )
 
-    alert = module.resolve_page_context(
+    alert = _resolve_page_context(
+        module,
         "alarm-alert-detail",
         f"/main/alarm-activity-management/alarm-triggered/edit/{ALERT_ID}",
         {"alert_id": ALERT_ID},
         "alarm-alert-detail",
         "alarm_alert",
-        request_get=fake_get,
+        reader=_Reader(fake_get),
     )
     assert alert["object"]["id"] == ALERT_ID
     assert [action["action_id"] for action in alert["object_actions"]] == [
@@ -260,13 +442,14 @@ def test_alert_and_cost_context_return_state_aware_actions(monkeypatch) -> None:
         "resolve",
     ]
 
-    cost = module.resolve_page_context(
+    cost = _resolve_page_context(
+        module,
         "cost-optimization-detail",
         f"/main/measurement-billing/resource-usage-analysis/{RECOMMENDATION_ID}",
         {"recommendation_id": RECOMMENDATION_ID},
         "cost-optimization-detail",
         "cost_optimization_recommendation",
-        request_get=fake_get,
+        reader=_Reader(fake_get),
     )
     assert cost["object"]["id"] == RECOMMENDATION_ID
     assert [action["action_id"] for action in cost["object_actions"]] == [
@@ -378,13 +561,14 @@ def test_edit_pages_resolve_minimal_current_objects_without_business_content(
     ]
 
     for route_id, path, parameters, page_type, object_type, object_id in cases:
-        result = module.resolve_page_context(
+        result = _resolve_page_context(
+            module,
             route_id,
             path,
             parameters,
             page_type,
             object_type,
-            request_get=fake_get,
+            reader=_Reader(fake_get),
         )
         assert result["success"] is True
         assert result["object"]["id"] == object_id
@@ -397,7 +581,8 @@ def test_optimization_policy_resolver_rejects_deceptive_category_prefix(
     monkeypatch,
 ) -> None:
     module = _load(monkeypatch)
-    result = module.resolve_page_context(
+    result = _resolve_page_context(
+        module,
         "optimization-policy-edit",
         (
             "/main/measurement-billing/cost-optimization/"
@@ -406,12 +591,14 @@ def test_optimization_policy_resolver_rejects_deceptive_category_prefix(
         {"policy_id": POLICY_ID},
         "optimization-policy-edit",
         "optimization_policy",
-        request_get=lambda *_args, **_kwargs: _Response(
-            {
-                "id": POLICY_ID,
-                "name": "Wrong category",
-                "category": "COST-OPTIMIZATIONX.MACHINE",
-            }
+        reader=_Reader(
+            lambda *_args, **_kwargs: _Response(
+                {
+                    "id": POLICY_ID,
+                    "name": "Wrong category",
+                    "category": "COST-OPTIMIZATIONX.MACHINE",
+                }
+            )
         ),
     )
 
@@ -484,14 +671,17 @@ def test_edit_page_resolvers_reject_provider_object_id_mismatch(
 ) -> None:
     module = _load(monkeypatch)
 
-    result = module.resolve_page_context(
+    result = _resolve_page_context(
+        module,
         route_id,
         path,
         parameters,
         page_type,
         object_type,
-        request_get=lambda *_args, **_kwargs: _Response(
-            {"id": GENERIC_REQUEST_ID}
+        reader=_Reader(
+            lambda *_args, **_kwargs: _Response(
+                {"id": GENERIC_REQUEST_ID}
+            )
         ),
     )
 
@@ -515,13 +705,14 @@ def test_catalog_request_and_resource_resolvers_return_selected_display_fields(m
             return _Response(_acl(resolver.CATALOG_ENTITY_CLASS, catalog_id))
         return _Response(catalog)
 
-    catalog_result = resolver.resolve_page_context(
+    catalog_result = _resolve_page_context(
+        resolver,
         "catalog-request",
         f"/main/catalog-ui/request/{catalog_id}",
         {"catalog_id": catalog_id},
         "catalog-request",
         "catalog",
-        request_get=catalog_get,
+        reader=_Reader(catalog_get),
     )
     assert catalog_result["success"] is True
     assert "inputData" not in catalog_result["object"]["attributes"]
@@ -538,7 +729,8 @@ def test_catalog_request_and_resource_resolvers_return_selected_display_fields(m
         "state": "PENDING",
         "credential": "secret",
     }
-    request_result = resolver.resolve_page_context(
+    request_result = _resolve_page_context(
+        resolver,
         "request-detail",
         (
             "/main/new-process/myApplication/CLOUD_BLUEPRINT_SERVICE/"
@@ -550,7 +742,7 @@ def test_catalog_request_and_resource_resolvers_return_selected_display_fields(m
         },
         "request-detail",
         "request",
-        request_get=lambda *_args, **_kwargs: _Response(request),
+        reader=_Reader(lambda *_args, **_kwargs: _Response(request)),
     )
     assert request_result["success"] is True
     assert "credential" not in request_result["object"]["attributes"]
@@ -572,13 +764,14 @@ def test_catalog_request_and_resource_resolvers_return_selected_display_fields(m
             }
         )
 
-    resource_result = resolver.resolve_page_context(
+    resource_result = _resolve_page_context(
+        resolver,
         "virtual-machine-detail",
         f"/main/virtual-machines/{RESOURCE_ID}/details",
         {"resource_id": RESOURCE_ID},
         "virtual-machine-detail",
         "virtual_machine",
-        request_get=resource_get,
+        reader=_Reader(resource_get),
     )
     assert resource_result["success"] is True
     assert "credential" not in resource_result["object"]["attributes"]
@@ -587,14 +780,24 @@ def test_catalog_request_and_resource_resolvers_return_selected_display_fields(m
         "analyze",
         "list_operations",
     ]
+    operations_action = next(
+        action
+        for action in resource_result["object_actions"]
+        if action["action_id"] == "list_operations"
+    )
+    operations_prompt = operations_action["agent_prompt"]["default"]
+    assert RESOURCE_ID in operations_prompt
+    assert '"virtual-machines"' in operations_prompt
+    assert "do not resolve the target by display name" in operations_prompt
 
-    generic_resource_result = resolver.resolve_page_context(
+    generic_resource_result = _resolve_page_context(
+        resolver,
         "cloud-resource-detail",
         f"/main/cloud-resource/{RESOURCE_ID}",
         {"resource_id": RESOURCE_ID},
         "resource-detail",
         "resource",
-        request_get=resource_get,
+        reader=_Reader(resource_get),
     )
     assert generic_resource_result["success"] is True
     assert [
@@ -611,7 +814,8 @@ def test_object_parameter_contract_mismatch_fails_before_provider_io(monkeypatch
         calls += 1
         raise AssertionError("invalid route contract must not reach SmartCMP")
 
-    result = resolver.resolve_page_context(
+    result = _resolve_page_context(
+        resolver,
         "catalog-request",
         "/main/catalog-ui/request/BUILD-IN-CATALOG-WINDOWS-VM",
         {
@@ -620,27 +824,7 @@ def test_object_parameter_contract_mismatch_fails_before_provider_io(monkeypatch
         },
         "catalog-request",
         "catalog",
-        request_get=fail_http,
+        reader=_Reader(fail_http),
     )
     assert result == {"success": False, "reason": "invalid_route_contract"}
     assert calls == 0
-
-
-def test_cli_contract_uses_fixed_provider_level_arguments(monkeypatch) -> None:
-    resolver = _load(monkeypatch)
-    args = resolver.parse_args(
-        [
-            "catalog-request",
-            "/main/catalog-ui/request/BUILD-IN-CATALOG-WINDOWS-VM",
-            '{"catalog_id":"BUILD-IN-CATALOG-WINDOWS-VM"}',
-            "catalog-request",
-            "catalog",
-        ]
-    )
-    assert vars(args) == {
-        "route_id": "catalog-request",
-        "path": "/main/catalog-ui/request/BUILD-IN-CATALOG-WINDOWS-VM",
-        "route_parameters": '{"catalog_id":"BUILD-IN-CATALOG-WINDOWS-VM"}',
-        "page_type": "catalog-request",
-        "object_type": "catalog",
-    }

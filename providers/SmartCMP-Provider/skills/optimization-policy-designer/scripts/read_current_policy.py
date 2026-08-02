@@ -13,7 +13,7 @@ from typing import Any
 
 try:
     from pydantic_ai import RunContext
-except ImportError:  # Provider-only unit tests do not install the Core runtime.
+except ImportError:  # Provider-only unit tests do not install the AtlasClaw runtime.
     RunContext = Any
 
 
@@ -24,25 +24,9 @@ sys.path.insert(
     ),
 )
 
-from _current_page_object import (  # noqa: E402
-    CurrentPageObjectError,
-    fetch_current_page_object,
-)
-
-
-_EDITABLE_FIELDS = (
-    "name",
-    "nameZh",
-    "description",
-    "descriptionZh",
-    "remedie",
-    "remedieZh",
-    "category",
-    "type",
-    "resourceType",
-    "severity",
-    "ruleContent",
-    "policyConfigs",
+from _current_page_object import fetch_current_page_object  # noqa: E402
+from smartcmp_provider.services.designers import (  # noqa: E402
+    project_optimization_policy,
 )
 
 
@@ -54,39 +38,25 @@ async def read_current_policy(ctx: RunContext[Any]) -> dict[str, Any]:
             expected_object_type="optimization_policy",
             api_collection="compliance-policies",
         )
-    except CurrentPageObjectError as exc:
+        policy = project_optimization_policy(payload)
+    except RuntimeError as exc:
         return {"success": False, "error": str(exc)}
 
-    category = str(payload.get("category") or "").strip().upper()
-    if category != "COST-OPTIMIZATION" and not category.startswith(
-        "COST-OPTIMIZATION."
-    ):
-        return {
-            "success": False,
-            "error": "Current policy is not a SmartCMP cost-optimization policy.",
-        }
-    rule_content = payload.get("ruleContent")
-    if not isinstance(rule_content, str):
-        return {
-            "success": False,
-            "error": "SmartCMP current policy ruleContent must be a string.",
-        }
-    editable = {key: payload.get(key) for key in _EDITABLE_FIELDS if key in payload}
     return {
         "success": True,
         "output": "\n".join(
             [
-                f"Current saved SmartCMP optimization policy: {payload.get('name') or payload['id']}",
-                f"Policy ID: {payload['id']}",
+                f"Current saved SmartCMP optimization policy: {policy.name or policy.object_id}",
+                f"Policy ID: {policy.object_id}",
                 "",
                 "Complete editable policy definition:",
                 "```json",
-                json.dumps(editable, ensure_ascii=False, indent=2),
+                json.dumps(policy.definition, ensure_ascii=False, indent=2),
                 "```",
             ]
         ),
         "policy": {
-            "id": payload["id"],
-            "definition": editable,
+            "id": policy.object_id,
+            "definition": policy.definition,
         },
     }

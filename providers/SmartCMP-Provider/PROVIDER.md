@@ -120,11 +120,11 @@ Cloud management platform provider for self-service resource requests, approvals
 | **Cookie** | `cookie` | Current-request CMP cookie/token, or static cookie for server-to-server/testing. | request `CloudChef-Authenticate` cookie/token or `cookie` |
 | **Credential** | `credential` | Username/password auto-login to CMP API. | `username`, `password` |
 
-> **Fallback selection:** `auth_type` may be a single value or an ordered chain. The runtime selects the first mode whose auth-specific fields are available.
-> - Provider Token: `provider_token` field present
-> - User Token: user-owned `user_token` field present
-> - Cookie: request-scoped `CloudChef-Authenticate` cookie/token or `cookie` field present
-> - Credential: `username` + `password` fields present
+> **Selection rule:** `auth_type` accepts exactly one mode. Lists, ordered
+> chains, and unknown values are rejected. When `auth_type` is omitted only for
+> compatibility with an existing instance, the Provider applies its documented
+> deterministic credential precedence; new configuration should always set an
+> explicit mode.
 
 ## Configuration Examples
 
@@ -221,7 +221,9 @@ CMP_USERNAME=admin
 CMP_PASSWORD=your-password
 ```
 
-> **Performance:** Credentials are cached at `.atlasclaw/users/default/sessions/smartcmp_cookie_cache.json` with 30-minute TTL.
+> **Runtime behavior:** Password login is resolved by SmartCMP Provider for
+> the current invocation. This integration does not maintain a separate
+> AtlasClaw cookie-cache file.
 
 ### Mode 5: User Token
 
@@ -253,7 +255,6 @@ CMP_URL=https://cmp.example.com
 |----------|-------------|-------------|
 | `CMP_URL` | Provider Token, Cookie, Credential, User Token | SmartCMP platform URL. Auto-normalizes: adds `https://` and `/platform-api` if missing. |
 | `CMP_PROVIDER_TOKEN` | Provider Token | Shared platform-generated API token for all AtlasClaw users. |
-| `CMP_API_TOKEN` | Legacy User Token | Platform-generated API token used by legacy env fallback. |
 | `CMP_COOKIE` | Cookie | Full session cookie string from browser. |
 | `CMP_USERNAME` | Credential | Login username. |
 | `CMP_PASSWORD` | Credential | Login password (plaintext or MD5 hash). |
@@ -304,20 +305,20 @@ CMP_URL=https://cmp.example.com
 |-------|------|-------------|----------------|
 | `resource-pool` | Directory Query | Standalone listing of all resource pools from the CMP UI directory endpoint | `smartcmp_list_all_resource_pools` |
 | `resource` | Directory Query + Day2 Operation | Standalone listing of all resources or all cloud hosts, one-host detail analysis via `PATCH /nodes/{id}/view`, current-user executable operation discovery, and no-parameter resource operation execution | `smartcmp_list_all_resource`, `smartcmp_resource_detail`, `smartcmp_list_resource_operations`, `smartcmp_operate_resource` |
-| `datasource` | Data Query | Read-only reference data queries, standalone business-group scope discovery, request reference lookups, and resource lookup by ID for service discovery and analysis workflows | `smartcmp_list_all_business_groups`, `smartcmp_list_applications`, `smartcmp_list_components`, `smartcmp_query_logical_templates`, `smartcmp_query_images`, `list_services`, `list_resource` |
-| `request` | Provisioning | Cloud resource provisioning requests that select a logical template, then follow the generated instruction's physical-template or cloud-image branch | `smartcmp_list_logical_templates`, `smartcmp_list_physical_templates`, `smartcmp_list_images`, `submit`, `status` |
-| `approval` | Workflow | Approval workflow management | `list_pending`, `approve`, `reject` |
-| `alarm` | Monitoring | Alarm workflows plus component-model-driven resource health evidence | `list_alerts`, `analyze_alert`, `analyze_resource_health`, `operate_alert` |
+| `datasource` | Data Query | Read-only business-group, application, component, template and image directories | `smartcmp_list_all_business_groups`, `smartcmp_list_applications`, `smartcmp_list_components`, `smartcmp_query_logical_templates`, `smartcmp_query_images` |
+| `request` | Provisioning | Cloud resource provisioning requests that select a logical template, then follow the generated instruction's physical-template or cloud-image branch | `smartcmp_list_services`, `smartcmp_get_request_catalog`, `smartcmp_list_logical_templates`, `smartcmp_list_physical_templates`, `smartcmp_list_images`, `smartcmp_submit_request`, `smartcmp_get_request_status` |
+| `approval` | Workflow | Approval workflow management | `smartcmp_list_pending`, `smartcmp_get_request_detail`, `smartcmp_analyze_approval_request`, `smartcmp_approve`, `smartcmp_reject` |
+| `alarm` | Monitoring | Alarm workflows plus component-model-driven resource health evidence | `smartcmp_list_alerts`, `smartcmp_analyze_alert`, `analyze_resource_health`, `smartcmp_operate_alert` |
 | `preapproval-agent` | Agent | Autonomous approval pre-review | Webhook-triggered, policy-based decisions |
 | `request-decomposition-agent` | Agent | Transform natural-language requirements into request drafts | NL parsing, multi-skill orchestration |
-| `cost-optimization` | Optimization | Analyze savings opportunities and execute platform-native fixes | `list_recommendations`, `analyze_recommendation`, `execute_optimization`, `track_execution` |
-| `resource-compliance` | Analysis | Resolve any resource by exact name or visible list index, build bounded CMP evidence, and run one generic LLM compliance analysis | `list_resource`, `analyze_resource` |
-| `form-designer` | Form Design | Generate, read, normalize, and refine SmartCMP Angular form schema JSON without saving CMP forms | `read_form`, `design_form` |
+| `cost-optimization` | Optimization | Analyze savings opportunities and execute platform-native fixes | `smartcmp_list_cost_recommendations`, `smartcmp_analyze_cost_recommendation`, `smartcmp_analyze_resource_cost`, `smartcmp_execute_cost_optimization`, `smartcmp_track_cost_optimization` |
+| `resource-compliance` | Analysis | Resolve any resource by exact name or visible list index, build bounded CMP evidence, and run one generic LLM compliance analysis | `smartcmp_analyze_resource_compliance` |
+| `form-designer` | Form Design | Generate, read, normalize, and refine SmartCMP Angular form schema JSON without saving CMP forms | `smartcmp_read_current_form_schema`, `smartcmp_read_form_schema`, `smartcmp_design_form_schema` |
 
-### Core Skills
+### Provider Skills
 
-All example commands below assume your current directory is
-`providers/SmartCMP-Provider/`.
+The names below are AtlasClaw Tools. Their `SKILL.md` entrypoints use
+`file.py:method`; handler files are not standalone CLI commands.
 
 #### resource-pool
 
@@ -325,10 +326,7 @@ List all resource pools directly from the CMP UI directory endpoint. Use this
 when the user says "查询可用的资源池", "查询资源池", or "列出所有的资源池" and does
 not want to enter the request workflow.
 
-```bash
-python skills/resource-pool/scripts/list_all_resource_pools.py              # List all resource pools
-python skills/resource-pool/scripts/list_all_resource_pools.py <keyword>    # Filter resource pools
-```
+Use `smartcmp_list_all_resource_pools`, optionally with `query_value`.
 
 #### resource
 
@@ -339,16 +337,8 @@ Use this when the user says "查看我的云资源", "查看所有资源", "查�
 "查看所有云主机", "查看某个云主机详情", "分析某个云主机属性",
 "查看可执行操作", "执行资源操作", "云资源开机", "云资源关机", "启动云主机", or "停止云主机".
 
-```bash
-python skills/resource/scripts/list_all_resource.py                                     # List all resources
-python skills/resource/scripts/list_all_resource.py --scope virtual_machines            # List all cloud hosts
-python skills/resource/scripts/list_all_resource.py --scope virtual_machines --query-value production
-python skills/resource/scripts/resource_detail.py <resource_id>              # Fetch and analyze one cloud host evidence view
-python skills/resource/scripts/list_resource_operations.py 'https://cmp/#/main/virtual-machines/<resource_id>/details'
-python skills/resource/scripts/operate_resource.py <resource_id> --action stop
-python skills/resource/scripts/operate_resource.py <resource_id> --action create_snapshot
-python skills/resource/scripts/operate_resource.py <id1> <id2> --action refresh
-```
+Use `smartcmp_list_all_resource`, `smartcmp_resource_detail`,
+`smartcmp_list_resource_operations`, and `smartcmp_operate_resource`.
 
 The operation list comes from `GET /nodes/{category}/{id}/resource-actions`
 with the current user's SmartCMP credentials. It does not use resource-type
@@ -356,22 +346,15 @@ definition endpoints as executable-operation fallback.
 
 #### datasource
 
-Query reference data (read-only). Use before `request` skill to discover
-available services, business-group scopes, applications, templates, images, or
-resource details. Treat SmartCMP `business group` as the same scope users may
+Query reference data (read-only). Use for business-group scopes, applications,
+components, templates, and images. Treat SmartCMP `business group` as the same scope users may
 call tenant, 租户, 部门, BU, Department, 项目, or Project. Standalone
 resource-pool queries still belong to `resource-pool`, and list-style resource
 browsing belongs to `resource`.
 
-```bash
-python skills/datasource/scripts/list_all_business_groups.py        # Standalone business-group scopes
-python skills/datasource/scripts/list_services.py                    # List service catalogs
-python skills/datasource/scripts/list_resource.py <resource_id>          # Resource details + normalized view
-python skills/shared/scripts/list_applications.py <business_group_id>    # List applications
-python skills/shared/scripts/list_components.py <source_key>             # List component metadata
-python skills/datasource/scripts/list_logical_templates.py [linux|windows|name] [--resource-bundle-id <id>]
-python skills/datasource/scripts/list_images.py <resource_bundle_id> <logic_template_id> <cloud_entry_type>
-```
+Use `smartcmp_list_all_business_groups`, `smartcmp_list_applications`,
+`smartcmp_list_components`, `smartcmp_query_logical_templates`, and
+`smartcmp_query_images`.
 
 #### request
 
@@ -383,20 +366,16 @@ datasource business-group listing. If datasource returns one business group,
 use it silently. Ask the user to choose only when datasource returns multiple
 business groups for the request.
 
-```bash
-python skills/datasource/scripts/list_services.py          # 1. Discover services
-python skills/request/scripts/submit.py --file request_body.json  # 2. Submit request
-```
+Use `smartcmp_list_services`, `smartcmp_get_request_catalog`, the request
+choice Tools, and `smartcmp_submit_request`.
 
 #### approval
 
 Manage approval workflows.
 
-```bash
-python skills/approval/scripts/list_pending.py                           # List pending approvals
-python skills/approval/scripts/approve.py <request_id> --reason "Approved"       # Approve
-python skills/approval/scripts/reject.py <request_id> --reason "Budget exceeded" # Reject
-```
+Use `smartcmp_list_pending`, `smartcmp_get_request_detail`,
+`smartcmp_analyze_approval_request`, `smartcmp_approve`, and
+`smartcmp_reject`.
 
 #### alarm
 
@@ -405,18 +384,14 @@ evidence for LLM resource health analysis, and optionally operate on alert
 status when appropriate. Resource health analysis does not require an alert and
 does not use alarm-policy thresholds as its verdict.
 
-```bash
-python skills/alarm/scripts/list_alerts.py                            # List current alerts
-python skills/alarm/scripts/analyze_alert.py <alert_id>               # Analyze one alert
-python skills/alarm/scripts/analyze_resource_health.py --resource-name <name> # Collect health evidence
-python skills/alarm/scripts/operate_alert.py <alert_id> --action mute # Change alert status
-```
+Use `smartcmp_list_alerts`, `smartcmp_analyze_alert`,
+`analyze_resource_health`, and `smartcmp_operate_alert`.
 
-`analyze_resource_health.py` resolves the resource `componentType`, loads its
+`analyze_resource_health` resolves the resource `componentType`, loads its
 effective monitoring model, and queries only model-defined Prometheus metrics
 that can be scoped to that resource. AWS VM, AWS RDS, vSphere VM, software,
 hardware, and other components therefore share one flow without sharing a
-hard-coded metric list. The script emits facts and time-series statistics; the
+hard-coded metric list. The handler emits facts and time-series statistics; the
 AtlasClaw LLM supplies the `healthy`, `abnormal`, or `indeterminate` judgment.
 
 #### cost-optimization
@@ -427,10 +402,10 @@ AWS, Azure, and similar environments, but execution stays within the platform
 and only uses the native day2 fix endpoint.
 
 **Workflow:**
-1. List recommendations with `list_recommendations.py`
-2. Analyze one finding with `analyze_recommendation.py --id <violation_id>`
-3. Execute the native fix with `execute_optimization.py --id <violation_id>`
-4. Track the remediation with `track_execution.py --id <violation_id>`
+1. List recommendations with `smartcmp_list_cost_recommendations`
+2. Analyze one finding with `smartcmp_analyze_cost_recommendation`
+3. Execute the native fix with `smartcmp_execute_cost_optimization`
+4. Track remediation with `smartcmp_track_cost_optimization`
 
 **Safety Boundary:**
 - Public-cloud best-practice guidance is advisory only
@@ -443,16 +418,11 @@ Inspect one or more existing resources by exact resource name or visible list
 selection, build a bounded and redacted CMP evidence profile, and let the LLM
 analyze operational state and compliance risk through one generic process.
 
-`list_resource.py` returns the canonical resource payload and shared normalized
-facts. The compliance tool treats `componentType` as context rather than an
-analyzer gate and does not read configured CMP policy results.
-
-```bash
-python skills/resource/scripts/list_all_resource.py --scope virtual_machines                  # Show visible names and indexes
-python skills/resource-compliance/scripts/analyze_resource.py --resource-name e2e-newrole-linux3-0501
-python skills/resource-compliance/scripts/analyze_resource.py --resource-index 2 --resource-directory-json '[{"index":2,"id":"internal-id","name":"e2e-newrole-linux3-0501"}]'
-python skills/resource-compliance/scripts/analyze_resource.py --payload-json '{"resourceIds":["id-1"],"triggerSource":"webhook"}'
-```
+SmartCMP Provider returns the canonical resource payload and shared
+normalized facts. The compliance Tool treats `componentType` as context rather
+than an analyzer gate and does not read configured CMP policy results. Use
+`smartcmp_list_all_resource` for visible selection and
+`smartcmp_analyze_resource_compliance` for the analysis.
 
 Interactive resource-compliance workflows must not ask users for SmartCMP
 UUIDs. Resource IDs are internal API and webhook compatibility values only.
@@ -472,7 +442,7 @@ Representative output fields:
 }
 ```
 
-The script does not call product-specific lifecycle or CVE sources. The final
+The Tool does not call product-specific lifecycle or CVE sources. The final
 LLM answer must distinguish confirmed CMP facts, model inference, and missing
 evidence. It never performs remediation automatically.
 
@@ -483,10 +453,7 @@ read with `GET /forms/{id}` from the selected SmartCMP instance, and final
 schemas are returned to AtlasClaw only. This skill does not submit service
 requests and does not save, publish, update, or delete forms in CMP.
 
-```bash
-python skills/form-designer/scripts/read_form.py 'https://cmp.example/#/main/service-model/forms/edit/<uuid>'
-python skills/form-designer/scripts/design_form.py --mode new --schema-json '{"type":"object","properties":{}}'
-```
+Use `smartcmp_read_form_schema` and `smartcmp_design_form_schema`.
 
 ### Agent Skills
 
@@ -498,7 +465,7 @@ instance and allowlist the exact provider-qualified skills that may use it.
 Webhook payloads should pass `provider_instance` and `robot_profile`.
 
 Use a SmartCMP `cmp_tk_*` token for the robot `provider_token` when available.
-The shared scripts send those tokens as `Authorization: Bearer <token>`, and
+SmartCMP Provider sends those tokens as `Authorization: Bearer <token>`, and
 SmartCMP audit trails should show the selected robot/admin account for approval
 actions and for webhook request submissions that do not forward SmartCMP user
 cookies.
@@ -527,23 +494,21 @@ Orchestration agent that transforms descriptive infrastructure demands into stru
 | `request_text` | string | Yes | Free-form requirement description |
 | `submission_mode` | string | No | `draft` or `review_required` |
 
-## Shared Scripts Reference
+## Skill handler organization
 
-Located in `skills/shared/scripts/` and `skills/datasource/scripts/`, used across
-datasource, request, and resource analysis workflows:
-
-| Script | Location | Description |
-|--------|----------|-------------|
-| `_common.py` | `shared/scripts/` | Authentication & URL normalization (used by all scripts) |
-| `list_resource.py` | `datasource/scripts/` | Fetch resource summary, details, raw resource fields, and the shared normalized `type + properties` view by ID |
-| `list_services.py` | `datasource/scripts/` | List published service catalogs |
-| `list_all_business_groups.py` | `datasource/scripts/` | List standalone business-group scopes |
+Multi-command Skills co-locate thin entrypoint methods in their own
+`scripts/adapter.py`. A Skill may still have multiple Python files when a
+helper has an independent caller or responsibility, such as embedded object
+actions or current-page resolution. Single-Tool Designer Skills may retain one
+direct handler. Authentication, HTTP, models, operations, and analysis live in
+`src/smartcmp_provider/`.
 
 ## Error Handling
 
 | Error | Cause | Resolution |
 |-------|-------|------------|
-| `401` / Token expired | Session cookie invalid | Refresh `CMP_COOKIE` env var |
-| `[ERROR]` output | Script execution failed | Report to user; do NOT self-debug |
+| `401` / Token expired | Selected SmartCMP session is invalid | Refresh the selected SmartCMP session |
+| Tool error | Handler or SmartCMP operation failed | Report the normalized error; do not invent a fallback |
 
-> All scripts output structured data with named metadata blocks such as `##..._START## ... ##..._END##` for programmatic parsing.
+> Handlers return user-visible content and `_internal` metadata through the
+> AtlasClaw Tool result contract.

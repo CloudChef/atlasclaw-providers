@@ -106,7 +106,7 @@ related:
 
 tool_list_name: "smartcmp_list_all_resource"
 tool_list_description: "List SmartCMP resources or virtual machines from the standalone CMP UI list endpoint and show each item's current status. Use `scope=all_resources` for 查看所有资源 and `scope=virtual_machines` for 查看所有云主机. `query_value` is optional. If the user only asked to browse resources, return the standard Markdown table. If the user asked for a resource operation, use the list result as target-resolution evidence and continue to confirmation or clarification."
-tool_list_entrypoint: "scripts/list_all_resource.py"
+tool_list_entrypoint: "scripts/adapter.py:list_all_resource"
 tool_list_groups:
   - cmp
   - datasource
@@ -140,7 +140,7 @@ tool_list_parameters: |
   }
 tool_detail_name: "smartcmp_resource_detail"
 tool_detail_description: "Summarize one SmartCMP cloud host by exact visible resource name or resource ID. Prefer `resource_name` when the user provides a host name such as `Linux-test-mysqlds`; the tool resolves one exact unique virtual-machine match internally, then uses `PATCH /nodes/{id}/view` until the CMP view API bug is fixed. Use this for 查看云主机详情 or 分析云主机属性."
-tool_detail_entrypoint: "scripts/resource_detail.py"
+tool_detail_entrypoint: "scripts/adapter.py:resource_detail"
 tool_detail_groups:
   - cmp
   - datasource
@@ -161,13 +161,18 @@ tool_detail_parameters: |
       "resource_name": {
         "type": "string",
         "description": "Exact visible SmartCMP cloud host name to inspect. Use this when the user asks for details by name and no resource ID is already known."
+      },
+      "category": {
+        "type": "string",
+        "description": "Resource category carried by list metadata or an object action. Default: virtual-machines.",
+        "default": "virtual-machines"
       }
     },
     "required": []
   }
 tool_operations_name: "smartcmp_list_resource_operations"
-tool_operations_description: "List enabled no-parameter SmartCMP resource operations executable by the current user through `GET /nodes/{category}/{resource_id}/resource-actions`. Accepts a SmartCMP detail URL such as `#/main/virtual-machines/<id>/details` or a raw resource UUID. Do not use resource type definition or built-in action endpoints as fallback. If the user only asked what operations are available, return the Markdown operation table. If the user asked to execute an operation, use this result as permission/operation validation evidence and continue to confirmation or clarification."
-tool_operations_entrypoint: "scripts/list_resource_operations.py"
+tool_operations_description: "List enabled no-parameter SmartCMP resource operations executable by the current user through `GET /nodes/{category}/{resource_id}/resource-actions`. Accepts a SmartCMP detail URL such as `#/main/virtual-machines/<id>/details` or a raw resource UUID. Do not use resource type definition or built-in action endpoints as fallback. If the user only asked what operations are available, return the Markdown operation table and invite an exact operation command. A later exact command such as `execute restart` for that resolved resource is explicit confirmation and must call `smartcmp_operate_resource`; do not ask for a redundant second confirmation."
+tool_operations_entrypoint: "scripts/adapter.py:list_resource_operations"
 tool_operations_groups:
   - cmp
   - resource
@@ -194,8 +199,8 @@ tool_operations_parameters: |
     "required": ["resource_ref"]
   }
 tool_power_name: "smartcmp_operate_resource"
-tool_power_description: "Execute an enabled no-parameter SmartCMP resource operation through `POST /nodes/resource-operations`. RULES: (1) NEVER claim an operation was submitted without actually calling this tool — fabricating results is strictly forbidden. (2) Before calling, confirm the exact resource and operation with the user. (3) Always pass real SmartCMP resource UUIDs or detail URLs in resource_ids, not display names or list indexes. (4) The tool rechecks `GET /nodes/{category}/{id}/resource-actions` with the current user context before submission. (5) After success, keep the user response short; do not print raw request or response details."
-tool_power_entrypoint: "scripts/operate_resource.py"
+tool_power_description: "Execute an enabled no-parameter SmartCMP resource operation through `POST /nodes/resource-operations`. `action` accepts the exact operation ID returned by `smartcmp_list_resource_operations`, including dynamic operations such as `restart`; it is not limited to power actions. RULES: (1) NEVER claim an operation was submitted without actually calling this tool — fabricating results is strictly forbidden. (2) Before calling, confirm the exact resource and operation with the user; an exact operation command after the resource and executable operations were just displayed is already that confirmation. (3) Always pass real SmartCMP resource UUIDs or detail URLs in resource_ids, not display names or list indexes. (4) The tool rechecks `GET /nodes/{category}/{id}/resource-actions` with the current user context before submission. (5) After success, keep the user response short; do not print raw request or response details."
+tool_power_entrypoint: "scripts/adapter.py:operate_resource"
 tool_power_groups:
   - cmp
   - resource
@@ -222,7 +227,7 @@ tool_power_parameters: |
       },
       "action": {
         "type": "string",
-        "description": "SmartCMP operation ID to execute. start/stop and 开机/关机 aliases are supported."
+        "description": "Exact SmartCMP operation ID returned by smartcmp_list_resource_operations, such as restart, refresh, create_snapshot, start, or stop. 开机/关机 aliases are also supported."
       }
     },
     "required": ["resource_ids", "action"]
@@ -235,7 +240,7 @@ tool_power_parameters: |
 # analysis implementations.
 tool_comprehensive_alerts_name: "smartcmp_resource_analyze_alerts"
 tool_comprehensive_alerts_description: "Resource-coordinator alias for the alarm skill's exact-resource alert evidence collector. Use only during comprehensive resource Analyze. Resolve one exact SmartCMP Resource.id and use it as the targetEntityId filter to collect current ALERT_FIRING/ALERT_MUTED alerts and currently ALERT_RESOLVED alerts whose triggerAt is within the requested lookback. This is not a resolveAt window. Do not associate alerts by resource name, nodeInstanceId, or entityInstanceId. Preserve association coverage; if associationStatus is partial or indeterminate, do not claim there are no current alerts or no matched resolved alerts in the trigger-time lookback."
-tool_comprehensive_alerts_entrypoint: "../alarm/scripts/list_alerts.py"
+tool_comprehensive_alerts_entrypoint: "../alarm/scripts/adapter.py:list_alerts"
 tool_comprehensive_alerts_groups:
   - cmp
   - resource
@@ -281,7 +286,7 @@ tool_comprehensive_alerts_parameters: |
 
 tool_comprehensive_health_name: "smartcmp_resource_analyze_health"
 tool_comprehensive_health_description: "Resource-coordinator alias for alarm's component-model-driven health evidence collector. Use only during comprehensive resource Analyze. Collect the current monitoring window and baseline, then preserve healthy, abnormal, or indeterminate semantics without treating absence of alerts as health evidence."
-tool_comprehensive_health_entrypoint: "../alarm/scripts/analyze_resource_health.py"
+tool_comprehensive_health_entrypoint: "../alarm/scripts/adapter.py:analyze_resource_health"
 tool_comprehensive_health_groups:
   - cmp
   - resource
@@ -321,7 +326,7 @@ tool_comprehensive_health_parameters: |
 
 tool_comprehensive_compliance_name: "smartcmp_resource_analyze_compliance"
 tool_comprehensive_compliance_description: "Resource-coordinator alias for the resource-compliance skill's bounded fact collector. Use only during comprehensive resource Analyze. Preserve compliant, at_risk, non_compliant, or needs_review semantics and never present generic LLM risk analysis as a CMP policy attestation."
-tool_comprehensive_compliance_entrypoint: "../resource-compliance/scripts/analyze_resource.py"
+tool_comprehensive_compliance_entrypoint: "../resource-compliance/scripts/adapter.py:analyze_resource"
 tool_comprehensive_compliance_groups:
   - cmp
   - resource
@@ -361,7 +366,7 @@ tool_comprehensive_compliance_parameters: |
 
 tool_comprehensive_cost_name: "smartcmp_resource_analyze_cost"
 tool_comprehensive_cost_description: "Resource-coordinator alias for cost-optimization's resource evidence collector. Use only during comprehensive resource Analyze. Preserve confirmed_optimization, potential_optimization, no_confirmed_opportunity, or indeterminate semantics; never invent a saving amount or remediate model-only potential."
-tool_comprehensive_cost_entrypoint: "../cost-optimization/scripts/analyze_resource_cost.py"
+tool_comprehensive_cost_entrypoint: "../cost-optimization/scripts/adapter.py:analyze_resource_cost"
 tool_comprehensive_cost_groups:
   - cmp
   - resource
@@ -481,6 +486,7 @@ When operation intent is present, a resource lookup is only a target-resolution 
 3. Confirm before submission.
    - Once both the resource UUID and operation ID are known, ask one concise confirmation using the resource name and operation ID/name, for example `Confirm stop on vm-a?`
    - Stop after asking for confirmation. Do not submit until the user explicitly confirms.
+   - If the immediately preceding workflow turn already showed the resolved resource and its executable operations, a later exact command such as `execute restart` or `confirm stop` for that resource is the explicit confirmation. Proceed to submission in that turn instead of asking the same question again.
 4. Submit after confirmation.
    - After explicit confirmation, call `smartcmp_operate_resource` with concrete resource UUIDs or detail URLs and the operation ID.
    - The latest explicit operation command supersedes older unfinished operation intent. For example, if the previous turn was about snapshots but the latest user message says `stop 1 vm-a`, handle `stop`.
@@ -496,7 +502,7 @@ When operation intent is present, a resource lookup is only a target-resolution 
 - `smartcmp_list_resource_operations` must only use `GET /nodes/{category}/{id}/resource-actions` with the current user context. Do not use `/resource-types/.../support-actions`, `/resource-types/.../resource-actions`, `/nodes/build-in-actions`, or other definition-level endpoints as executable-operation fallback.
 - Only show enabled no-parameter operations as executable choices. Operations that are disabled, web-only, have `inputsForm`, or require non-empty `parameters` are outside this tool's execution scope.
 - **NEVER claim a resource operation was submitted or succeeded without actually calling `smartcmp_operate_resource`.** You must call the tool and receive a real response before telling the user the operation is done.
-- **Before calling the operation tool, confirm with the user:** show the target resource name + operation ID/name, ask `Confirm this operation?`, and STOP. Only call the tool after user confirms.
+- **Before calling the operation tool, confirm with the user:** show the target resource name + operation ID/name, ask `Confirm this operation?`, and STOP. An exact operation command made after that resource and operation were just displayed is the confirmation; call the tool instead of adding a redundant confirmation turn.
 - After a resource operation succeeds, respond with only the action, resource ID(s), submitted status, message, and verification hint. Do not print raw request payloads or raw response details.
 - Resolve every target to a concrete SmartCMP resource UUID before calling `smartcmp_operate_resource`.
 - When the user only provides a resource name for a state-changing operation, use `smartcmp_list_all_resource` to find the resource and map the chosen item to its `id`; for detail inspection by name, use `smartcmp_resource_detail.resource_name` instead.
@@ -532,11 +538,17 @@ Never show:
 - “Top Level Keys”
 - Repeated IDs or technical fields unless they are part of the compact detail view
 
-## Scripts
+## Handlers and helpers
 
-| Script | Description |
+All four resource Tool commands are co-located in `scripts/adapter.py`:
+
+| Handler | Description |
 |--------|-------------|
-| `scripts/list_all_resource.py` | Call the standalone resource list endpoint and emit a Markdown resource table with visible status |
-| `scripts/resource_detail.py` | Fetch one cloud host view and emit a compact grouped detail summary |
-| `scripts/list_resource_operations.py` | List enabled no-parameter operations executable by the current SmartCMP user for one resource |
-| `scripts/operate_resource.py` | Submit SmartCMP no-parameter resource operations for one or more resource IDs |
+| `scripts/adapter.py:list_all_resource` | Call the standalone resource list endpoint and emit a Markdown resource table with visible status |
+| `scripts/adapter.py:resource_detail` | Fetch one cloud host view and emit a compact grouped detail summary |
+| `scripts/adapter.py:list_resource_operations` | List enabled no-parameter operations executable by the current SmartCMP user for one resource |
+| `scripts/adapter.py:operate_resource` | Submit SmartCMP no-parameter resource operations for one or more resource IDs |
+
+`scripts/_resource_object_actions.py` remains separate because the embedded
+assistant Context resolver calls it to build resource page actions. It is not
+a one-command forwarding script.

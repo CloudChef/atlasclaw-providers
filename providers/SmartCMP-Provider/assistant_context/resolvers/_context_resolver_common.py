@@ -1,62 +1,245 @@
 # -*- coding: utf-8 -*-
 # Copyright 2026 Qianyun, Inc., www.cloudchef.io, All rights reserved.
 
-"""Fail-closed request-user configuration and helpers for embedded page context."""
+"""Fail-closed SmartCMP Provider bridge and projections for embedded page context."""
 
 from __future__ import annotations
 
-import json
-import os
 import re
-import sys
 import uuid
-from typing import Any, Callable
+from types import TracebackType
+from typing import Any, Protocol
 
-import requests
-
-try:
-    from _request_user_transport import (
-        RequestUserConfigError,
-        load_request_user_transport,
-        suppress_insecure_request_warning,
-    )
-except ImportError:
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from _request_user_transport import (
-        RequestUserConfigError,
-        load_request_user_transport,
-        suppress_insecure_request_warning,
-    )
+from _atlasclaw_adapter import (
+    AtlasClawAdapterError,
+    resolve_selected_provider_request,
+)
+from smartcmp_provider.auth.models import ResolvedSmartCmpRequest
+from smartcmp_provider.errors import SmartCmpError
+from smartcmp_provider.operations.context_objects import (
+    CATALOG_ENTITY_CLASS,
+    RESOURCE_ENTITY_CLASS,
+    has_instance_permission,
+    list_current_pending_approvals,
+    read_alert,
+    read_approval,
+    read_catalog,
+    read_component_definition,
+    read_cost_recommendation,
+    read_form_definition,
+    read_optimization_policy,
+    read_request,
+    read_resource,
+    read_script_definition,
+)
+from smartcmp_provider.transport.client import SmartCmpClient
 
 
 class ContextConfigError(RuntimeError):
     """Raised before Provider I/O when request-user context configuration is invalid."""
 
 
-RequestGet = Callable[..., Any]
-CATALOG_ENTITY_CLASS = "io.cloudchef.yacmp.core.catalog.Catalog"
-RESOURCE_ENTITY_CLASS = "io.cloudchef.yacmp.core.resource.Resource"
+class ContextReader(Protocol):
+    """Define the identity-scoped Provider reads required by the page adapter."""
+
+    @property
+    def ui_base_url(self) -> str:
+        """Return the selected SmartCMP browser base URL for action links."""
+
+    async def read_form_definition(self, object_id: str) -> dict[str, Any]:
+        """Read one exact form definition."""
+
+    async def read_script_definition(self, object_id: str) -> dict[str, Any]:
+        """Read one exact script definition."""
+
+    async def read_optimization_policy(self, object_id: str) -> dict[str, Any]:
+        """Read one exact optimization policy."""
+
+    async def read_component_definition(self, object_id: str) -> dict[str, Any]:
+        """Read one exact blueprint component."""
+
+    async def read_alert(self, object_id: str) -> dict[str, Any]:
+        """Read one exact alert."""
+
+    async def read_cost_recommendation(self, object_id: str) -> dict[str, Any]:
+        """Read one exact cost recommendation."""
+
+    async def read_approval(self, object_id: str) -> dict[str, Any]:
+        """Read one exact approval."""
+
+    async def list_current_pending_approvals(
+        self,
+        workflow_id: str,
+    ) -> tuple[dict[str, Any], ...]:
+        """List current-user pending approvals for one Request ID."""
+
+    async def read_catalog(self, object_id: str) -> dict[str, Any]:
+        """Read one exact catalog."""
+
+    async def read_request(self, object_id: str) -> dict[str, Any]:
+        """Read one exact generic request."""
+
+    async def read_resource(self, object_id: str) -> dict[str, Any]:
+        """Read one exact resource."""
+
+    async def has_instance_permission(
+        self,
+        entity_class: str,
+        entity_id: str,
+        permission: str,
+    ) -> bool:
+        """Check one current-principal instance permission."""
+
+
 _CATALOG_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$")
 _REQUEST_ID = re.compile(r"^[A-Z]{3}\d{14}$")
 
 
-def load_context_config() -> tuple[str, dict[str, str], int]:
-    """Load only an explicit instance and request-scoped Host authentication cookie.
+class SmartCmpProviderContextReader:
+    """Execute page-context reads through one resolved SmartCMP Provider request."""
 
-    Provider/user tokens, configured cookies, and credentials are intentionally ignored.
-    This resolver path never imports the general SmartCMP helper, so it cannot auto-login.
+    def __init__(self, request: ResolvedSmartCmpRequest) -> None:
+        """Bind all reads to one immutable current-user credential and instance."""
+
+        self._request = request
+        self._client: SmartCmpClient | None = None
+
+    async def __aenter__(self) -> SmartCmpProviderContextReader:
+        """Open one HTTP connection pool shared by this context resolution."""
+
+        self._client = SmartCmpClient(self._request)
+        await self._client.__aenter__()
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Close the request-scoped HTTP connection pool."""
+
+        if self._client is not None:
+            await self._client.__aexit__(exc_type, exc, traceback)
+            self._client = None
+
+    @property
+    def ui_base_url(self) -> str:
+        """Return the SmartCMP Provider-derived browser base URL used in action metadata."""
+
+        return self._request.context.instance.ui_base_url
+
+    async def read_form_definition(self, object_id: str) -> dict[str, Any]:
+        """Read one exact form definition through SmartCMP Provider."""
+
+        return await read_form_definition(self._require_client(), object_id)
+
+    async def read_script_definition(self, object_id: str) -> dict[str, Any]:
+        """Read one exact script definition through SmartCMP Provider."""
+
+        return await read_script_definition(self._require_client(), object_id)
+
+    async def read_optimization_policy(self, object_id: str) -> dict[str, Any]:
+        """Read one exact optimization policy through SmartCMP Provider."""
+
+        return await read_optimization_policy(self._require_client(), object_id)
+
+    async def read_component_definition(self, object_id: str) -> dict[str, Any]:
+        """Read one exact component definition through SmartCMP Provider."""
+
+        return await read_component_definition(self._require_client(), object_id)
+
+    async def read_alert(self, object_id: str) -> dict[str, Any]:
+        """Read one exact alert through SmartCMP Provider."""
+
+        return await read_alert(self._require_client(), object_id)
+
+    async def read_cost_recommendation(self, object_id: str) -> dict[str, Any]:
+        """Read one exact cost recommendation through SmartCMP Provider."""
+
+        return await read_cost_recommendation(self._require_client(), object_id)
+
+    async def read_approval(self, object_id: str) -> dict[str, Any]:
+        """Read one exact approval through SmartCMP Provider."""
+
+        return await read_approval(self._require_client(), object_id)
+
+    async def list_current_pending_approvals(
+        self,
+        workflow_id: str,
+    ) -> tuple[dict[str, Any], ...]:
+        """List current-user pending approvals for one Request ID through SmartCMP Provider."""
+
+        return await list_current_pending_approvals(
+            self._require_client(),
+            workflow_id,
+        )
+
+    async def read_catalog(self, object_id: str) -> dict[str, Any]:
+        """Read one exact catalog through SmartCMP Provider."""
+
+        return await read_catalog(self._require_client(), object_id)
+
+    async def read_request(self, object_id: str) -> dict[str, Any]:
+        """Read one exact generic request through SmartCMP Provider."""
+
+        return await read_request(self._require_client(), object_id)
+
+    async def read_resource(self, object_id: str) -> dict[str, Any]:
+        """Read one exact resource through SmartCMP Provider."""
+
+        return await read_resource(self._require_client(), object_id)
+
+    async def has_instance_permission(
+        self,
+        entity_class: str,
+        entity_id: str,
+        permission: str,
+    ) -> bool:
+        """Check one current-principal instance permission through SmartCMP Provider."""
+
+        return await has_instance_permission(
+            self._require_client(),
+            entity_class,
+            entity_id,
+            permission,
+        )
+
+    def _require_client(self) -> SmartCmpClient:
+        """Return the active request client or reject use outside its scope."""
+
+        if self._client is None:
+            raise RuntimeError("Context reader must be used inside an async scope.")
+        return self._client
+
+
+async def load_context_reader_from_context(ctx: Any) -> SmartCmpProviderContextReader:
+    """Load the current Host user from an AtlasClaw execution context.
+
+    Args:
+        ctx: Request-scoped AtlasClaw context containing the selected Provider
+            instance and current Host cookies.
+
+    Returns:
+        A reader bound to the current SmartCMP browser session.
+
+    Raises:
+        ContextConfigError: If the current request has no usable SmartCMP session.
     """
+
     try:
-        return load_request_user_transport()
-    except RequestUserConfigError as exc:
-        raise ContextConfigError(str(exc)) from exc
-
-
-BASE_URL, HEADERS, REQUEST_TIMEOUT = load_context_config()
+        request = await resolve_selected_provider_request(
+            ctx,
+            request_cookie_only=True,
+        )
+    except AtlasClawAdapterError as error:
+        raise ContextConfigError(str(error)) from error
+    return SmartCmpProviderContextReader(request)
 
 
 def exact_uuid(value: Any) -> str:
     """Return a canonical UUID or an empty string when the external ID is invalid."""
+
     normalized = str(value or "").strip().lower()
     try:
         parsed = uuid.UUID(normalized)
@@ -67,92 +250,22 @@ def exact_uuid(value: Any) -> str:
 
 def exact_catalog_id(value: str) -> str:
     """Validate UUID and built-in SmartCMP catalog identifiers without URL parts."""
+
     normalized = str(value or "").strip()
     return normalized if _CATALOG_ID.fullmatch(normalized) else ""
 
 
 def exact_request_id(value: Any) -> str:
     """Return one user-visible SmartCMP workflow ID or an empty string."""
+
     normalized = str(value or "").strip().upper()
     return normalized if _REQUEST_ID.fullmatch(normalized) else ""
 
 
 def text(value: Any) -> str:
     """Return a trimmed scalar string while excluding nested provider data."""
+
     return str(value).strip() if isinstance(value, (str, int, float)) else ""
-
-
-def get_json(
-    path: str,
-    *,
-    request_get: RequestGet = requests.get,
-    params: dict[str, Any] | None = None,
-) -> Any:
-    """Execute one request-user authenticated, non-mutating Provider GET."""
-    # Resolver stdout must remain a single JSON value. urllib3 writes this one
-    # expected warning to stderr for verify=False, and the Markdown Tool runtime
-    # preserves stderr as Tool output. Keep the suppression local and category-
-    # specific so Provider diagnostics, unrelated warnings, and exceptions remain
-    # observable and continue to fail closed.
-    with suppress_insecure_request_warning():
-        response = request_get(
-            f"{BASE_URL}/{path.lstrip('/')}",
-            headers=HEADERS,
-            params=params,
-            verify=False,
-            timeout=REQUEST_TIMEOUT,
-        )
-    response.raise_for_status()
-    return response.json()
-
-
-def has_instance_permission(
-    entity_class: str,
-    entity_id: str,
-    permission: str,
-    *,
-    request_get: RequestGet = requests.get,
-) -> bool:
-    """Check one effective current-user instance ACL from the read-only permission query."""
-    try:
-        payload = get_json(
-            "acl/queryCurrentUserPermissions",
-            request_get=request_get,
-            params={
-                "entityClassNames": entity_class,
-                "entityInstanceIds": entity_id,
-            },
-        )
-    except (requests.exceptions.RequestException, TypeError, ValueError):
-        return False
-    if not isinstance(payload, list):
-        return False
-
-    exact_entries: list[dict[str, Any]] = []
-    class_entries: list[dict[str, Any]] = []
-    for item in payload:
-        if not isinstance(item, dict):
-            continue
-        entity = item.get("entityClass")
-        if not isinstance(entity, dict) or text(entity.get("className")) != entity_class:
-            continue
-        instance_id = text(entity.get("instanceId"))
-        if instance_id == entity_id:
-            exact_entries.append(item)
-        elif instance_id in {"", "-1"}:
-            class_entries.append(item)
-
-    for item in exact_entries + class_entries:
-        permissions = item.get("permissions")
-        if not isinstance(permissions, list):
-            continue
-        permission_ids = {
-            text(value.get("id")) if isinstance(value, dict) else text(value)
-            for value in permissions
-        }
-        if permission in permission_ids:
-            return True
-    return False
 
 
 def success_object(
@@ -176,8 +289,3 @@ def success_object(
         },
         "object_actions": object_actions,
     }
-
-
-def write_result(result: dict[str, Any]) -> None:
-    """Write one coordination JSON value without credentials or raw Provider payloads."""
-    print(json.dumps(result, ensure_ascii=False))

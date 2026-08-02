@@ -3,20 +3,7 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-
-SCRIPT_DIR = (
-    Path(__file__).resolve().parents[1]
-    / "skills"
-    / "cost-optimization"
-    / "scripts"
-)
-if str(SCRIPT_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPT_DIR))
-
-import _analysis as analysis  # noqa: E402
+from smartcmp_provider.analysis.cost import recommendation as analysis
 
 
 def test_normalize_analysis_facts_combines_violation_and_policy_fields():

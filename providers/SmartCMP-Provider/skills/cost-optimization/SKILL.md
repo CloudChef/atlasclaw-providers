@@ -43,23 +43,50 @@ related:
 
 tool_list_name: "smartcmp_list_cost_recommendations"
 tool_list_description: "List SmartCMP cost optimization recommendations with optional related policy counts."
-tool_list_entrypoint: "scripts/list_recommendations.py"
+tool_list_entrypoint: "scripts/adapter.py:list_recommendations"
 tool_list_groups:
   - cmp
   - finops
 tool_list_capability_class: "provider:smartcmp"
 tool_list_priority: 100
+tool_list_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "status": {"type": "string", "default": "ACTIVED"},
+      "severity": {
+        "type": "array",
+        "items": {"type": "string"}
+      },
+      "category": {"type": "string", "default": "COST-OPTIMIZATION"},
+      "query": {"type": "string"},
+      "page": {"type": "integer", "default": 0, "minimum": 0},
+      "size": {"type": "integer", "default": 20, "minimum": 1},
+      "with_related_policies": {"type": "boolean", "default": false}
+    }
+  }
 tool_analyze_name: "smartcmp_analyze_cost_recommendation"
 tool_analyze_description: "Analyze one SmartCMP cost optimization recommendation with multi-dimensional insights, datasource-enriched resource context, risk assessment, saving priority, and best practice guidance."
-tool_analyze_entrypoint: "scripts/analyze_recommendation.py"
+tool_analyze_entrypoint: "scripts/adapter.py:analyze_recommendation"
 tool_analyze_groups:
   - cmp
   - finops
 tool_analyze_capability_class: "provider:smartcmp"
 tool_analyze_priority: 120
+tool_analyze_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "violation_id": {
+        "type": "string",
+        "description": "SmartCMP cost recommendation violation ID."
+      }
+    },
+    "required": ["violation_id"]
+  }
 tool_resource_analyze_name: "smartcmp_analyze_resource_cost"
 tool_resource_analyze_description: "Collect read-only SmartCMP cost evidence for one resource, correlate enabled applicable cost policies, latest resource executions, and active violations, then use the LLM to distinguish platform-confirmed findings from model-only optimization potential. Prefer resource_name or a visible resource_index with recent smartcmp_list_all_resource metadata; resource_id is an internal compatibility input only. Never claim that COMPLIANCE without explicit complete evidence means the resource has no optimization opportunity, never invent a saving amount, and never remediate from model-only evidence."
-tool_resource_analyze_entrypoint: "scripts/analyze_resource_cost.py"
+tool_resource_analyze_entrypoint: "scripts/adapter.py:analyze_resource_cost"
 tool_resource_analyze_groups:
   - cmp
   - finops
@@ -91,20 +118,42 @@ tool_resource_analyze_parameters: |
   }
 tool_execute_name: "smartcmp_execute_cost_optimization"
 tool_execute_description: "Remediate a SmartCMP cost optimization violation through its native day2 repair."
-tool_execute_entrypoint: "scripts/execute_optimization.py"
+tool_execute_entrypoint: "scripts/adapter.py:execute_optimization"
 tool_execute_groups:
   - cmp
   - finops
 tool_execute_capability_class: "provider:smartcmp"
 tool_execute_priority: 150
+tool_execute_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "violation_id": {
+        "type": "string",
+        "description": "Confirmed SmartCMP violation ID to remediate."
+      }
+    },
+    "required": ["violation_id"]
+  }
 tool_track_name: "smartcmp_track_cost_optimization"
 tool_track_description: "Track SmartCMP cost optimization remediation progress."
-tool_track_entrypoint: "scripts/track_execution.py"
+tool_track_entrypoint: "scripts/adapter.py:track_execution"
 tool_track_groups:
   - cmp
   - finops
 tool_track_capability_class: "provider:smartcmp"
 tool_track_priority: 130
+tool_track_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "violation_id": {
+        "type": "string",
+        "description": "SmartCMP violation ID whose remediation status is requested."
+      }
+    },
+    "required": ["violation_id"]
+  }
 ---
 
 # cost-optimization
@@ -112,36 +161,42 @@ tool_track_priority: 130
 Use this skill to work through cost optimization recommendations from
 discovery to remediation tracking.
 
+## Handlers and helpers
+
+`scripts/adapter.py` contains all five Tool handlers for listing, analysis,
+execution, and tracking. `scripts/_cost_object_actions.py` remains separate
+because the embedded assistant Context resolver calls it to build resource
+actions; it is not a one-command forwarding script.
+
 ## Workflow
 
 Choose the entry path that matches the user's object:
 
 1. Analyze an existing recommendation:
-   - List recommendations with `list_recommendations.py`
-   - Optional: `--with-related-policies` to show related policy counts
-   - Analyze a recommendation with `analyze_recommendation.py`
-   - Silently resolve the related `resourceId` through datasource
-     `../datasource/scripts/list_resource.py`
+   - Call `smartcmp_list_cost_recommendations`
+   - Optionally request related policy counts
+   - Call `smartcmp_analyze_cost_recommendation`
+   - Let SmartCMP Provider resolve the related `resourceId`
    - Merge normalized resource `type + properties` into the analysis facts
    - Returns multi-dimensional recommendations (P0/P1/P2 priority)
    - Includes risk assessment and best practice guidance
    - Shows saving contribution, policy history, and resource operational context
 2. Analyze a resource directly:
-   - Call `analyze_resource_cost.py` with an exact visible name or recent list `#` selection
+   - Call `smartcmp_analyze_resource_cost` with an exact visible name or recent list `#` selection
    - Read resource facts, enabled applicable policy configurations, latest resource executions,
      and active violations without triggering policy execution
    - Use the returned `analysisContract` to keep platform facts separate from `llm_potential`
    - Read [references/RESOURCE_ANALYSIS.md](references/RESOURCE_ANALYSIS.md) for VM, AWS RDS,
      and generic resource reasoning rules
-3. Remediate an existing finding through the native day2 repair in `execute_optimization.py` only
-   after the user explicitly requests it
-4. Track remediation state with `track_execution.py`
+3. Call `smartcmp_execute_cost_optimization` for native day2 repair only after
+   the user explicitly requests it
+4. Track remediation state with `smartcmp_track_cost_optimization`
 
 ## Analysis Output Enhancement
 
-The `analyze_recommendation.py` now provides:
+`smartcmp_analyze_cost_recommendation` provides:
 
-- **P0 Primary Action**: Core recommendation (remediate / configure_platform_policy / manual_review)
+- **P0 Primary Action**: Provider recommendation (remediate / configure_platform_policy / manual_review)
 - **P1 Risk Assessment**: Risk level (high/medium/low) with specific warnings
 - **P1 Configuration Guide**: When fixType is missing, explains how to configure day2 repair
 - **P1 Saving Priority**: Contribution percentage to global optimizable amount
@@ -166,9 +221,8 @@ Only an existing platform violation may enter the separate remediation flow. An
 
 ## Resource Enrichment
 
-This skill should internally reuse the datasource skill's shared
-`../datasource/scripts/list_resource.py` helper whenever a recommendation includes
-`resourceId`.
+SmartCMP Provider resolves and reads resource evidence whenever a
+recommendation includes `resourceId`.
 
 - Pull resource details before rendering the final analysis output.
 - Merge resource status/type/OS and normalized facts into `facts` and

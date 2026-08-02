@@ -3,17 +3,9 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pytest
 
-
-SHARED_SCRIPTS = Path(__file__).resolve().parents[1] / "skills" / "shared" / "scripts"
-if str(SHARED_SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(SHARED_SCRIPTS))
-
-from _resource_target import (  # noqa: E402
+from smartcmp_provider.domain.resource_resolution import (
     ResourceResolutionError,
     resolve_exact_resource_name,
     resolve_single_resource,

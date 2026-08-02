@@ -11,10 +11,10 @@ MODULE_PATH = (
     REPO_ROOT
     / "providers"
     / "SmartCMP-Provider"
-    / "skills"
-    / "alarm"
-    / "scripts"
-    / "_analysis.py"
+    / "src"
+    / "smartcmp_provider"
+    / "analysis"
+    / "alarms.py"
 )
 
 

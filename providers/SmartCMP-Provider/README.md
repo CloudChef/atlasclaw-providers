@@ -33,7 +33,9 @@ The request-detail template is
 is matched again, so the floating assistant clears stale Context and follows the current SmartCMP
 object without using an LLM to guess the page. The manifest maps each path to one existing
 `smartcmp:*` Skill and declares one Provider-level Context entrypoint,
-`assistant_context/resolve.py`.
+`assistant_context/resolve.py:resolve_context`. AtlasClaw validates and caches this
+explicit async callable when the Embed Integration loads, so page navigation does
+not start a new Provider script process.
 
 A new page for an existing object type needs only a route entry when it keeps that object's
 existing owning Domain Skill. A genuinely new SmartCMP object API extends the Provider-level read
@@ -45,6 +47,9 @@ Context resolution requires the explicitly configured
 Provider type/instance and accepts only the request-scoped
 `CloudChef-Authenticate` Cookie for the explicitly selected Provider instance. It ignores Provider
 tokens, user tokens, configured cookies, and username/password credentials, and never auto-logs in.
+The resolver delegates Cookie semantics, URL normalization, timeout, HTTP,
+SmartCMP object reads, and ACL checks to SmartCMP Provider; it has no separate
+request-user transport or authentication implementation.
 It returns minimal objects containing only approved display fields and does not introduce a separate login, token, credential,
 role, menu, ACL, or database-permission flow.
 
@@ -77,13 +82,13 @@ nonce, and sends normalized router paths with monotonically increasing
 generations. SmartCMP does not call AtlasClaw Context, Agent Run, or Tool APIs
 for the iframe and does not duplicate AtlasClaw confirmation UI.
 
-When AtlasClaw selects SmartCMP as its single default Embed Provider, Core loads
+When AtlasClaw selects SmartCMP as its single default Embed Provider, AtlasClaw Core loads
 `assistant_context/routes.json` by convention for the floating surface. The Provider package does
 not declare a configurable manifest path, and SmartCMP embedding messages do not select a Provider
 instance.
 
 The browser Cookie remains request-scoped and runtime-only. Static credentials
-used by standalone or direct-script workflows stay in their configured
+used by other AtlasClaw or standalone MCP workflows stay in their configured
 credential stores. Neither form of credential belongs in route manifests or
 embedding messages.
 
@@ -120,7 +125,7 @@ AtlasClaw:
 AtlasClaw `host_cookie` authentication resolves the signed-in user. The
 configured SmartCMP HostApp Provider then receives the same request-scoped
 Enterprise System Cookie through `auth_type: "cookie"` when it reads SmartCMP
-objects or executes Domain Skills. See the [Core Embedded integration
+objects or executes Domain Skills. See the [AtlasClaw Core Embedded integration
 guide](https://github.com/CloudChef/atlasclaw/blob/main/docs/EMBED-INTEGRATION.md)
 for the complete Cookie and message contract.
 
@@ -140,120 +145,30 @@ for the complete Cookie and message contract.
 - **Optimization Policy Designer** - Read the current cost-optimization policy and return complete replacement fields and rule content
 - **Component Script Designer** - Read one current component file, apply resource-type-specific rules, and return the complete file without changing the component
 
-## Standalone and Script Quick Start
+## AtlasClaw Provider configuration
 
-### Environment Configuration
+Configure SmartCMP through the AtlasClaw Provider instance contract described
+in [PROVIDER.md](PROVIDER.md). Supported modes are user token, provider token,
+Cookie, and username/password credential. AtlasClaw selects the instance and
+passes request-scoped Context to the Skill handler; SmartCMP Provider owns
+credential interpretation, login, and API headers.
 
-The following `.env` modes support standalone AtlasClaw deployments and direct
-Provider scripts. They do not configure Embedded Context resolution, which
-always uses the request-scoped browser Cookie described above.
-
-Configure one of these standalone/script modes in the project-root `.env` file:
-
-> **Note:** Auth URL is automatically inferred from `CMP_URL` - no manual configuration needed!
->
-> SmartCMP SaaS auth handling is exact-match only:
-> - `https://console.smartcmp.cloud/` uses `https://account.smartcmp.cloud/bss-api/api/authentication`
-> - `https://account.smartcmp.cloud/#/login` uses `https://account.smartcmp.cloud/bss-api/api/authentication`
-> - All other hosts default to `{CMP_URL}/platform-api/login` unless `CMP_AUTH_URL` is set explicitly
->
-> | Environment | Auth URL (auto-inferred) |
-> |-------------|--------------------------|
-> | `console.smartcmp.cloud` | `account.smartcmp.cloud/bss-api/api/authentication` |
-> | `account.smartcmp.cloud` | `account.smartcmp.cloud/bss-api/api/authentication` |
-> | Private deployment | `{CMP_URL}/platform-api/login` |
->
-> If your private deployment uses a `smartcmp.cloud` hostname or a non-standard
-> login endpoint, set `CMP_AUTH_URL` explicitly to avoid host-based inference.
-
----
-
-#### Mode 1: SaaS Environment (Auto-Login)
-
-For SmartCMP SaaS platform:
-
-```bash
-# .env file
-
-# Business API domain (auto-appends /platform-api)
-CMP_URL=https://console.smartcmp.cloud
-
-# Auto-login credentials (Cookie will be obtained automatically)
-CMP_USERNAME=your_email@company.com
-CMP_PASSWORD=your_password_or_md5_hash
-
-# Optional: Override login endpoint explicitly
-# CMP_AUTH_URL=https://cmp.example.com/platform-api/login
-
-# Optional: Skip auto-login if you have a valid Cookie
-# CMP_COOKIE=your_cookie_string
-```
-
----
-
-#### Mode 2: Private Deployment (Auto-Login or Cookie)
-
-For on-premise SmartCMP installations:
-
-```bash
-# .env file
-
-# Single IP/domain (auto-appends /platform-api)
-CMP_URL=https://your-cmp-server-ip
-
-# Optional: Override login endpoint explicitly
-# CMP_AUTH_URL=https://your-private-cmp/platform-api/login
-
-# Option A: Auto-login (Recommended)
-CMP_USERNAME=admin
-CMP_PASSWORD=your_password_or_md5_hash
-
-# Option B: Direct Cookie (if auto-login fails)
-# CMP_COOKIE=XXL_JOB_LOGIN_IDENTITY=xxx; CloudChef-Authenticate=xxx; tenant_id=xxx; ...
-```
-
----
-
-### Configuration Priority
-
-1. If `CMP_COOKIE` is set → Use directly
-2. If `CMP_COOKIE` is empty → Check local cache (`.atlasclaw/users/default/sessions/smartcmp_cookie_cache.json`)
-3. If cache missing/expired → Auto-login using `CMP_USERNAME` + `CMP_PASSWORD`
-
-The local `.atlasclaw/users/default/sessions/` cache is a runtime artifact and
-should not be committed.
-
----
-
-### Obtaining Cookie Manually
-
-1. Log into SmartCMP web console
-2. Open browser Developer Tools (F12)
-3. Go to Network tab
-4. Refresh the page, click any `/platform-api/*` request
-5. Copy the full `Cookie` header value
-
----
+The Skill handler files are not supported as direct command-line programs and
+do not implement a separate `.env` selection order or local Cookie cache.
 
 ### Quick Verification
 
-Test your configuration:
+Verify the co-located SmartCMP Provider package without connecting to CMP:
 
 ```bash
-# Run from providers/SmartCMP-Provider/
-python -c "
-import sys; sys.path.insert(0, 'skills/shared/scripts')
-from _common import get_cmp_config
-url, auth_token, _ = get_cmp_config()
-print(f'URL: {url}')
-print(f'Auth: {auth_token[:50]}...' if auth_token and len(auth_token) > 50 else f'Auth: {auth_token}')
-"
+PYTHONPATH=src python -c "import smartcmp_provider; print(smartcmp_provider.__name__)"
+python -m pytest -q
 ```
 
 ## Skill Modules
 
-All example commands below assume your current directory is
-`providers/SmartCMP-Provider/`.
+The names below are AtlasClaw Tools. Their `SKILL.md` entrypoints use
+`file.py:method`; the handler files are not standalone CLI commands.
 
 ### approval - Approval Management
 
@@ -268,25 +183,20 @@ approving requests, and rejecting requests.
 **Boundary:**
 - Use this skill only for pending approval tasks and approval actions.
 - Do not use approval tools for a user's submitted request status or approval-result query.
-- For "check my request status" or "has my submitted request been approved", use `request/scripts/status.py`.
+- For "check my request status" or "has my submitted request been approved",
+  use `smartcmp_get_request_status`.
 
 **Examples:**
-```bash
-# List pending approvals
-python skills/approval/scripts/list_pending.py
 
-# Approve request
-python skills/approval/scripts/approve.py <request_id> --reason "Approved per policy"
-
-# Reject request
-python skills/approval/scripts/reject.py <request_id> --reason "Budget exceeded"
-```
+- List: `smartcmp_list_pending`
+- Approve: `smartcmp_approve`
+- Reject: `smartcmp_reject`
 
 ### alarm - Alarm and Resource Health Management
 
 Inspect and analyze SmartCMP alarms directly in this provider, or analyze one
 resource independently from alerts using its component monitoring model. Use
-`operate_alert.py` only when an explicit status action is intended.
+`smartcmp_operate_alert` only when an explicit status action is intended.
 
 **Use Cases:**
 - List current alarm alerts
@@ -294,57 +204,37 @@ resource independently from alerts using its component monitoring model. Use
 - Collect component-specific Prometheus evidence for LLM resource health analysis
 - Operate on alert status using English actions such as `mute`, `resolve`, or `reopen`
 
-**Examples:**
-```bash
-# List alerts
-python skills/alarm/scripts/list_alerts.py
-
-# Analyze one alert
-python skills/alarm/scripts/analyze_alert.py <alert_id>
-
-# Collect one resource's model-driven monitoring evidence
-python skills/alarm/scripts/analyze_resource_health.py --resource-name <name>
-
-# Operate on one or more alerts
-python skills/alarm/scripts/operate_alert.py <alert_id> --action mute
-```
+**Tools:** `smartcmp_list_alerts`, `smartcmp_analyze_alert`,
+`analyze_resource_health`, and `smartcmp_operate_alert`.
 
 Resource health analysis uses the resolved resource `componentType` to load
 the component's effective monitoring model and query its own Prometheus metric
-definitions. It never substitutes a generic VM metric list. The script returns
+definitions. It never substitutes a generic VM metric list. The handler returns
 evidence only; the AtlasClaw LLM determines whether the observed resource is
 healthy, abnormal, or indeterminate.
 
 ### datasource - Data Source Queries
 
-Read-only queries for SmartCMP reference data, used for browsing, discovering
-available resources, and looking up existing resources by ID. Standalone
+Read-only queries for SmartCMP reference data. Standalone
 business-group scope discovery belongs here, while standalone resource-pool and
 resource browsing still use their dedicated skills.
 
 **Supported Queries:**
 - Business-group scopes such as tenant / 租户 / 部门 / BU / Project
-- Service catalogs
 - Application lists
 - OS templates
 - Images
-- Resource details by resource ID with `list_resource.py`
-- Shared normalized resource view (`type + properties`) from `list_resource.py`
 
 **Examples:**
-```bash
-# List standalone business-group scopes
-python skills/datasource/scripts/list_all_business_groups.py
 
-# Filter business-group scopes
-python skills/datasource/scripts/list_all_business_groups.py production
+- `smartcmp_list_all_business_groups`
+- `smartcmp_list_applications`
+- `smartcmp_list_components`
+- `smartcmp_query_logical_templates`
+- `smartcmp_query_images`
 
-# List service catalogs
-python skills/datasource/scripts/list_services.py
-
-# Show resource details and normalized resource view by ID
-python skills/datasource/scripts/list_resource.py <resource_id>
-```
+Catalog discovery is owned by `request`; resource browsing is owned by
+`resource`.
 
 ### resource-pool - Resource Pool Directory
 
@@ -357,14 +247,7 @@ directory endpoint.
 - 列出所有的资源池
 - Query resource pools by keyword without entering the request workflow
 
-**Examples:**
-```bash
-# List all resource pools
-python skills/resource-pool/scripts/list_all_resource_pools.py
-
-# Filter resource pools
-python skills/resource-pool/scripts/list_all_resource_pools.py production
-```
+Use `smartcmp_list_all_resource_pools`, optionally with `query_value`.
 
 ### resource - Resource Browsing, Analysis & Operations
 
@@ -385,26 +268,8 @@ operations, and operate on SmartCMP resources or cloud hosts.
 - 把某个云主机开机
 - Query resources or virtual machines by keyword without entering the request workflow
 
-**Examples:**
-```bash
-# List all resources
-python skills/resource/scripts/list_all_resource.py
-
-# List all cloud hosts
-python skills/resource/scripts/list_all_resource.py --scope virtual_machines
-
-# Filter cloud hosts
-python skills/resource/scripts/list_all_resource.py --scope virtual_machines --query-value production
-
-# Refresh and analyze one cloud host
-python skills/resource/scripts/resource_detail.py <resource_id>
-
-# List current-user executable no-parameter operations
-python skills/resource/scripts/list_resource_operations.py 'https://cmp/#/main/virtual-machines/res-1/details'
-
-# Execute one no-parameter operation
-python skills/resource/scripts/operate_resource.py res-1 --action create_snapshot
-```
+**Tools:** `smartcmp_list_all_resource`, `smartcmp_resource_detail`,
+`smartcmp_list_resource_operations`, and `smartcmp_operate_resource`.
 
 The dynamic **Analyze** action on a resolved resource page uses the `resource`
 Skill as a coordinator. It keeps one exact internal resource target and calls
@@ -441,11 +306,16 @@ already submitted request by the SmartCMP Request ID returned from submission.
 7. Submit request
 
 **Submitted Request Status:**
-- Use `status.py` for questions such as "check my request status" or "has my request been approved?"
+- Use `smartcmp_get_request_status` for questions such as "check my request
+  status" or "has my request been approved?"
 - Input is the user-visible Request ID returned by submission, such as `RES20260501000095` or `TIC20260316000001`.
-- The script searches `/generic-request/search` for an exact request-number match, then fetches detail with `/generic-request/{id}`.
-- The script returns structured fields such as `state`, `statusCategory`, `approvalPassed`, `currentStep`, `currentApprover`, `provisionState`, `error`, and `updatedAt`.
-- The agent should explain those fields in the current user's message language; the script does not hard-code a localized approval sentence.
+- SmartCMP Provider searches for an exact request-number match and fetches
+  its detail.
+- The Tool returns structured fields such as `state`, `statusCategory`,
+  `approvalPassed`, `currentStep`, `currentApprover`, `provisionState`,
+  `error`, and `updatedAt`.
+- The agent should explain those fields in the current user's message language;
+  the handler does not hard-code a localized approval sentence.
 
 **Status Semantics:**
 - `APPROVAL_PENDING` means approval has not passed yet.
@@ -453,17 +323,8 @@ already submitted request by the SmartCMP Request ID returned from submission.
 - `STARTED`, `TASK_RUNNING`, `WAIT_EXECUTE`, and `FINISHED` mean approval passed or the request entered a later execution stage.
 - `INITIALING`, `INITIALING_FAILED`, `FAILED`, and `CANCELED` should be reported as the current state without claiming approval or rejection.
 
-**Examples:**
-```bash
-# List services
-python skills/datasource/scripts/list_services.py
-
-# Submit request
-python skills/request/scripts/submit.py --file request_body.json
-
-# Query submitted request status
-python skills/request/scripts/status.py RES20260501000095
-```
+**Main Tools:** `smartcmp_list_services`, `smartcmp_get_request_catalog`,
+`smartcmp_submit_request`, and `smartcmp_get_request_status`.
 
 ### preapproval-agent - Pre-approval Agent
 
@@ -511,7 +372,7 @@ Recommended SmartCMP setup:
 - Send webhook payloads with `args.provider_instance` and
   `args.robot_profile`; do not use `args.instance` for robot execution.
 
-When the selected token starts with `cmp_tk_`, SmartCMP scripts send it as
+When the selected token starts with `cmp_tk_`, SmartCMP Provider sends it as
 `Authorization: Bearer <token>`. Approval tools use the selected robot
 credential. In webhook robot dispatches that do not forward SmartCMP user
 cookies, request submission resolves the SmartCMP actor from that same robot
@@ -524,16 +385,18 @@ resource's optimization potential, execute SmartCMP-native day2 fixes for existi
 track remediation progress.
 
 **Workflow:**
-1. For an existing recommendation, discover findings with `list_recommendations.py` and inspect
-   one with `analyze_recommendation.py --id <violation_id>`
-2. For any supported resource, call `analyze_resource_cost.py --resource-name <name>` even when no
-   recommendation exists
+1. For an existing recommendation, call
+   `smartcmp_list_cost_recommendations`, then
+   `smartcmp_analyze_cost_recommendation`
+2. For any supported resource, call `smartcmp_analyze_resource_cost` even
+   when no recommendation exists
 3. Correlate enabled applicable policies, their latest exact resource executions, active
    violations, billing facts, and missing evidence
 4. Keep platform-confirmed findings separate from `llm_potential`; no violation does not prove
    that the resource is already optimized
-5. Execute `execute_optimization.py --id <violation_id>` only for an existing SmartCMP finding
-6. Check remediation state with `track_execution.py --id <violation_id>`
+5. Execute `smartcmp_execute_cost_optimization` only for an existing SmartCMP
+   finding
+6. Check remediation state with `smartcmp_track_cost_optimization`
 
 **Safety Boundary:**
 - Public-cloud best-practice guidance is advisory only
@@ -557,23 +420,8 @@ analyze operational state and compliance risk.
 5. Let the LLM distinguish confirmed facts, inference, and missing evidence without using CMP compliance rules or external product adapters
 6. Emit a non-judgmental summary and a stable `##RESOURCE_COMPLIANCE_START##` JSON block
 
-**Examples:**
-```bash
-# Show visible resource names and indexes
-python skills/resource/scripts/list_all_resource.py --scope virtual_machines
-
-# Analyze one resource by name
-python skills/resource-compliance/scripts/analyze_resource.py --resource-name e2e-newrole-linux3-0501
-
-# Analyze one resource selected from the latest resource list
-python skills/resource-compliance/scripts/analyze_resource.py \
-  --resource-index 2 \
-  --resource-directory-json '[{"index":2,"id":"internal-id","name":"e2e-newrole-linux3-0501"}]'
-
-# Analyze webhook-style input
-python skills/resource-compliance/scripts/analyze_resource.py \
-  --payload-json '{"resourceIds":["id-1","id-2"],"triggerSource":"webhook"}'
-```
+Use `smartcmp_list_all_resource` to establish a visible selection and
+`smartcmp_analyze_resource_compliance` to analyze the selected resource.
 
 Interactive resource-compliance workflows should not ask users for SmartCMP
 UUIDs. Resource IDs are internal API and webhook compatibility values only.
@@ -593,7 +441,7 @@ Representative output fields:
 ```
 
 **Safety Boundary:**
-- The script collects evidence; the LLM provides the final advisory judgment
+- The Tool collects evidence; the LLM provides the final advisory judgment
 - CMP state, absence of findings, or absence of a product rule is not proof of compliance
 - Patch, lifecycle, and CVE claims remain inferred or missing unless the payload contains authoritative evidence
 - No remediation APIs are called by this skill
@@ -606,109 +454,59 @@ persistence: it may call `GET /forms/{id}` to read source schema, but it never
 saves, updates, publishes, submits, or deletes CMP data.
 
 **Workflow:**
-1. For existing forms, read the form URL with `read_form.py`
+1. For existing forms, call `smartcmp_read_form_schema`
 2. Generate or modify the schema JSON according to the user's requirements
-3. Normalize the schema with `design_form.py`
+3. Normalize the schema with `smartcmp_design_form_schema`
 4. Return the final schema JSON and a short change summary for manual copy/review
-
-**Examples:**
-```bash
-# Read an existing form schema
-python skills/form-designer/scripts/read_form.py \
-  'https://cmp.example/#/main/service-model/forms/edit/42607f38-2c63-4649-a8de-efa031db4544'
-
-# Normalize a new or modified schema draft
-python skills/form-designer/scripts/design_form.py \
-  --mode new \
-  --schema-json '{"type":"object","properties":{}}' \
-  --change-summary 'Generated a new form schema.'
-```
 
 ## Directory Structure
 
 ```
 SmartCMP-Provider/
+├── pyproject.toml                   # smartcmp-provider distribution
+├── src/
+│   └── smartcmp_provider/          # Importable Provider auth, HTTP, models and operations
 ├── skills/
-│   ├── approval/                    # Approval management skill
-│   │   ├── scripts/                 # Approval scripts
-│   │   ├── references/              # Reference docs
-│   │   └── SKILL.md
-│   ├── alarm/                       # Alarm and resource health skill
-│   │   ├── scripts/                 # Alert workflows and model-driven resource health evidence
-│   │   ├── references/
-│   │   └── SKILL.md
-│   ├── cost-optimization/           # Cost optimization skill
-│   │   ├── references/
-│   │   ├── scripts/
-│   │   └── SKILL.md
-│   ├── datasource/                  # Data source query skill
-│   │   ├── scripts/                 # Datasource-owned standalone business-group directory helper
-│   │   ├── references/
-│   │   └── SKILL.md
-│   ├── form-designer/               # SmartCMP Angular form schema design skill
-│   │   ├── references/
-│   │   ├── scripts/
-│   │   └── SKILL.md
-│   ├── script-designer/             # Current script-definition replacement skill
-│   │   ├── scripts/
-│   │   └── SKILL.md
-│   ├── optimization-policy-designer/ # Current cost-optimization policy replacement skill
-│   │   ├── scripts/
-│   │   └── SKILL.md
-│   ├── component-script-designer/   # Resource-type-aware component file replacement skill
-│   │   ├── references/
-│   │   ├── scripts/
-│   │   └── SKILL.md
-│   ├── preapproval-agent/           # Pre-approval agent
-│   │   ├── references/
-│   │   └── SKILL.md
-│   ├── request/                     # Resource request and submitted-status skill
-│   │   ├── scripts/                 # Submit and status scripts
-│   │   ├── references/
-│   │   └── SKILL.md
-│   ├── request-decomposition-agent/ # Request decomposition agent
-│   │   ├── references/
-│   │   └── SKILL.md
-│   ├── resource/                    # Standalone resource directory skill
-│   │   ├── scripts/
-│   │   └── SKILL.md
-│   ├── resource-pool/               # Standalone resource-pool directory skill
-│   │   ├── scripts/
-│   │   └── SKILL.md
-│   ├── resource-compliance/         # Resource compliance analysis skill
-│   │   ├── references/
-│   │   ├── scripts/
-│   │   └── SKILL.md
+│   ├── approval/scripts/
+│   │   ├── adapter.py               # Five approval Tool handlers
+│   │   └── _approval_object_actions.py
+│   ├── alarm/scripts/
+│   │   ├── adapter.py               # Four alarm/health Tool handlers
+│   │   └── _alarm_object_actions.py
+│   ├── ...                          # Other Skill-local adapters/helpers
 │   └── shared/
-│       └── scripts/                 # Shared authentication module
-│           ├── _common.py
-│           └── _current_page_object.py
+│       └── scripts/
+│           ├── _provider_bootstrap.py
+│           ├── _atlasclaw_adapter.py
+│           ├── _current_page_object.py
+│           └── _object_actions_common.py
 ├── test/                            # Provider test suite
 ├── PROVIDER.md                      # Provider configuration docs
 └── README.md                        # This file
 ```
 
-## Shared Scripts
+## Skill handler organization
 
-The `shared/scripts/` directory contains the authentication module, while data query
-scripts are located in `datasource/scripts/`:
-
-| Script | Location | Description |
-|--------|----------|-------------|
-| `_common.py` | `shared/scripts/` | Authentication & URL normalization (used by all scripts) |
-| `list_resource.py` | `datasource/scripts/` | Fetch resource summary, details, raw resource fields, and the shared normalized `type + properties` view by ID |
-| `list_services.py` | `datasource/scripts/` | List published service catalogs |
-| `list_all_business_groups.py` | `datasource/scripts/` | List standalone business-group scopes |
+Multi-command Skills co-locate thin entrypoint methods in their own
+`scripts/adapter.py`. A Skill may still have multiple Python files when a
+helper has an independent caller or responsibility, such as embedded object
+actions or current-page resolution. Single-Tool Designer Skills may retain one
+direct handler. There are no one-command forwarding modules and no
+subprocess-based cross-Skill proxies.
 
 ## Notes
 
-1. **Environment Variables** - All scripts read connection info from `CMP_URL`, `CMP_COOKIE`, `CMP_USERNAME`, `CMP_PASSWORD`, and `CMP_AUTH_URL` environment variables
-2. **Cookie Expiration** - If you encounter `401` errors, refresh and update the Cookie
-3. **Output Format** - Script output includes named metadata blocks such as `##..._START## ... ##..._END##` for programmatic parsing
+1. **Authentication** - AtlasClaw handlers pass the selected Instance and
+   Cookie/user/robot Authentication Context to SmartCMP Provider.
+2. **Cookie Expiration** - If you encounter `401` errors, refresh the selected
+   SmartCMP session.
+3. **Output Format** - Handlers return visible content plus `_internal`
+   metadata for programmatic use.
 4. **Alarm and Health Coverage** - Alert workflows and component-model-driven resource health analysis are supported directly by the `alarm` skill
 5. **Error Handling** - On `[ERROR]` output, report to user immediately; do NOT self-debug
 6. **Resource Compliance** - `resource-compliance` builds one bounded CMP fact profile for every resource type and hands it to the LLM; it does not use configured CMP policy results or product-specific external adapters
-7. **Localized Responses** - Scripts should return stable fields and metadata. Agents are responsible for explaining results in the current user's message language.
+7. **Localized Responses** - Handlers return stable fields and metadata.
+   Agents explain results in the current user's message language.
 8. **No Raw Day2 Dumps** - Resource operations should not print raw request payloads or raw SmartCMP response details after a successful submission.
 9. **Form Designer Is Read-Only** - `form-designer` outputs schema JSON for manual review/copy only. It must not save or update CMP forms.
 10. **Editor Skills Are Read-Only** - Script, optimization-policy, and component-script designers read only the exact Context-bound saved object and return manual replacement content; they do not save, publish, execute, or deploy it.

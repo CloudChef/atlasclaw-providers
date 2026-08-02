@@ -5,18 +5,15 @@ import importlib.util
 import sys
 from pathlib import Path
 
-import pytest
-
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 MODULE_PATH = (
     REPO_ROOT
     / "providers"
     / "SmartCMP-Provider"
-    / "skills"
-    / "alarm"
-    / "scripts"
-    / "_alarm_common.py"
+    / "src"
+    / "smartcmp_provider"
+    / "domain"
+    / "alarms.py"
 )
 
 
@@ -53,36 +50,6 @@ def test_normalize_timestamp_supports_multiple_inputs():
     assert module.normalize_timestamp(None) == ""
 
 
-def test_extract_items_tolerates_multiple_payload_shapes():
-    module = load_module()
-    raw_items = [{"id": "a1"}, {"id": "a2"}]
-
-    assert module.extract_items(raw_items) == raw_items
-    assert module.extract_items({"content": raw_items}) == raw_items
-    assert module.extract_items({"data": raw_items}) == raw_items
-    assert module.extract_items({"result": raw_items}) == raw_items
-    assert module.extract_items({"data": {"items": raw_items}}) == raw_items
-
-
-def test_extract_policy_tolerates_direct_and_wrapped_payloads():
-    module = load_module()
-    policy = {
-        "id": "policy-1",
-        "name": "CPU High",
-        "nameZh": "CPU High Zh",
-        "metric": "cpu_usage",
-        "expression": "avg(cpu_usage) > 80",
-        "resourceType": "VirtualMachine",
-    }
-    alert_like_payload = {"id": "alert-1", "name": "Alert row", "status": "ALERT_FIRING", "level": 3}
-
-    assert module.extract_policy(policy) == policy
-    assert module.extract_policy({"policy": policy}) == policy
-    assert module.extract_policy({"data": {"policy": policy}}) == policy
-    assert module.extract_policy({"content": policy}) == policy
-    assert module.extract_policy(alert_like_payload) == {}
-
-
 def test_build_list_params_omits_blank_values():
     module = load_module()
 
@@ -93,7 +60,6 @@ def test_build_list_params_omits_blank_values():
         "size": 25,
         "status": "ALERT_FIRING",
     }
-
 
 def test_build_list_params_supports_time_window_and_list_filters():
     module = load_module()
@@ -123,63 +89,3 @@ def test_build_list_params_supports_time_window_and_list_filters():
         "nodeInstanceId": "node-1",
         "targetEntityId": "target-1",
     }
-
-
-def test_request_json_uses_expected_request_shape(monkeypatch):
-    module = load_module()
-    captured = {}
-
-    class FakeResponse:
-        status_code = 200
-        text = '{"ok": true}'
-
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return {"ok": True}
-
-    def fake_request(**kwargs):
-        captured.update(kwargs)
-        return FakeResponse()
-
-    monkeypatch.setattr(
-        module,
-        "get_connection",
-        lambda content_type="application/json; charset=utf-8": (
-            "https://cmp.example.com/platform-api",
-            {"CloudChef-Authenticate": "token"},
-            {},
-        ),
-    )
-    monkeypatch.setattr(module.requests, "request", fake_request)
-
-    result = module.request_json("GET", "/alarm-alert", params={"page": 1})
-
-    assert result == {"ok": True}
-    assert captured["method"] == "GET"
-    assert captured["url"] == "https://cmp.example.com/platform-api/alarm-alert"
-    assert captured["params"] == {"page": 1}
-    assert captured["timeout"] == 60
-    assert "json" not in captured
-
-
-def test_request_json_wraps_request_errors(monkeypatch):
-    module = load_module()
-
-    def fake_request(**_kwargs):
-        raise module.requests.RequestException("network down")
-
-    monkeypatch.setattr(
-        module,
-        "get_connection",
-        lambda content_type="application/json; charset=utf-8": (
-            "https://cmp.example.com/platform-api",
-            {"CloudChef-Authenticate": "token"},
-            {},
-        ),
-    )
-    monkeypatch.setattr(module.requests, "request", fake_request)
-
-    with pytest.raises(RuntimeError, match="SmartCMP request failed"):
-        module.request_json("GET", "/alarm-alert")

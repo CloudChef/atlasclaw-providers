@@ -67,14 +67,14 @@ related:
 # === Tool Registration ===
 tool_list_name: "smartcmp_list_pending"
 tool_list_description: "Query pending approvals from SmartCMP. Automatically uses configured CMP connection."
-tool_list_entrypoint: "scripts/list_pending.py"
+tool_list_entrypoint: "scripts/adapter.py:list_pending"
 tool_list_group: "cmp"
 tool_list_capability_class: "provider:smartcmp"
 tool_list_priority: 100
 tool_list_result_mode: "tool_only_ok"
 tool_detail_name: "smartcmp_get_request_detail"
 tool_detail_description: "Get detail of a SmartCMP pending approval task. ONLY use when user explicitly asks to view/show/inspect/check details by Request ID / 编号, e.g. 'show detail of CHG20260413000011' or '查看 CHG20260413000011 的详情'. Do NOT use this tool for action commands such as approve, agree, pass, reject, deny, refuse, 批准, 同意, 通过, 拒绝, or 驳回. For submitted request status or '是否审批通过/是否被批准', use smartcmp_get_request_status."
-tool_detail_entrypoint: "scripts/get_request_detail.py"
+tool_detail_entrypoint: "scripts/adapter.py:get_request_detail"
 tool_detail_aliases:
   - "approval detail"
   - "request detail"
@@ -134,7 +134,7 @@ tool_detail_parameters: |
   }
 tool_analyze_name: "smartcmp_analyze_approval_request"
 tool_analyze_description: "Read-only analysis for one pending SmartCMP approval request. Use when the user asks to analyze/evaluate/review an approval request or clicks an approval analysis action. This tool produces guidance without changing provider state and returns object_actions for the user to choose the next action."
-tool_analyze_entrypoint: "scripts/analyze_request.py"
+tool_analyze_entrypoint: "scripts/adapter.py:analyze_request"
 tool_analyze_aliases:
   - "analyze approval"
   - "review approval"
@@ -166,7 +166,7 @@ tool_analyze_groups:
   - approval
 tool_analyze_capability_class: "provider:smartcmp"
 tool_analyze_priority: 112
-tool_analyze_result_mode: "tool_only_ok"
+tool_analyze_result_mode: "llm"
 tool_analyze_cli_positional:
   - identifier
 tool_analyze_parameters: |
@@ -186,8 +186,8 @@ tool_analyze_parameters: |
     "required": ["identifier"]
   }
 tool_approve_name: "smartcmp_approve"
-tool_approve_description: "Approve requests in SmartCMP. `ids` must be SmartCMP user-facing Request ID(s), e.g. RES20260505000010, TIC20260502000003, or CHG20260413000011. For user selections like 'approve 1', '同意 1', or '批准 1', resolve the row index to APPROVAL_META.requestId before calling. Never pass row numbers, UUID-shaped internal IDs, or placeholder/dummy values; the script resolves Request IDs internally."
-tool_approve_entrypoint: "scripts/approve.py"
+tool_approve_description: "Approve requests in SmartCMP. `ids` must be SmartCMP user-facing Request ID(s), e.g. RES20260505000010, TIC20260502000003, or CHG20260413000011. For user selections like 'approve 1', '同意 1', or '批准 1', resolve the row index to the latest smartcmp_list_pending `_internal.items[].request_id` before calling. Never pass row numbers, UUID-shaped internal IDs, or placeholder/dummy values; SmartCMP Provider resolves Request IDs internally."
+tool_approve_entrypoint: "scripts/adapter.py:approve"
 tool_approve_aliases:
   - "approve request"
   - "agree request"
@@ -240,8 +240,8 @@ tool_approve_parameters: |
     "required": ["ids"]
   }
 tool_reject_name: "smartcmp_reject"
-tool_reject_description: "Reject requests in SmartCMP. `ids` must be SmartCMP user-facing Request ID(s), e.g. RES20260505000010, TIC20260502000003, or CHG20260413000011. For user selections like 'reject 1' or '拒绝 1', resolve the row index to APPROVAL_META.requestId before calling. Never pass row numbers, UUID-shaped internal IDs, or placeholder/dummy values; the script resolves Request IDs internally."
-tool_reject_entrypoint: "scripts/reject.py"
+tool_reject_description: "Reject requests in SmartCMP. `ids` must be SmartCMP user-facing Request ID(s), e.g. RES20260505000010, TIC20260502000003, or CHG20260413000011. For user selections like 'reject 1' or '拒绝 1', resolve the row index to the latest smartcmp_list_pending `_internal.items[].request_id` before calling. Never pass row numbers, UUID-shaped internal IDs, or placeholder/dummy values; SmartCMP Provider resolves Request IDs internally."
+tool_reject_entrypoint: "scripts/adapter.py:reject"
 tool_reject_aliases:
   - "reject request"
   - "deny request"
@@ -284,7 +284,7 @@ tool_reject_parameters: |
       },
       "reason": {
         "type": "string",
-        "description": "Rejection reason (recommended)"
+        "description": "Optional rejection reason"
       }
     },
     "required": ["ids"]
@@ -344,84 +344,60 @@ Examples:
 - `查看 CHG20260413000011 的详情` MUST call `smartcmp_get_request_detail`.
 - `show detail of CHG20260413000011` MUST call `smartcmp_get_request_detail`.
 
-## Scripts
+## Handlers and helpers
 
-| Script | Description | Location |
-|--------|-------------|----------|
-| `list_pending.py` | List pending approval items with priority | `scripts/` |
-| `analyze_request.py` | Analyze one pending approval without executing a decision | `scripts/` |
-| `approve.py` | Approve one or more requests | `scripts/` |
-| `reject.py` | Reject one or more requests | `scripts/` |
+All five Tool commands are co-located in `scripts/adapter.py`:
 
-## Environment Setup
+| Handler | Description |
+|--------|-------------|
+| `list_pending` | List pending approval items with priority |
+| `get_request_detail` | Read one approval request |
+| `analyze_request` | Analyze one pending approval without executing a decision |
+| `approve` | Approve one or more requests |
+| `reject` | Reject one or more requests |
 
-### Option 1: Direct Cookie
-```powershell
-# PowerShell - CMP_URL auto-normalizes (adds /platform-api if missing)
-$env:CMP_URL = "<your-cmp-host>"
-$env:CMP_COOKIE = '<full cookie string>'
-```
+`scripts/_approval_object_actions.py` remains separate because the embedded
+assistant Context resolver also calls it to build page actions. It is not a
+one-command forwarding script.
 
-```bash
-# Bash
-export CMP_URL="<your-cmp-host>"
-export CMP_COOKIE="<full cookie string>"
-```
-
-### Option 2: Auto-Login (Recommended)
-Automatically obtains and caches cookies (30-minute TTL). Auth URL is auto-inferred.
-
-```powershell
-# PowerShell
-$env:CMP_URL = "<your-cmp-host>"
-$env:CMP_USERNAME = "<username>"
-$env:CMP_PASSWORD = "<password>"
-```
-
-```bash
-# Bash
-export CMP_URL="<your-cmp-host>"
-export CMP_USERNAME="<username>"
-export CMP_PASSWORD="<password>"
-```
+The Adapter receives the selected instance and Cookie/user/robot credential
+from AtlasClaw Context. SmartCMP Provider owns authentication resolution and
+all SmartCMP API calls.
 
 ## Workflow
 
 ### Step 1: List Pending Approvals
 
-**Command:**
-```bash
-python scripts/list_pending.py [--days N]
-```
+Call `smartcmp_list_pending` with optional `days`.
 
 **Output Format:**
 - Human-readable: Markdown table sorted by latest SmartCMP update first
-- Machine-readable: `##APPROVAL_META_START## ... ##APPROVAL_META_END##` on stderr for internal tool use
+- Machine-readable: `_internal.items` in the Tool result, retained by AtlasClaw workflow context
 
-**META Fields:**
+**`_internal.items` fields:**
 | Field | Description |
 |-------|-------------|
 | `index` | Display index (1, 2, 3...) — for user selection only |
-| `requestId` | **SmartCMP user-facing Request ID / request number** — use this for approve/reject tool input (e.g., RES20260505000010, TIC20260502000003, or CHG20260413000011) |
+| `request_id` | **SmartCMP user-facing Request ID / request number** — use this for approve/reject tool input (e.g., RES20260505000010, TIC20260502000003, or CHG20260413000011) |
 | `name` | Request name |
-| `catalogName` | Service catalog type |
+| `catalog_name` | Service catalog type |
 | `applicant` | Requester name |
-| `waitHours` | Hours since creation |
-| `priorityScore` | Priority score (higher = more urgent) |
+| `approval_step` | Current approval step |
+| `current_approver` | Current approver display name |
 
 ---
 
 ## CRITICAL: Request ID Field Selection
 
-> **MUST USE `requestId` field for approve.py and reject.py**
+> **MUST USE `request_id` field for `smartcmp_approve` and `smartcmp_reject`**
 >
-> The APPROVAL_META exposes one ID field to the agent: the user-facing `requestId`.
-> The scripts resolve `requestId` to the SmartCMP approval action identifier internally before calling the CMP approval API.
+> The list result exposes one ID field to the agent: the user-facing `_internal.items[].request_id`.
+> SmartCMP Provider resolves `request_id` to the internal approval action identifier before calling the CMP approval API.
 
 | Field | Format Example | Can Use as approve/reject tool input? |
 |-------|----------------|----------------------------|
-| `requestId` | `RES20260505000010`, `TIC20260502000003`, `CHG20260413000011` | **YES — USE THIS** |
-| display index | `1`, `2`, `3` | **NO — resolve row index to `requestId` first** |
+| `request_id` | `RES20260505000010`, `TIC20260502000003`, `CHG20260413000011` | **YES — USE THIS** |
+| display index | `1`, `2`, `3` | **NO — resolve row index to `request_id` first** |
 | UUID-shaped internal ID | internal SmartCMP identifier | **NO — not exposed to the agent and not accepted by approve/reject** |
 
 **Mapping user selection to correct ID:**
@@ -429,83 +405,60 @@ python scripts/list_pending.py [--days N]
 User says "1", "approve 1", "同意 1", or "批准 1"
   |
   v
-Find item with index=1 in APPROVAL_META
+Find the selected item in the latest `smartcmp_list_pending` `_internal.items`
   |
   v
-Extract the "requestId" field
+Extract the `request_id` field
   |
   v
-Pass to approve.py or reject.py
+Pass to `smartcmp_approve` or `smartcmp_reject`
 ```
 
-Never invent or pass placeholder values such as `dummy-id-placeholder`, `placeholder`, `example`, or `<request_id>`. If the latest APPROVAL_META is unavailable, list pending approvals again before calling approve/reject.
+Never invent or pass placeholder values such as `dummy-id-placeholder`, `placeholder`, `example`, or `<request_id>`. If the latest list metadata is unavailable, list pending approvals again before calling approve/reject.
 
 ### Step 2: Approve Requests
 
-**Command:**
-```bash
-# Single approval
-python scripts/approve.py <request_id>
-
-# With reason
-python scripts/approve.py <request_id> --reason "Approved per policy"
-
-# Batch approval
-python scripts/approve.py <request_id1> <request_id2> <request_id3>
-```
+Call `smartcmp_approve` with one or more `request_ids` and an optional
+`reason`.
 
 ### Step 3: Reject Requests
 
-**Command:**
-```bash
-# Single rejection
-python scripts/reject.py <request_id>
-
-# With reason (recommended)
-python scripts/reject.py <request_id> --reason "Budget exceeded"
-
-# Batch rejection
-python scripts/reject.py <request_id1> <request_id2> --reason "Not aligned with policy"
-```
+Call `smartcmp_reject` with one or more `request_ids` and an optional
+rejection `reason`.
 
 ## Output Parsing
 
-### Approval META Block
+### Approval `_internal.items` entry
 
 ```json
 {
   "index": 1,
-  "requestId": "RES20260505000010",                   // <- USE THIS for approve/reject
+  "request_id": "RES20260505000010",
   "name": "Test Request",
-  "catalogName": "Issue Ticket",
+  "catalog_name": "Issue Ticket",
   "applicant": "TestUser",
-  "email": "test@example.com",
-  "waitHours": 0.5,
-  "priority": "Low",
-  "priorityScore": 50,
-  "approvalStep": "Level 1 Approval",
-  "currentApprover": "Pending"
+  "approval_step": "Level 1 Approval",
+  "current_approver": "Pending"
 }
 ```
 
 ### Quick Reference: Which ID to Use
 
 ```
-[OK]    approve.py <requestId> <- Use "requestId" field: RES20260505000010
-[OK]    reject.py <requestId>  <- Use "requestId" field: TIC20260502000003 or CHG20260413000011
+[OK]    smartcmp_approve(request_id) <- RES20260505000010
+[OK]    smartcmp_reject(request_id)  <- TIC20260502000003 or CHG20260413000011
 
-[FAIL]  approve.py <uuid>        <- internal SmartCMP UUID, not accepted
-[FAIL]  approve.py 1             <- display row number, resolve it to APPROVAL_META.requestId first
-[FAIL]  approve.py dummy-id-placeholder <- placeholder, never send to CMP
+[FAIL]  smartcmp_approve(<uuid>) <- internal SmartCMP UUID, not accepted
+[FAIL]  smartcmp_approve(1)      <- display row number; resolve it to request_id first
+[FAIL]  smartcmp_approve(dummy-id-placeholder) <- placeholder, never send to CMP
 ```
 
 ## Critical Rules
 
-> **ONLY use `requestId` field for approve/reject tool input**. The scripts convert requestId to the SmartCMP approval action ID internally.
+> **ONLY use `request_id` field for approve/reject tool input**. SmartCMP Agent
+> SmartCMP Provider converts it to the approval action ID internally.
 
 > **NEVER create temp files** — no `.py`, `.txt`, `.json`. Your context IS your memory.
-
-> **NEVER redirect output** — no `>`, `>>`, `2>&1`. Run scripts directly, read stdout.
 
 > **Always show pending list first** before approve/reject operations.
 
@@ -515,10 +468,10 @@ python scripts/reject.py <request_id1> <request_id2> --reason "Not aligned with 
 
 | Error | Cause | Resolution |
 |-------|-------|------------|
-| `400` + `activity is null` | Used an internal or stale identifier after Request ID resolution | Re-list pending approvals, verify the item is still pending, and retry with `requestId` |
-| `Invalid SmartCMP Request ID(s)` | Used a display row number, UUID-shaped internal ID, or placeholder instead of `APPROVAL_META.requestId` | Re-list pending approvals and resolve the selected row to the `requestId` field |
-| `401` / Token expired | Session timeout | Refresh `CMP_COOKIE` or re-login |
-| `404` / Not found | Invalid or stale Request ID | Verify ID from latest list_pending.py output |
+| `400` + `activity is null` | Used an internal or stale identifier after Request ID resolution | Re-list pending approvals, verify the item is still pending, and retry with `request_id` |
+| `Invalid SmartCMP Request ID(s)` | Used a display row number, UUID-shaped internal ID, or placeholder instead of `_internal.items[].request_id` | Re-list pending approvals and resolve the selected row to its `request_id` field |
+| `401` / Token expired | Selected SmartCMP session expired | Refresh the selected SmartCMP session or credential |
+| `404` / Not found | Invalid or stale Request ID | Verify ID from the latest `smartcmp_list_pending` result |
 | `[ERROR]` output | Various | Report to user immediately; do NOT self-debug |
 
 ## References
