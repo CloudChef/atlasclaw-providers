@@ -472,6 +472,7 @@ rejection `reason`.
 | `Invalid SmartCMP Request ID(s)` | Used a display row number, UUID-shaped internal ID, or placeholder instead of `_internal.items[].request_id` | Re-list pending approvals and resolve the selected row to its `request_id` field |
 | `401` / Token expired | Selected SmartCMP session expired | Refresh the selected SmartCMP session or credential |
 | `404` / Not found | Invalid or stale Request ID | Verify ID from the latest `smartcmp_list_pending` result |
+| Unknown decision outcome | SmartCMP accepted the write but the result cannot be verified | Do not retry and do not use pending detail/list as proof. Use `smartcmp_get_request_status` when available; otherwise report the unknown outcome. |
 | `[ERROR]` output | Various | Report to user immediately; do NOT self-debug |
 
 ## References

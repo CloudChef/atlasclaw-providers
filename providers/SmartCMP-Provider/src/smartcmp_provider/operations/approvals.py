@@ -419,7 +419,7 @@ def _decision_items(
                     else "unknown"
                 ),
                 message=(
-                    _safe_record_message(failed=failed)
+                    _record_message(payload, failed=failed)
                     if failed or succeeded
                     else "SmartCMP did not return verifiable aggregate results."
                 ),
@@ -436,6 +436,13 @@ def _decision_items(
             )
             for request_id in request_ids
         ]
+
+    # SmartCMP's batch endpoint returns one ordered response per submitted
+    # activity and uses ``pass`` as the item-level execution result. Detect this
+    # contract before the legacy activity-ID response shapes below; approvalId
+    # identifies the parent Approval, not the submitted ApprovalActivity.
+    if any(isinstance(record, dict) and "pass" in record for record in payload):
+        return _ordered_batch_decision_items(decision, request_ids, payload)
 
     pending_records = [
         record if isinstance(record, dict) else None for record in payload
@@ -487,10 +494,47 @@ def _decision_items(
                 request_id=request_id,
                 outcome="failed" if failed else "succeeded",
                 status=_safe_record_status(record, failed=failed),
-                message=_safe_record_message(failed=failed),
+                message=_record_message(record, failed=failed),
             )
         )
     return results
+
+
+def _ordered_batch_decision_items(
+    decision: str,
+    request_ids: tuple[str, ...],
+    payload: list[Any],
+) -> list[ApprovalDecisionItem]:
+    """Map SmartCMP's ordered batch response without exposing internal IDs."""
+
+    if len(payload) != len(request_ids) or not all(
+        isinstance(record, dict) and type(record.get("pass")) is bool
+        for record in payload
+    ):
+        return [
+            ApprovalDecisionItem(
+                request_id=request_id,
+                outcome="unknown",
+                status="unknown",
+                message="SmartCMP returned an unverifiable batch decision result.",
+            )
+            for request_id in request_ids
+        ]
+
+    succeeded_status = "approved" if decision == "approve" else "rejected"
+    return [
+        ApprovalDecisionItem(
+            request_id=request_id,
+            outcome="succeeded" if record["pass"] else "failed",
+            status=succeeded_status if record["pass"] else "failed",
+            message=(
+                ""
+                if record["pass"]
+                else _record_message(record, failed=True)
+            ),
+        )
+        for request_id, record in zip(request_ids, payload, strict=True)
+    ]
 
 
 def _record_activity_id(record: dict[str, Any]) -> str:
@@ -550,7 +594,9 @@ def _safe_record_status(record: dict[str, Any], *, failed: bool) -> str:
     return state if state in _SAFE_SUCCESS_STATES else "completed"
 
 
-def _safe_record_message(*, failed: bool) -> str:
+def _record_message(record: dict[str, Any], *, failed: bool) -> str:
     if failed:
-        return "SmartCMP reported an item-level decision failure."
+        return str(record.get("reason") or "").strip() or (
+            "SmartCMP reported an item-level decision failure."
+        )
     return ""

@@ -106,19 +106,15 @@ def test_batch_approval_resolves_visible_ids_and_reports_partial_failure():
             200,
             json=[
                 {
-                    "id": "response-row-id-2",
-                    "activityId": "activity-internal-2",
-                    "success": False,
-                    "status": "failed",
-                    "message": (
-                        "could not approve activity-internal-secret-id"
-                    ),
+                    "approvalId": "approval-internal-1",
+                    "type": "PROVISION_RES",
+                    "pass": True,
                 },
                 {
-                    "id": "response-row-id-1",
-                    "activityId": "activity-internal-1",
-                    "success": True,
-                    "status": "approved",
+                    "approvalId": "approval-internal-2",
+                    "type": "MANUAL_REQUEST",
+                    "pass": False,
+                    "reason": "could not approve activity-internal-secret-id",
                 },
             ],
             request=request,
@@ -149,11 +145,8 @@ def test_batch_approval_resolves_visible_ids_and_reports_partial_failure():
         "TIC20260502000003",
     ]
     assert [item.outcome for item in result.items] == ["succeeded", "failed"]
-    assert "activity-internal" not in result.model_dump_json()
-    assert "secret-id" not in result.model_dump_json()
-    assert result.items[1].message == (
-        "SmartCMP reported an item-level decision failure."
-    )
+    assert "approval-internal" not in result.model_dump_json()
+    assert result.items[1].message == "could not approve activity-internal-secret-id"
 
 
 def test_approval_detail_preserves_five_page_lookup_and_finds_page_two():

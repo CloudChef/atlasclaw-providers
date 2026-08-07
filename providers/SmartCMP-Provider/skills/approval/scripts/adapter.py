@@ -237,16 +237,29 @@ async def _decide(
             ),
         )
         completed = [
-            item.request_id
-            for item in result.items
-            if item.outcome == "succeeded"
+            item.request_id for item in result.items if item.outcome == "succeeded"
+        ]
+        failed = [item for item in result.items if item.outcome == "failed"]
+        unknown = [
+            item.request_id for item in result.items if item.outcome == "unknown"
         ]
         verb = "Approved" if decision == "approve" else "Rejected"
-        summary = (
-            f"{verb}: {', '.join(completed)}"
-            if completed
-            else f"No requests were {verb.casefold()}."
-        )
+        decision_name = "Approval" if decision == "approve" else "Rejection"
+        summaries = []
+        if completed:
+            summaries.append(f"{verb}: {', '.join(completed)}")
+        if failed:
+            summaries.extend(
+                f"{decision_name} failed: {item.request_id}"
+                + (f" — {item.message}" if item.message else "")
+                for item in failed
+            )
+        if unknown:
+            summaries.append(
+                f"{decision_name} submitted but outcome could not be confirmed: "
+                + ", ".join(unknown)
+            )
+        summary = "\n".join(summaries)
         return tool_result(result, summary=summary)
     except (ValueError, RuntimeError) as error:
         return tool_error(error)

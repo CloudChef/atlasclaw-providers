@@ -458,8 +458,8 @@ def test_atlasclaw_auth_context_rejects_unsupported_mode(
         )
 
 
-def test_approval_adapter_builds_one_typed_decision(monkeypatch) -> None:
-    """Verify the consolidated approval handler delegates one confirmed write."""
+def test_approval_adapter_reports_unknown_without_claiming_failure(monkeypatch) -> None:
+    """Keep an indeterminate approval distinct from a definite failure."""
 
     adapter = _load(
         SKILLS_ROOT / "approval" / "scripts" / "adapter.py",
@@ -476,10 +476,10 @@ def test_approval_adapter_builds_one_typed_decision(monkeypatch) -> None:
             items=(
                 ApprovalDecisionItem(
                     request_id="RES20260731000001",
-                    outcome="succeeded",
+                    outcome="unknown",
                 ),
             ),
-            overall_success=True,
+            overall_success=False,
         )
 
     monkeypatch.setattr(adapter, "execute", fake_execute)
@@ -492,6 +492,11 @@ def test_approval_adapter_builds_one_typed_decision(monkeypatch) -> None:
     )
 
     assert result["success"] is True
+    assert result["output"] == (
+        "Approval submitted but outcome could not be confirmed: "
+        "RES20260731000001"
+    )
+    assert "No requests were approved" not in result["output"]
     assert captured["input"].request_ids == ("RES20260731000001",)
     assert captured["input"].reason == "policy accepted"
 

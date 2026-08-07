@@ -50,4 +50,4 @@ with `ids` and a rejection `reason`.
 | Invalid Request ID | Re-list pending approvals and resolve the selected row to `request_id` |
 | `401 Unauthorized` | Refresh the selected SmartCMP session or credential |
 | `404 Not Found` | Re-list because the approval may be stale or completed |
-| Timeout or unknown write result | Report the normalized Provider result; do not retry a write blindly |
+| Timeout or unknown write result | Do not retry and do not verify through pending detail/list. Use `smartcmp_get_request_status` when available; otherwise report the normalized unknown outcome. |
