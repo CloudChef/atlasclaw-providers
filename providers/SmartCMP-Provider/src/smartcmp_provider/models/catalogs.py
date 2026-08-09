@@ -62,7 +62,13 @@ class FacetQuery(BaseModel):
 
 
 class ResourceBundleQuery(BaseModel):
-    """Select static request resource pools for one provisioning context."""
+    """Select resource pools and resolve their request-time placement choices.
+
+    ``placement_fields`` contains only fields declared by the selected catalog.
+    ``placement_values`` carries the selected ``catalogId`` and ``node`` context
+    together with choices already made in the dependency chain. Keeping that
+    context in the existing map preserves the shared MCP Tool signature.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -70,15 +76,19 @@ class ResourceBundleQuery(BaseModel):
     component_type: str
     node_type: str
     cloud_entry_type_id: str = ""
+    resource_bundle_id: str = ""
+    placement_fields: tuple[str, ...] = ()
+    placement_values: dict[str, str] = Field(default_factory=dict)
 
 
 class FlavorQuery(BaseModel):
-    """Select machine flavors for an optional catalog and resource pool."""
+    """Select compute profiles or their cloud flavors for a resource pool."""
 
     model_config = ConfigDict(frozen=True)
 
     query_value: str = ""
     resource_bundle_id: str = ""
+    compute_profile_id: str = ""
     catalog_id: str = ""
     node_template_name: str = ""
     page: int = Field(default=1, ge=1)

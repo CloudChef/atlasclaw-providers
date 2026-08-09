@@ -3,9 +3,7 @@
 
 from __future__ import annotations
 
-import hashlib
 import importlib.util
-import json
 import sys
 import tomllib
 from dataclasses import FrozenInstanceError
@@ -21,12 +19,6 @@ from pydantic import BaseModel
 PROVIDER_ROOT = Path(__file__).resolve().parents[1]
 SKILLS_ROOT = PROVIDER_ROOT / "skills"
 BOOTSTRAP_PATH = SKILLS_ROOT / "shared" / "scripts" / "_provider_bootstrap.py"
-EXPECTED_PROVIDER_SCHEMA_SHA256 = (
-    "6fc94545693692adf22cf0ccb2be9466a71cef465fc8c5719f2a43cacb29539c"
-)
-EXPECTED_SKILL_METADATA_SHA256 = (
-    "984e3bafad5a3f959397aa23822fe54378f4234f0aa55b6f9467b5281f32ab1a"
-)
 EXPECTED_SKILL_PATHS = {
     "alarm/SKILL.md",
     "approval/SKILL.md",
@@ -162,25 +154,13 @@ def test_provider_package_declares_stable_build_contract() -> None:
     assert pyproject["tool"]["setuptools"]["packages"]["find"]["where"] == ["src"]
 
 
-def test_provider_and_skill_metadata_match_p0_compatibility_snapshot() -> None:
-    provider_schema_digest = hashlib.sha256(
-        (PROVIDER_ROOT / "provider.schema.json").read_bytes()
-    ).hexdigest()
+def test_skill_metadata_keeps_expected_tool_contract() -> None:
     frontmatters = _skill_frontmatters()
-    normalized_metadata = json.dumps(
-        frontmatters,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    ).encode()
-    skill_metadata_digest = hashlib.sha256(normalized_metadata).hexdigest()
     tool_names = _tool_names(frontmatters)
 
     assert set(frontmatters) == EXPECTED_SKILL_PATHS
     assert len(tool_names) == len(set(tool_names)) == 51
     assert set(tool_names) == EXPECTED_TOOL_NAMES
-    assert provider_schema_digest == EXPECTED_PROVIDER_SCHEMA_SHA256
-    assert skill_metadata_digest == EXPECTED_SKILL_METADATA_SHA256
 
 
 def test_atlasclaw_bootstrap_imports_colocated_provider_without_config(

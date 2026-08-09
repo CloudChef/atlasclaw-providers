@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from urllib.parse import quote
 
@@ -42,8 +43,8 @@ async def execute_resource_action(
 ) -> ResourceActionResult:
     """Validate and submit a no-parameter resource action exactly once.
 
-    Every target is checked through the current credential's resource-actions
-    endpoint immediately before submission. The POST is never retried; an
+    Every target is checked through the current credential's authoritative
+    operation endpoint immediately before submission. The POST is never retried; an
     indeterminate transport result is surfaced as an unknown outcome.
 
     Args:
@@ -68,6 +69,7 @@ async def execute_resource_action(
         )
 
     resource_ids: list[str] = []
+    categories: set[str] = set()
     selected_operations: list[dict[str, Any]] = []
     for target in action_input.targets:
         category = target.category.strip()
@@ -103,9 +105,10 @@ async def execute_resource_action(
                 f"{resource_id}: {reason}",
                 trace_id=client.request.context.trace_id,
             )
-        selected_operations.append(operation)
+        categories.add(category.casefold())
         if resource_id not in resource_ids:
             resource_ids.append(resource_id)
+            selected_operations.append(operation)
 
     if len(resource_ids) > 1 and any(
         operation.get("supportBatchAction") is not True
@@ -117,25 +120,53 @@ async def execute_resource_action(
             trace_id=client.request.context.trace_id,
         )
 
-    payload = {
-        "operationId": action,
-        "resourceIds": (
-            resource_ids[0]
-            if len(resource_ids) == 1
-            else ",".join(resource_ids)
-        ),
-        "scheduledTaskMetadataRequest": {
-            "cronExpression": "",
-            "cycleDescription": "",
-            "cycled": False,
-            "scheduleEnabled": False,
-            "scheduledTime": None,
-        },
+    if len(categories) != 1:
+        raise SmartCmpValidationError(
+            "A single operation cannot mix deployments and node resources.",
+            trace_id=client.request.context.trace_id,
+        )
+
+    schedule = {
+        "cronExpression": "",
+        "cycleDescription": "",
+        "cycled": False,
+        "scheduleEnabled": False,
+        "scheduledTime": None,
     }
+    if categories == {"deployments"}:
+        payload = {
+            resource_id: {
+                "operationName": str(operation.get("id") or ""),
+                "scheduledTaskMetadataRequest": schedule,
+                "operationParamJson": json.dumps(
+                    {"systemForm": None}, separators=(",", ":")
+                ),
+                **(
+                    {"recycle": True, "manual": True}
+                    if action == "permanently_delete_deployment"
+                    else {}
+                ),
+            }
+            for resource_id, operation in zip(
+                resource_ids, selected_operations, strict=True
+            )
+        }
+        operation_path = "/deployments/execute-action"
+    else:
+        payload = {
+            "operationId": action,
+            "resourceIds": (
+                resource_ids[0]
+                if len(resource_ids) == 1
+                else ",".join(resource_ids)
+            ),
+            "scheduledTaskMetadataRequest": schedule,
+        }
+        operation_path = "/nodes/resource-operations"
     try:
         response_payload = await client.request_json(
             "POST",
-            "/nodes/resource-operations",
+            operation_path,
             json_body=payload,
         )
     except SmartCmpError as exc:
@@ -169,10 +200,16 @@ async def _fetch_current_user_operations(
     category: str,
     resource_id: str,
 ) -> list[dict[str, Any]]:
-    path = (
-        f"/nodes/{quote(category, safe='')}/{quote(resource_id, safe='')}"
-        "/resource-actions"
-    )
+    if category.casefold() == "deployments":
+        path = (
+            f"/deployments/{quote(resource_id, safe='')}"
+            "/deployment-actions"
+        )
+    else:
+        path = (
+            f"/nodes/{quote(category, safe='')}/{quote(resource_id, safe='')}"
+            "/resource-actions"
+        )
     payload = await client.request_json("GET", path)
     if not isinstance(payload, list):
         raise SmartCmpUpstreamError(

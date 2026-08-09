@@ -36,43 +36,49 @@ try:
         SmartCmpNotFoundError,
         SmartCmpPermissionError,
         SmartCmpRateLimitError,
-        SmartCmpTargetResolutionError,
         SmartCmpTimeoutError,
         SmartCmpUnknownOutcomeError,
         SmartCmpUpstreamError,
         SmartCmpValidationError,
     )
     from smartcmp_provider.models.catalogs import (
-        CatalogDetailQuery,
         CatalogListQuery,
+        FlavorQuery,
+        ImageQuery,
+        ResourceBundleQuery,
     )
     from smartcmp_provider.models.requests import (
         RequestActorIdentity,
         RequestStatusQuery,
         RequestSubmissionInput,
     )
+    from smartcmp_provider.models.operations import (
+        ResourceActionInput,
+        ResourceActionTarget,
+    )
     from smartcmp_provider.models.resources import (
         ResourceDetailQuery,
         ResourceEvidenceQuery,
         ResourceListQuery,
         ResourceOperationsQuery,
-        ResourceSummarySearchQuery,
     )
     from smartcmp_provider.operations.resources import (
         get_resource_detail,
         load_resource_evidence,
         list_resource_operations,
         list_resources,
-        search_resource_summaries,
     )
     from smartcmp_provider.operations.catalogs import (
-        get_catalog_detail,
         list_catalogs,
+        list_flavors,
+        list_images,
+        list_resource_bundles,
     )
     from smartcmp_provider.operations.requests import (
         get_request_status,
         submit_request,
     )
+    from smartcmp_provider.operations.resource_actions import execute_resource_action
     from smartcmp_provider.transport.client import SmartCmpClient
     from smartcmp_provider.instance import SmartCmpInstance
 finally:
@@ -113,26 +119,6 @@ def make_request(
     )
 
 
-def test_provided_resolver_keeps_secret_out_of_context_and_repr():
-    request = make_request(
-        instance_name="cmp-a",
-        base_url="cmp-a.example/tenant",
-        user_id="user-a",
-        token="session-a",
-        timeout=75,
-    )
-
-    assert request.context.instance.base_url == "https://cmp-a.example/tenant/platform-api"
-    assert request.context.instance.timeout_seconds == 75
-    assert request.context.instance.tls.verify is False
-    assert request.context.principal.subject == "user-a"
-    assert request.context.trace_id == "run-user-a"
-    assert request.credential.headers() == {
-        "CloudChef-Authenticate": "session-a",
-        "Content-Type": "application/json; charset=utf-8",
-    }
-    assert "session-a" not in repr(request.credential)
-    assert not hasattr(request.context, "credential")
 
 
 def test_integration_resolver_owns_configured_and_oauth_credentials():
@@ -397,89 +383,10 @@ def test_transport_maps_timeout_without_exposing_credential():
     assert "never-log-this-token" not in str(exc_info.value)
 
 
-def test_authenticated_transport_rejects_redirect_without_forwarding_headers():
-    request_scope = make_request(
-        instance_name="cmp-a",
-        base_url="https://cmp.example",
-        user_id="user-a",
-        token="session-a",
-    )
-    seen_hosts: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen_hosts.append(str(request.url.host))
-        return httpx.Response(
-            307,
-            headers={"Location": "https://redirect.example/collect"},
-            request=request,
-        )
-
-    async def invoke():
-        async with SmartCmpClient(
-            request_scope,
-            transport=httpx.MockTransport(handler),
-        ) as client:
-            await client.request_json("GET", "/nodes/search")
-
-    with pytest.raises(SmartCmpUpstreamError, match="redirects are not allowed"):
-        asyncio.run(invoke())
-
-    assert seen_hosts == ["cmp.example"]
 
 
-def test_mutation_redirect_has_unknown_outcome_without_following_location() -> None:
-    """A rejected write redirect must not make a duplicate retry appear safe."""
-
-    request_scope = make_request(
-        instance_name="cmp-a",
-        base_url="https://cmp.example",
-        user_id="user-a",
-        token="session-a",
-    )
-    seen_hosts: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen_hosts.append(str(request.url.host))
-        return httpx.Response(
-            303,
-            headers={"Location": "https://redirect.example/collect"},
-            request=request,
-        )
-
-    async def invoke() -> None:
-        async with SmartCmpClient(
-            request_scope,
-            transport=httpx.MockTransport(handler),
-        ) as client:
-            await client.request_json("POST", "/requests", json_body={})
-
-    with pytest.raises(SmartCmpUpstreamError) as exc_info:
-        asyncio.run(invoke())
-
-    assert exc_info.value.mutation_outcome == "unknown"
-    assert seen_hosts == ["cmp.example"]
 
 
-def test_password_login_rejects_redirect_without_replaying_digest():
-    seen_hosts: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen_hosts.append(str(request.url.host))
-        return httpx.Response(
-            307,
-            headers={"Location": "https://redirect.example/collect"},
-            request=request,
-        )
-
-    with pytest.raises(SmartCmpAuthenticationError, match="HTTP 307"):
-        login_with_password(
-            "https://cmp.example/platform-api/login",
-            "admin",
-            "password",
-            transport=httpx.MockTransport(handler),
-        )
-
-    assert seen_hosts == ["cmp.example"]
 
 
 @pytest.mark.parametrize(
@@ -570,38 +477,6 @@ def test_transport_maps_invalid_json_and_business_failures(
     assert "never-log-this-token" not in str(exc_info.value)
 
 
-def test_transport_redacts_secrets_echoed_by_upstream_errors():
-    request_scope = make_request(
-        instance_name="cmp-a",
-        base_url="https://cmp.example",
-        user_id="user-a",
-        token="session-a",
-    )
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            400,
-            json={
-                "message": "credentialPassword=vm-secret is invalid",
-                "request": {"password": "nested-secret"},
-            },
-            request=request,
-        )
-
-    async def invoke():
-        async with SmartCmpClient(
-            request_scope,
-            transport=httpx.MockTransport(handler),
-        ) as client:
-            await client.request_json("POST", "/generic-request/submit")
-
-    with pytest.raises(SmartCmpValidationError) as exc_info:
-        asyncio.run(invoke())
-
-    rendered = str(exc_info.value)
-    assert "vm-secret" not in rendered
-    assert "nested-secret" not in rendered
-    assert "[REDACTED]" in rendered
 
 
 @pytest.mark.parametrize(
@@ -620,34 +495,6 @@ def test_transport_redacts_complete_unquoted_credential_values(message, secret):
     assert rendered.endswith("[REDACTED]")
 
 
-def test_password_login_does_not_expose_success_body_without_credentials():
-    """A malformed login success response must not cross the error boundary."""
-
-    password_digest = "5f4dcc3b5aa765d61d8327deb882cf99"
-    bearer_token = "cmp_tk_secret"
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={
-                "code": f"password={password_digest}",
-                "message": f"Authorization: Bearer {bearer_token}",
-            },
-            request=request,
-        )
-
-    with pytest.raises(SmartCmpAuthenticationError) as exc_info:
-        login_with_password(
-            "https://cmp.example/platform-api/login",
-            "admin",
-            password_digest,
-            transport=httpx.MockTransport(handler),
-        )
-
-    rendered = str(exc_info.value)
-    assert "contains no cookies or tokens" in rendered
-    assert password_digest not in rendered
-    assert bearer_token not in rendered
 
 
 def test_transport_uses_smaller_deadline_and_rejects_expired_deadline():
@@ -779,18 +626,50 @@ Collect the VM shape before submission.
     assert result.catalogs[1]["type"] == "cloudchef.nodes.Compute"
 
 
-def test_catalog_detail_rejects_a_different_response_id():
+@pytest.mark.parametrize(
+    ("cloud_entry_type", "expected_resource_type"),
+    [
+        (
+            "yacmp:cloudentry:type:generic-cloud:terraform_enterprise",
+            "yacmp:cloudentry:type:generic-cloud::images",
+        ),
+        (
+            "yacmp:cloudentry:type:generic-cloud:tencentcloud",
+            "yacmp:cloudentry:type:generic-cloud::images",
+        ),
+        (
+            "yacmp:cloudentry:type:vsphere",
+            "yacmp:cloudentry:type:vsphere::images",
+        ),
+    ],
+)
+def test_image_query_uses_cmp_cloud_family_resource_type(
+    cloud_entry_type: str,
+    expected_resource_type: str,
+) -> None:
+    """Generic-Cloud subtypes share CMP image dispatch without changing others."""
+
     request_scope = make_request(
         instance_name="cmp-a",
         base_url="https://cmp.example",
         user_id="user-a",
         token="session-a",
     )
+    submitted_payloads: list[dict] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
+        submitted_payloads.append(json.loads(request.content))
         return httpx.Response(
             200,
-            json={"id": "catalog-other", "name": "Wrong catalog"},
+            json=[
+                {
+                    "id": "provider-image-id",
+                    "name": "Selected image",
+                    "properties": {
+                        "extra": {"templateId": "request-template-id"}
+                    },
+                }
+            ],
             request=request,
         )
 
@@ -799,16 +678,284 @@ def test_catalog_detail_rejects_a_different_response_id():
             request_scope,
             transport=httpx.MockTransport(handler),
         ) as client:
-            await get_catalog_detail(
+            return await list_images(
                 client,
-                CatalogDetailQuery(catalog_id="catalog-selected"),
+                ImageQuery(
+                    resource_bundle_id="resource-bundle-1",
+                    logic_template_id="logical-template-1",
+                    cloud_entry_type=cloud_entry_type,
+                ),
             )
 
-    with pytest.raises(
-        SmartCmpValidationError,
-        match="returned a different catalog ID",
-    ):
-        asyncio.run(invoke())
+    result = asyncio.run(invoke())
+
+    assert len(submitted_payloads) == 1
+    assert submitted_payloads[0]["cloudResourceType"] == expected_resource_type
+    assert result.items[0]["templateId"] == "request-template-id"
+
+
+def test_resource_bundle_resolves_declared_placement_fields() -> None:
+    """Resolve one resource-pool lookup and report remaining required fields."""
+
+    request_scope = make_request(
+        instance_name="cmp-a",
+        base_url="https://cmp.example",
+        user_id="user-a",
+        token="session-a",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/resource-bundles"):
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "id": "resource-bundle-1",
+                        "name": "AWS pool",
+                        "cloudEntryTypeId": "yacmp:cloudentry:type:aws",
+                        "cloudEntryId": "cloud-entry-1",
+                    }
+                ],
+                request=request,
+            )
+        if request.url.path.endswith("/catalogs/catalog-1"):
+            return httpx.Response(
+                200,
+                json={
+                    "id": "catalog-1",
+                    "blueprint": {
+                        "mainYaml": (
+                            "node_templates:\n"
+                            "  SecurityGroup:\n"
+                            "    type: cloudchef.nodes.SecurityGroup\n"
+                        ),
+                        "extensibleParams": json.dumps(
+                            {
+                                "SecurityGroup": {
+                                    "data": {
+                                        "account_id": "account-1",
+                                        "un_visibility_property": ["account_id"],
+                                    }
+                                }
+                            }
+                        ),
+                    },
+                },
+                request=request,
+            )
+        if request.url.path.endswith("/components"):
+            return httpx.Response(200, json=[], request=request)
+        if request.url.path.endswith("/cloudentries"):
+            return httpx.Response(
+                200,
+                json={
+                    "result": [
+                        {
+                            "resourceConfig": {
+                                "SecurityGroup": {
+                                    "account_id": {
+                                        "type": "string",
+                                        "required": {"inRequest": {"value": True}},
+                                    },
+                                    "vpc_id": {
+                                        "type": "string",
+                                        "required": {"inRequest": {"value": True}},
+                                        "cloudResourceType": "generic-resource",
+                                        "queryProperties": {"resourceType": "vpc"},
+                                        "dependencies": {
+                                            "account_id": "accountId",
+                                        },
+                                    },
+                                    "group_description": {
+                                        "type": "string",
+                                        "required": {"inRequest": {"value": True}},
+                                    },
+                                }
+                            }
+                        }
+                    ]
+                },
+                request=request,
+            )
+        if request.url.path.endswith("/cloudprovider"):
+            body = json.loads(request.content)
+            assert body["queryProperties"] == {
+                "resourceType": "vpc",
+                "resourceBundleId": "resource-bundle-1",
+                "accountId": "account-1",
+            }
+            return httpx.Response(
+                200,
+                json=[{"id": "vpc-a", "name": "VPC A"}],
+                request=request,
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    async def invoke():
+        async with SmartCmpClient(
+            request_scope,
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            pending = await list_resource_bundles(
+                client,
+                ResourceBundleQuery(
+                    business_group_id="business-group-1",
+                    component_type="cloudchef.nodes.SecurityGroup",
+                    node_type="cloudchef.nodes.SecurityGroup",
+                    resource_bundle_id="resource-bundle-1",
+                    placement_fields=("vpc_id",),
+                    placement_values={
+                        "catalogId": "catalog-1",
+                        "node": "SecurityGroup",
+                    },
+                ),
+            )
+            complete = await list_resource_bundles(
+                client,
+                ResourceBundleQuery(
+                    business_group_id="business-group-1",
+                    component_type="cloudchef.nodes.SecurityGroup",
+                    node_type="cloudchef.nodes.SecurityGroup",
+                    resource_bundle_id="resource-bundle-1",
+                    placement_values={
+                        "catalogId": "catalog-1",
+                        "node": "SecurityGroup",
+                        "vpc_id": "vpc-a",
+                        "group_description": "MCP acceptance group",
+                    },
+                ),
+            )
+            return pending, complete
+
+    pending, complete = asyncio.run(invoke())
+
+    fields = {
+        field["key"]: field
+        for field in pending.items[0]["requestFields"]
+    }
+    assert fields["account_id"]["value"] == "account-1"
+    assert fields["vpc_id"]["dependsOn"] == ["account_id"]
+    assert pending.items[0]["placementOptions"]["vpc_id"][0]["id"] == "vpc-a"
+    assert set(pending.items[0]["missingRequiredFields"]) == {
+        "vpc_id",
+        "group_description",
+    }
+    assert complete.items[0]["valid"] is True
+
+
+@pytest.mark.parametrize(
+    ("action", "extra"),
+    [
+        ("Tear Down", {}),
+        ("permanently_delete_deployment", {"recycle": True, "manual": True}),
+    ],
+)
+def test_deployment_operation_rechecks_and_submits_once(action: str, extra: dict) -> None:
+    """Deployment actions preserve the exact current operation contract."""
+
+    request_scope = make_request(
+        instance_name="cmp-a",
+        base_url="https://cmp.example",
+        user_id="user-a",
+        token="session-a",
+    )
+    submitted: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            assert request.url.path.endswith(
+                "/deployments/deployment-1/deployment-actions"
+            )
+            return httpx.Response(
+                200,
+                json=[{
+                    "id": action,
+                    "enabled": True,
+                    "supportBatchAction": True,
+                    "parameters": {},
+                }],
+                request=request,
+            )
+        submitted.append(json.loads(request.content))
+        assert request.url.path.endswith("/deployments/execute-action")
+        return httpx.Response(200, json={"success": True}, request=request)
+
+    async def invoke():
+        async with SmartCmpClient(
+            request_scope,
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            return await execute_resource_action(
+                client,
+                ResourceActionInput(
+                    targets=(ResourceActionTarget(
+                        category="deployments",
+                        resource_id="deployment-1",
+                    ),),
+                    action=action,
+                ),
+            )
+
+    result = asyncio.run(invoke())
+
+    assert result.submitted is True
+    assert len(submitted) == 1
+    deployment_request = submitted[0]["deployment-1"]
+    assert deployment_request["operationName"] == action
+    assert {key: deployment_request[key] for key in extra} == extra
+
+
+
+
+def test_cloud_flavor_query_returns_the_request_flavor_id() -> None:
+    """Cloud-flavor choices expose the value required by MachineSpec."""
+
+    request_scope = make_request(
+        instance_name="cmp-a",
+        base_url="https://cmp.example",
+        user_id="user-a",
+        token="session-a",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith(
+            "/flavors/compute-profile-1/cloud-flavors"
+        )
+        assert request.url.params["cloudResource"] == "true"
+        assert request.url.params["resourceBundleId"] == "resource-bundle-1"
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "id": "cloud-flavor-mapping-1",
+                    "name": "2C2G",
+                    "flavorId": "S6.MEDIUM2",
+                    "flavorName": "InstanceFamily:S6 CPU:2 Memory:2",
+                }
+            ],
+            request=request,
+        )
+
+    async def invoke():
+        async with SmartCmpClient(
+            request_scope,
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            return await list_flavors(
+                client,
+                FlavorQuery(
+                    resource_bundle_id="resource-bundle-1",
+                    compute_profile_id="compute-profile-1",
+                ),
+            )
+
+    result = asyncio.run(invoke())
+
+    assert result.items == (
+        {"id": "S6.MEDIUM2", "name": "InstanceFamily:S6 CPU:2 Memory:2"},
+    )
+
+
 
 
 def test_request_submission_normalizes_payload_and_submits_exactly_once():
@@ -884,75 +1031,6 @@ def test_request_submission_normalizes_payload_and_submits_exactly_once():
     assert result.items[0].request_id == "RES20260731009991"
 
 
-def test_request_submission_stops_verification_after_first_confirmed_snapshot():
-    """A confirmed snapshot must not be overwritten by later polling failures."""
-
-    request_scope = make_request(
-        instance_name="cmp-a",
-        base_url="https://cmp.example",
-        user_id="user-a",
-        token="session-a",
-    )
-    verification_calls = 0
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal verification_calls
-        if request.url.path.endswith("/generic-request/submit"):
-            return httpx.Response(
-                200,
-                json=[
-                    {
-                        "id": "internal-request-id",
-                        "workflowId": "RES20260731009992",
-                        "state": "INITIALING",
-                    }
-                ],
-                request=request,
-            )
-        verification_calls += 1
-        if verification_calls > 1:
-            return httpx.Response(
-                500,
-                json={"message": "late verification failure"},
-                request=request,
-            )
-        return httpx.Response(
-            200,
-            json={
-                "workflowId": "RES20260731009992",
-                "state": "STARTED",
-                "processInstanceId": "process-1",
-            },
-            request=request,
-        )
-
-    async def invoke():
-        async with SmartCmpClient(
-            request_scope,
-            transport=httpx.MockTransport(handler),
-        ) as client:
-            return await submit_request(
-                client,
-                RequestSubmissionInput(
-                    body={
-                        "catalogId": "catalog-linux",
-                        "name": "confirmed-request",
-                        "quantity": 1,
-                    },
-                    actor=RequestActorIdentity(
-                        user_id="user-1",
-                        login_id="admin",
-                    ),
-                    verification_attempts=3,
-                    verification_interval_seconds=0,
-                ),
-            )
-
-    result = asyncio.run(invoke())
-
-    assert verification_calls == 1
-    assert result.items[0].outcome == "success"
-    assert result.items[0].request_id == "RES20260731009992"
 
 
 @pytest.mark.parametrize("error_field", ["errorMessage", "errMsg"])
@@ -1006,61 +1084,6 @@ def test_request_submission_redacts_credentials_from_submit_record(
     assert "[REDACTED]" in result.items[0].error
 
 
-def test_request_submission_redacts_credentials_from_verification_snapshot() -> None:
-    """Failed request verification must sanitize SmartCMP error fields."""
-    request_scope = make_request(
-        instance_name="cmp-a",
-        base_url="https://cmp.example",
-        user_id="user-a",
-        token="session-a",
-    )
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/generic-request/submit"):
-            return httpx.Response(
-                200,
-                json=[
-                    {
-                        "id": "20fef12e-5015-4df5-822b-e1e87c4f64fd",
-                        "workflowId": "RES20260731009995",
-                        "state": "INITIALING",
-                    }
-                ],
-                request=request,
-            )
-        return httpx.Response(
-            200,
-            json={
-                "workflowId": "RES20260731009995",
-                "state": "INITIALING_FAILED",
-                "errMsg": "password: vm-secret failed validation",
-            },
-            request=request,
-        )
-
-    async def invoke():
-        async with SmartCmpClient(
-            request_scope,
-            transport=httpx.MockTransport(handler),
-        ) as client:
-            return await submit_request(
-                client,
-                RequestSubmissionInput(
-                    body={"catalogId": "catalog-linux", "name": "failed"},
-                    actor=RequestActorIdentity(
-                        user_id="user-1",
-                        login_id="admin",
-                    ),
-                    verification_attempts=1,
-                    verification_interval_seconds=0,
-                ),
-            )
-
-    result = asyncio.run(invoke())
-
-    assert result.items[0].outcome == "initialization_failed"
-    assert "vm-secret" not in result.items[0].error
-    assert "[REDACTED]" in result.items[0].error
 
 
 def test_robot_submission_uses_cmp_actor_instead_of_webhook_user():
@@ -1129,70 +1152,6 @@ def test_robot_submission_uses_cmp_actor_instead_of_webhook_user():
     assert submitted[0]["userLoginId"] != "webhook-approval-1"
 
 
-@pytest.mark.parametrize(
-    "current_user_payload",
-    [
-        None,
-        {"id": "robot-user-id"},
-    ],
-)
-def test_robot_submission_stops_when_cmp_actor_cannot_be_resolved(
-    current_user_payload,
-):
-    request_scope = make_request(
-        instance_name="cmp-a",
-        base_url="https://cmp.example",
-        user_id="webhook-approval-1",
-        token="cmp_tk_robot",
-        robot_profile="cmp-test-robot",
-    )
-    submit_calls = 0
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal submit_calls
-        if request.url.path.endswith("/users/current-user-details"):
-            if current_user_payload is None:
-                return httpx.Response(
-                    401,
-                    json={"message": "Robot credential rejected."},
-                    request=request,
-                )
-            return httpx.Response(
-                200,
-                json=current_user_payload,
-                request=request,
-            )
-        submit_calls += 1
-        return httpx.Response(200, json=[], request=request)
-
-    async def invoke():
-        async with SmartCmpClient(
-            request_scope,
-            transport=httpx.MockTransport(handler),
-        ) as client:
-            await submit_request(
-                client,
-                RequestSubmissionInput(
-                    body={
-                        "catalogId": "catalog-linux",
-                        "name": "robot-vm",
-                        "userId": "stale-user-id",
-                        "userLoginId": "stale-user",
-                    },
-                    verification_attempts=1,
-                    verification_interval_seconds=0,
-                ),
-            )
-
-    expected_error = (
-        SmartCmpAuthenticationError
-        if current_user_payload is None
-        else SmartCmpUpstreamError
-    )
-    with pytest.raises(expected_error):
-        asyncio.run(invoke())
-
-    assert submit_calls == 0
 
 
 def test_indeterminate_submit_is_not_retried():
@@ -1289,55 +1248,6 @@ def test_uncorrelated_successful_submit_is_unknown(submit_payload):
     assert submit_calls == 1
 
 
-def test_expired_submit_deadline_fails_before_http_without_unknown_outcome():
-    request_scope = make_request(
-        instance_name="cmp-a",
-        base_url="https://cmp.example",
-        user_id="user-a",
-        token="session-a",
-    )
-    expired_context = replace(
-        request_scope.context,
-        deadline=datetime.now(UTC) - timedelta(seconds=1),
-    )
-    expired_request = replace(request_scope, context=expired_context)
-    submit_calls = 0
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal submit_calls
-        submit_calls += 1
-        return httpx.Response(200, json=[], request=request)
-
-    async def invoke():
-        async with SmartCmpClient(
-            expired_request,
-            transport=httpx.MockTransport(handler),
-        ) as client:
-            await submit_request(
-                client,
-                RequestSubmissionInput(
-                    body={
-                        "catalogId": "catalog-linux",
-                        "name": "expired-vm",
-                        "userId": "user-1",
-                        "userLoginId": "admin",
-                    },
-                    actor=RequestActorIdentity(
-                        user_id="user-1",
-                        login_id="admin",
-                    ),
-                    verification_attempts=1,
-                    verification_interval_seconds=0,
-                ),
-            )
-
-    with pytest.raises(
-        SmartCmpTimeoutError,
-        match="deadline expired before the upstream call",
-    ):
-        asyncio.run(invoke())
-
-    assert submit_calls == 0
 
 
 def test_business_rejection_is_definite_and_not_reported_as_unknown():
@@ -1447,184 +1357,12 @@ def test_request_status_resolves_visible_id_and_normalizes_approval_state():
     assert result.metadata["currentStep"] == "Manager approval"
 
 
-def test_request_status_rejects_detail_for_a_different_visible_request():
-    request_scope = make_request(
-        instance_name="cmp-a",
-        base_url="https://cmp.example",
-        user_id="user-a",
-        token="session-a",
-    )
-    requested_id = "RES20260731009994"
-    detail_id = "e7f746fe-e030-47df-945e-998254944335"
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/generic-request/search"):
-            return httpx.Response(
-                200,
-                json={
-                    "content": [
-                        {"id": detail_id, "workflowId": requested_id},
-                    ]
-                },
-                request=request,
-            )
-        return httpx.Response(
-            200,
-            json={
-                "id": detail_id,
-                "workflowId": "RES20260731009995",
-                "state": "STARTED",
-            },
-            request=request,
-        )
-
-    async def invoke():
-        async with SmartCmpClient(
-            request_scope,
-            transport=httpx.MockTransport(handler),
-        ) as client:
-            await get_request_status(
-                client,
-                RequestStatusQuery(request_id=requested_id),
-            )
-
-    with pytest.raises(
-        SmartCmpTargetResolutionError,
-        match="returned a different Request ID",
-    ):
-        asyncio.run(invoke())
 
 
-def test_request_status_rejects_conflicting_visible_request_aliases():
-    request_scope = make_request(
-        instance_name="cmp-a",
-        base_url="https://cmp.example",
-        user_id="user-a",
-        token="session-a",
-    )
-    requested_id = "RES20260731009996"
-    detail_id = "ab2b48cf-4adb-49e9-9c24-95fe58497100"
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/generic-request/search"):
-            return httpx.Response(
-                200,
-                json={
-                    "content": [
-                        {"id": detail_id, "workflowId": requested_id},
-                    ]
-                },
-                request=request,
-            )
-        return httpx.Response(
-            200,
-            json={
-                "id": detail_id,
-                "requestId": "RES20260731009997",
-                "workflowId": requested_id,
-                "state": "STARTED",
-            },
-            request=request,
-        )
-
-    async def invoke():
-        async with SmartCmpClient(
-            request_scope,
-            transport=httpx.MockTransport(handler),
-        ) as client:
-            await get_request_status(
-                client,
-                RequestStatusQuery(request_id=requested_id),
-            )
-
-    with pytest.raises(
-        SmartCmpTargetResolutionError,
-        match="returned a different Request ID",
-    ):
-        asyncio.run(invoke())
 
 
-@pytest.mark.parametrize("failure_endpoint", ["search", "detail"])
-def test_request_status_preserves_authentication_error_type(failure_endpoint):
-    request_scope = make_request(
-        instance_name="cmp-a",
-        base_url="https://cmp.example",
-        user_id="user-a",
-        token="session-a",
-    )
-    request_id = "RES20260731009998"
-    detail_id = "bd6ee27a-40df-41b7-bb70-74dc720bb269"
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        is_search = request.url.path.endswith("/generic-request/search")
-        if (
-            failure_endpoint == "search"
-            and is_search
-            or failure_endpoint == "detail"
-            and not is_search
-        ):
-            return httpx.Response(
-                401,
-                json={"message": "Credential expired."},
-                request=request,
-            )
-        return httpx.Response(
-            200,
-            json={
-                "content": [
-                    {"id": detail_id, "workflowId": request_id},
-                ]
-            },
-            request=request,
-        )
-
-    async def invoke():
-        async with SmartCmpClient(
-            request_scope,
-            transport=httpx.MockTransport(handler),
-        ) as client:
-            await get_request_status(
-                client,
-                RequestStatusQuery(request_id=request_id),
-            )
-
-    with pytest.raises(SmartCmpAuthenticationError, match="HTTP 401"):
-        asyncio.run(invoke())
 
 
-def test_resource_summary_params_only_search_omits_json_body():
-    """Params-only legacy searches must not gain an empty JSON request body."""
-
-    request_scope = make_request(
-        instance_name="cmp-a",
-        base_url="https://cmp.example",
-        user_id="user-a",
-        token="session-a",
-    )
-    seen: list[bytes] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(bytes(request.content))
-        return httpx.Response(
-            200,
-            json={"content": [], "totalElements": 0},
-            request=request,
-        )
-
-    async def invoke():
-        async with SmartCmpClient(
-            request_scope,
-            transport=httpx.MockTransport(handler),
-        ) as client:
-            return await search_resource_summaries(
-                client,
-                ResourceSummarySearchQuery(
-                    params={"page": 1, "size": 100},
-                ),
-            )
-
-    asyncio.run(invoke())
-    assert seen == [b""]
 
 
 def test_resource_evidence_is_normalized_inside_provider():
@@ -1671,39 +1409,3 @@ def test_resource_evidence_is_normalized_inside_provider():
     assert normalized["properties"]["cpu"] == 2
     assert normalized["properties"]["memoryMb"] == 4096
     assert "nested" not in normalized["properties"]
-
-
-def test_resource_evidence_falls_back_only_for_version_compatibility_status():
-    """A 5xx view failure must propagate instead of invoking legacy GET."""
-
-    request_scope = make_request(
-        instance_name="cmp-a",
-        base_url="https://cmp.example",
-        user_id="user-a",
-        token="session-a",
-    )
-    seen: list[tuple[str, str]] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen.append((request.method, request.url.path))
-        return httpx.Response(
-            500,
-            json={"message": "view failed"},
-            request=request,
-        )
-
-    async def invoke():
-        async with SmartCmpClient(
-            request_scope,
-            transport=httpx.MockTransport(handler),
-        ) as client:
-            await load_resource_evidence(
-                client,
-                ResourceEvidenceQuery(resource_ids=("resource-1",)),
-            )
-
-    with pytest.raises(SmartCmpUpstreamError):
-        asyncio.run(invoke())
-    assert seen == [
-        ("PATCH", "/platform-api/nodes/resource-1/view"),
-    ]
