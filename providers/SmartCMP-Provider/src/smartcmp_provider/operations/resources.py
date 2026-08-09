@@ -312,10 +312,16 @@ async def list_resource_operations(
             "Resource category and resource ID are required.",
             trace_id=client.request.context.trace_id,
         )
-    path = (
-        f"/nodes/{quote(category, safe='')}/{quote(resource_id, safe='')}"
-        "/resource-actions"
-    )
+    if category.casefold() == "deployments":
+        path = (
+            f"/deployments/{quote(resource_id, safe='')}"
+            "/deployment-actions"
+        )
+    else:
+        path = (
+            f"/nodes/{quote(category, safe='')}/{quote(resource_id, safe='')}"
+            "/resource-actions"
+        )
     payload = await client.request_json("GET", path)
     if not isinstance(payload, list):
         raise SmartCmpUpstreamError(
