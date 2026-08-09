@@ -171,7 +171,7 @@ tool_detail_parameters: |
     "required": []
   }
 tool_operations_name: "smartcmp_list_resource_operations"
-tool_operations_description: "List enabled no-parameter SmartCMP resource operations executable by the current user through `GET /nodes/{category}/{resource_id}/resource-actions`. Accepts a SmartCMP detail URL such as `#/main/virtual-machines/<id>/details` or a raw resource UUID. Do not use resource type definition or built-in action endpoints as fallback. If the user only asked what operations are available, return the Markdown operation table and invite an exact operation command. A later exact command such as `execute restart` for that resolved resource is explicit confirmation and must call `smartcmp_operate_resource`; do not ask for a redundant second confirmation."
+tool_operations_description: "List enabled no-parameter SmartCMP operations executable by the current user. Node resources use `GET /nodes/{category}/{resource_id}/resource-actions`; category `deployments` uses `GET /deployments/{resource_id}/deployment-actions`. Accepts a SmartCMP detail URL or a raw UUID. Do not use definition-level or built-in action endpoints as fallback. If the user only asked what operations are available, return the Markdown operation table and invite an exact operation command. A later exact command for that resolved target is explicit confirmation and must call `smartcmp_operate_resource`; do not ask for a redundant second confirmation."
 tool_operations_entrypoint: "scripts/adapter.py:list_resource_operations"
 tool_operations_groups:
   - cmp
@@ -199,7 +199,7 @@ tool_operations_parameters: |
     "required": ["resource_ref"]
   }
 tool_power_name: "smartcmp_operate_resource"
-tool_power_description: "Execute an enabled no-parameter SmartCMP resource operation through `POST /nodes/resource-operations`. `action` accepts the exact operation ID returned by `smartcmp_list_resource_operations`, including dynamic operations such as `restart`; it is not limited to power actions. RULES: (1) NEVER claim an operation was submitted without actually calling this tool — fabricating results is strictly forbidden. (2) Before calling, confirm the exact resource and operation with the user; an exact operation command after the resource and executable operations were just displayed is already that confirmation. (3) Always pass real SmartCMP resource UUIDs or detail URLs in resource_ids, not display names or list indexes. (4) The tool rechecks `GET /nodes/{category}/{id}/resource-actions` with the current user context before submission. (5) After success, keep the user response short; do not print raw request or response details."
+tool_power_description: "Execute an enabled no-parameter SmartCMP operation. Node resources use `POST /nodes/resource-operations`; category `deployments` uses `POST /deployments/execute-action`. `action` accepts the exact operation ID returned by `smartcmp_list_resource_operations`. RULES: (1) NEVER claim an operation was submitted without calling this tool. (2) Before calling, confirm the exact target and operation; an exact operation command after the target and executable operations were displayed is already confirmation. (3) Pass real SmartCMP UUIDs or detail URLs, not display names or list indexes. (4) The tool rechecks the current user's operation endpoint immediately before submission. (5) After success, keep the response short and omit raw payloads."
 tool_power_entrypoint: "scripts/adapter.py:operate_resource"
 tool_power_groups:
   - cmp
@@ -227,7 +227,7 @@ tool_power_parameters: |
       },
       "action": {
         "type": "string",
-        "description": "Exact SmartCMP operation ID returned by smartcmp_list_resource_operations, such as restart, refresh, create_snapshot, start, or stop. 开机/关机 aliases are also supported."
+        "description": "Exact SmartCMP operation ID returned by smartcmp_list_resource_operations, such as restart, refresh, Tear Down, or permanently_delete_deployment."
       }
     },
     "required": ["resource_ids", "action"]
@@ -499,7 +499,10 @@ When operation intent is present, a resource lookup is only a target-resolution 
 - `smartcmp_resource_detail` uses `PATCH /nodes/{id}/view` to fetch the host evidence view until the CMP view API bug is fixed. Do not use older resource/detail APIs as fallback in this interactive detail skill.
 - Keep list-mode output as a standard Markdown table. Include a `#` column for stable item references, a resource name column, and status; do not print object links in visible table cells.
 - For host detail, present only grouped key facts. Do not dump raw properties, top-level keys, source endpoints, or every key/value returned by the API.
-- `smartcmp_list_resource_operations` must only use `GET /nodes/{category}/{id}/resource-actions` with the current user context. Do not use `/resource-types/.../support-actions`, `/resource-types/.../resource-actions`, `/nodes/build-in-actions`, or other definition-level endpoints as executable-operation fallback.
+- `smartcmp_list_resource_operations` uses the current user context and only the
+  target's authoritative endpoint: `/nodes/{category}/{id}/resource-actions` for
+  node resources or `/deployments/{id}/deployment-actions` for deployments. Do
+  not use definition-level or built-in action endpoints as fallback.
 - Only show enabled no-parameter operations as executable choices. Operations that are disabled, web-only, have `inputsForm`, or require non-empty `parameters` are outside this tool's execution scope.
 - **NEVER claim a resource operation was submitted or succeeded without actually calling `smartcmp_operate_resource`.** You must call the tool and receive a real response before telling the user the operation is done.
 - **Before calling the operation tool, confirm with the user:** show the target resource name + operation ID/name, ask `Confirm this operation?`, and STOP. An exact operation command made after that resource and operation were just displayed is the confirmation; call the tool instead of adding a redundant confirmation turn.

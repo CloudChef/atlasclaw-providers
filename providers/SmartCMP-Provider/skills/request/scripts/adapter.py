@@ -196,8 +196,11 @@ async def list_resource_bundles(
     component_type: str,
     node_type: str,
     cloud_entry_type_id: str | None = None,
+    resource_bundle_id: str | None = None,
+    placement_fields: list[str] | None = None,
+    placement_values: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """List requestable resource pools for one catalog field context."""
+    """List resource pools and Provider-resolved catalog placement choices."""
 
     try:
         result = await execute(
@@ -208,6 +211,9 @@ async def list_resource_bundles(
                 component_type=component_type,
                 node_type=node_type,
                 cloud_entry_type_id=cloud_entry_type_id or "",
+                resource_bundle_id=resource_bundle_id or "",
+                placement_fields=tuple(placement_fields or ()),
+                placement_values=placement_values or {},
             ),
         )
         return tool_result(
@@ -242,6 +248,7 @@ async def list_flavors(
     ctx: RunContext[Any],
     query: str | None = None,
     resource_bundle_id: str | None = None,
+    compute_profile_id: str | None = None,
     catalog_id: str | None = None,
     node_template_name: str | None = None,
 ) -> dict[str, Any]:
@@ -254,6 +261,7 @@ async def list_flavors(
             FlavorQuery(
                 query_value=query or "",
                 resource_bundle_id=resource_bundle_id or "",
+                compute_profile_id=compute_profile_id or "",
                 catalog_id=catalog_id or "",
                 node_template_name=node_template_name or "",
             ),
