@@ -843,6 +843,101 @@ def test_resource_bundle_resolves_declared_placement_fields() -> None:
     assert complete.items[0]["valid"] is True
 
 
+def test_windows_compute_uses_shared_compute_cloud_schema() -> None:
+    """Windows machine nodes resolve the cloud platform's Compute schema."""
+
+    request_scope = make_request(
+        instance_name="cmp-a",
+        base_url="https://cmp.example",
+        user_id="user-a",
+        token="session-a",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/resource-bundles"):
+            return httpx.Response(
+                200,
+                json=[{
+                    "id": "resource-bundle-1",
+                    "cloudEntryTypeId": "yacmp:cloudentry:type:vsphere",
+                    "cloudEntryId": "cloud-entry-1",
+                }],
+                request=request,
+            )
+        if request.url.path.endswith("/catalogs/catalog-windows"):
+            return httpx.Response(
+                200,
+                json={
+                    "id": "catalog-windows",
+                    "blueprint": {
+                        "mainYaml": (
+                            "node_templates:\n"
+                            "  WindowsCompute:\n"
+                            "    type: cloudchef.nodes.WindowsCompute\n"
+                        ),
+                        "extensibleParams": "{}",
+                    },
+                },
+                request=request,
+            )
+        if request.url.path.endswith("/components"):
+            return httpx.Response(200, json=[], request=request)
+        if request.url.path.endswith("/cloudentries"):
+            return httpx.Response(
+                200,
+                json={
+                    "result": [{
+                        "resourceConfig": {
+                            "Compute": {
+                                "network_id": {
+                                    "type": "string",
+                                    "required": {"inRequest": {"value": True}},
+                                    "visibility": {"inRequest": {"value": True}},
+                                    "modification": {"inRequest": {"value": True}},
+                                    "cloudResourceType": "generic-resource",
+                                    "queryProperties": {"resourceType": "network"},
+                                }
+                            }
+                        }
+                    }]
+                },
+                request=request,
+            )
+        if request.url.path.endswith("/cloudprovider"):
+            return httpx.Response(
+                200,
+                json=[{"id": "network-1", "name": "Network 1"}],
+                request=request,
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    async def invoke():
+        async with SmartCmpClient(
+            request_scope,
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            return await list_resource_bundles(
+                client,
+                ResourceBundleQuery(
+                    business_group_id="business-group-1",
+                    component_type="resource.iaas.machine.windows_instance.abstract",
+                    node_type="cloudchef.nodes.WindowsCompute",
+                    resource_bundle_id="resource-bundle-1",
+                    placement_fields=("networkId",),
+                    placement_values={
+                        "catalogId": "catalog-windows",
+                        "node": "WindowsCompute",
+                    },
+                ),
+            )
+
+    result = asyncio.run(invoke())
+
+    fields = {field["key"]: field for field in result.items[0]["requestFields"]}
+    assert fields["networkId"]["target"] == "networkId"
+    assert result.items[0]["placementOptions"]["networkId"][0]["id"] == "network-1"
+
+
 @pytest.mark.parametrize(
     ("action", "extra"),
     [

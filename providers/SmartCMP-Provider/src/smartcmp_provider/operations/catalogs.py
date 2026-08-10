@@ -64,6 +64,9 @@ _RESOURCE_BUNDLE_SYSTEM_FIELDS = frozenset(
         "un_modification_property",
     }
 )
+_COMPUTE_NODE_TYPES = frozenset(
+    {"cloudchef.nodes.Compute", "cloudchef.nodes.WindowsCompute"}
+)
 _COMPUTE_RELATED_RESOURCE_FIELDS = {
     "cloudchef.nodes.Network": ("networkId", "string"),
     "cloudchef.nodes.SecurityGroup": ("securityGroupIds", "array"),
@@ -375,14 +378,16 @@ async def _resolve_resource_bundle_request_fields(
     selected_values: dict[str, str],
 ) -> dict[str, Any]:
     node_config = _catalog_node_config(catalog, node_name)
-    base_fields = await _load_cloud_request_schema(client, resource_bundle, node_name)
+    node_type = _catalog_node_type(catalog.get("blueprint"), node_name)
+    is_compute_node = node_type in _COMPUTE_NODE_TYPES
+    base_fields = await _load_cloud_request_schema(
+        client,
+        resource_bundle,
+        "Compute" if is_compute_node else node_name,
+    )
     catalog_fields = _schema_properties(node_config.get("schema"))
     fields = _merge_field_maps(base_fields, catalog_fields)
     data = node_config.get("data") if isinstance(node_config.get("data"), dict) else {}
-    is_compute_node = (
-        _catalog_node_type(catalog.get("blueprint"), node_name)
-        == "cloudchef.nodes.Compute"
-    )
     if is_compute_node:
         fields = {
             key: schema
@@ -2214,7 +2219,7 @@ def _derive_blueprint_resource_type(
         if not nodes:
             continue
         for node_name, node_type in nodes:
-            if node_type == "cloudchef.nodes.Compute":
+            if node_type in _COMPUTE_NODE_TYPES:
                 return {"node": node_name, "type": node_type}
         node_name, node_type = nodes[0]
         return {"node": node_name, "type": node_type}

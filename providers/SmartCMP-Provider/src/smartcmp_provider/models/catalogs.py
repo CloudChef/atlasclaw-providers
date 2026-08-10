@@ -6,6 +6,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+type PlacementFieldName = str
+
 
 class CatalogListQuery(BaseModel):
     """Select published catalogs or one exact catalog for request discovery."""
@@ -77,7 +79,7 @@ class ResourceBundleQuery(BaseModel):
     node_type: str
     cloud_entry_type_id: str = ""
     resource_bundle_id: str = ""
-    placement_fields: tuple[str, ...] = ()
+    placement_fields: tuple[PlacementFieldName, ...] = ()
     placement_values: dict[str, str] = Field(default_factory=dict)
 
 
