@@ -17,10 +17,6 @@ from smartcmp_provider.domain.resource_normalization import (
     determine_component_type,
 )
 from smartcmp_provider.errors import (
-    SmartCmpError,
-    SmartCmpAuthenticationError,
-    SmartCmpPermissionError,
-    SmartCmpRateLimitError,
     SmartCmpTargetResolutionError,
     SmartCmpUpstreamError,
     SmartCmpValidationError,
@@ -220,10 +216,9 @@ async def load_resource_evidence(
 ) -> ResourceEvidenceResult:
     """Load analyzer-compatible evidence packs for explicit resource IDs.
 
-    The current SmartCMP ``PATCH /nodes/{id}/view`` endpoint is authoritative.
-    Legacy GET endpoints are used only for explicit 404/405 compatibility
-    responses from the view endpoint. Timeout, conflict, malformed response,
-    and 5xx failures propagate without being disguised as legacy success.
+    SmartCMP ``PATCH /nodes/{id}/view`` is the sole authoritative evidence
+    endpoint. Every upstream failure propagates to the caller so analysis cannot
+    substitute a different resource representation.
 
     Args:
         client: Client bound to the current request credential.
@@ -385,19 +380,8 @@ async def _load_one_resource_evidence(
 ) -> dict[str, Any]:
     encoded_id = quote(resource_id, safe="")
     source_endpoint = f"/nodes/{encoded_id}/view"
-    primary_errors: list[str] = []
-    try:
-        payload = await client.request_json("PATCH", source_endpoint)
-        resource = _unwrap_payload(payload)
-    except SmartCmpError as exc:
-        if exc.http_status not in {404, 405}:
-            raise
-        primary_errors.append(f"Primary PATCH {source_endpoint} failed: {exc}")
-        return await _load_legacy_resource_evidence(
-            client,
-            resource_id,
-            primary_errors,
-        )
+    payload = await client.request_json("PATCH", source_endpoint)
+    resource = _unwrap_payload(payload)
 
     if not resource:
         raise SmartCmpUpstreamError(
@@ -415,74 +399,6 @@ async def _load_one_resource_evidence(
         "fetchStatus": "ok",
         "missingEvidence": [],
         "errors": [],
-        "fallbackUsed": False,
-        "fallbackEndpoints": [],
-    }
-    record["normalized"] = build_normalized_resource(record)
-    return record
-
-
-async def _load_legacy_resource_evidence(
-    client: SmartCmpClient,
-    resource_id: str,
-    primary_errors: list[str],
-) -> dict[str, Any]:
-    encoded_id = quote(resource_id, safe="")
-    resource_endpoint = f"/nodes/{encoded_id}"
-    details_endpoint = f"/nodes/{encoded_id}/details"
-    errors = list(primary_errors)
-    try:
-        payload = await client.request_json("GET", resource_endpoint)
-        resource = _unwrap_payload(payload)
-    except (
-        SmartCmpAuthenticationError,
-        SmartCmpPermissionError,
-        SmartCmpRateLimitError,
-    ):
-        raise
-    except SmartCmpError as exc:
-        errors.append(f"Fallback GET {resource_endpoint} failed: {exc}")
-        record = _missing_resource_record(resource_id)
-        record["errors"] = errors
-        record["fallbackUsed"] = True
-        record["fallbackEndpoints"] = [resource_endpoint, details_endpoint]
-        return record
-
-    if not resource:
-        errors.append(
-            f"Fallback GET {resource_endpoint} did not return resource data."
-        )
-        record = _missing_resource_record(resource_id)
-        record["errors"] = errors
-        record["fallbackUsed"] = True
-        record["fallbackEndpoints"] = [resource_endpoint, details_endpoint]
-        return record
-
-    details: dict[str, Any] = {}
-    try:
-        details_payload = await client.request_json("GET", details_endpoint)
-        details = _unwrap_payload(details_payload)
-    except (
-        SmartCmpAuthenticationError,
-        SmartCmpPermissionError,
-        SmartCmpRateLimitError,
-    ):
-        raise
-    except SmartCmpError as exc:
-        errors.append(f"Fallback GET {details_endpoint} failed: {exc}")
-    record = {
-        "resourceId": resource_id,
-        "sourceEndpoint": f"/nodes/{encoded_id}/view",
-        "data": resource,
-        "summary": {},
-        "resource": resource,
-        "details": details,
-        "normalized": {},
-        "fetchStatus": "ok",
-        "missingEvidence": [],
-        "errors": errors,
-        "fallbackUsed": True,
-        "fallbackEndpoints": [resource_endpoint, details_endpoint],
     }
     record["normalized"] = build_normalized_resource(record)
     return record
@@ -501,8 +417,6 @@ def _missing_resource_record(resource_id: str) -> dict[str, Any]:
         "fetchStatus": "error",
         "missingEvidence": ["resource.data"],
         "errors": ["Resource view data was not returned."],
-        "fallbackUsed": False,
-        "fallbackEndpoints": [],
     }
 
 

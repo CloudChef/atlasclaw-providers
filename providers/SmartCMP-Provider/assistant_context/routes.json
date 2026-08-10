@@ -90,6 +90,18 @@
       }
     },
     {
+      "id": "security-compliance-violations",
+      "priority": 400,
+      "match": {
+        "path_template": "/main/resource-management/records"
+      },
+      "result": {
+        "page_type": "security-compliance-violations",
+        "object_type": "security_compliance_violation_collection",
+        "skill_ref": "smartcmp:security-compliance"
+      }
+    },
+    {
       "id": "pending-approval-detail",
       "priority": 400,
       "match": {

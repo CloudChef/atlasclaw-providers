@@ -15,9 +15,15 @@ if str(PROVIDER_SRC) not in sys.path:
     sys.path.insert(0, str(PROVIDER_SRC))
 
 from smartcmp_provider.auth.resolver import resolve_provided_request  # noqa: E402
+from smartcmp_provider.analysis.cost.recommendation import (  # noqa: E402
+    normalize_analysis_facts,
+)
+from smartcmp_provider.domain.cost import available_cost_operations  # noqa: E402
 from smartcmp_provider.errors import (  # noqa: E402
     SmartCmpAuthenticationError,
+    SmartCmpTargetResolutionError,
     SmartCmpUpstreamError,
+    SmartCmpValidationError,
 )
 from smartcmp_provider.models.alarms import (  # noqa: E402
     AlarmAnalysisFactsQuery,
@@ -25,6 +31,7 @@ from smartcmp_provider.models.alarms import (  # noqa: E402
     ResourceAlertListQuery,
 )
 from smartcmp_provider.models.cost import (  # noqa: E402
+    CostExecutionStatusQuery,
     CostListQuery,
     CostRecommendationFactsQuery,
     ResourceCostAnalysisQuery,
@@ -52,6 +59,9 @@ from smartcmp_provider.transport.client import SmartCmpClient  # noqa: E402
 from smartcmp_provider.services.cost_analysis import (  # noqa: E402
     analyze_cost_recommendation,
     analyze_resource_cost,
+)
+from smartcmp_provider.services.cost_execution import (  # noqa: E402
+    get_cost_execution_status,
 )
 from smartcmp_provider.services.alarm_analysis import analyze_alarm  # noqa: E402
 from smartcmp_provider.services.alarm_listing import (  # noqa: E402
@@ -333,8 +343,8 @@ def test_alarm_optional_context_does_not_hide_authentication_failure():
         asyncio.run(invoke())
 
 
-def test_alarm_resource_fallback_is_owned_by_provider():
-    """Alert resource-name fallback must resolve inside the shared service."""
+def test_alarm_resolves_stale_resource_id_by_visible_name():
+    """Resolve a stale alert resource ID through its exact visible name."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -357,8 +367,6 @@ def test_alarm_resource_fallback_is_owned_by_provider():
                 request=request,
             )
         if path.endswith("/nodes/missing-resource/view"):
-            return httpx.Response(404, json={}, request=request)
-        if path.endswith("/nodes/missing-resource"):
             return httpx.Response(404, json={}, request=request)
         if path.endswith("/nodes/search"):
             return httpx.Response(
@@ -414,12 +422,18 @@ def test_cost_list_keeps_filters_and_bounded_pagination():
     seen_pages: list[int] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["category"] == "COST-OPTIMIZATION"
         page = int(request.url.params["page"])
         seen_pages.append(page)
         return httpx.Response(
             200,
             json={
-                "content": [{"id": f"violation-{page}"}],
+                "content": [
+                    {
+                        "id": f"violation-{page}",
+                        "category": "COST-OPTIMIZATION.MACHINE",
+                    }
+                ],
                 "last": page == 1,
                 "totalElements": 2,
             },
@@ -436,7 +450,6 @@ def test_cost_list_keeps_filters_and_bounded_pagination():
                 CostListQuery(
                     filters={
                         "status": "ACTIVED",
-                        "category": "COST-OPTIMIZATION",
                     },
                     page=0,
                     size=1,
@@ -452,6 +465,43 @@ def test_cost_list_keeps_filters_and_bounded_pagination():
         "violation-1",
     ]
     assert result.total == 2
+
+
+def test_cost_list_rejects_non_cost_input_and_response_categories():
+    """Cost list boundaries must fail before exposing cross-domain rows."""
+
+    request_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        return httpx.Response(
+            200,
+            json={
+                "content": [
+                    {"id": "security-1", "category": "SECURITY.MACHINE"}
+                ],
+                "last": True,
+            },
+            request=request,
+        )
+
+    async def invoke(query: CostListQuery):
+        async with SmartCmpClient(
+            make_request(),
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            return await list_cost_violations(client, query)
+
+    with pytest.raises(SmartCmpValidationError, match="require category"):
+        asyncio.run(
+            invoke(CostListQuery(filters={"category": "SECURITY"}))
+        )
+    assert request_count == 0
+
+    with pytest.raises(SmartCmpUpstreamError, match="non-Cost row"):
+        asyncio.run(invoke(CostListQuery()))
+    assert request_count == 1
 
 
 def test_cost_recommendation_keeps_required_fact_and_bounded_optional_inputs():
@@ -487,7 +537,12 @@ def test_cost_recommendation_keeps_required_fact_and_bounded_optional_inputs():
         if path.endswith("/compliance-policies/search"):
             return httpx.Response(
                 200,
-                json={"content": [{"id": "policy-1"}, {"id": "policy-2"}]},
+                json={
+                    "content": [
+                        {"id": "policy-1", "category": "COST-OPTIMIZATION"},
+                        {"id": "policy-2", "category": "COST-OPTIMIZATION"},
+                    ]
+                },
                 request=request,
             )
         return httpx.Response(200, json={"source": path}, request=request)
@@ -513,8 +568,118 @@ def test_cost_recommendation_keeps_required_fact_and_bounded_optional_inputs():
     assert any("size=100" in url for url in seen)
 
 
-def test_cost_recommendation_resolves_resource_fallback_inside_provider():
-    """Resource lookup fallback must not remain in an AtlasClaw adapter."""
+def test_cost_analysis_preserves_tracking_identity_for_follow_up_actions():
+    """An in-flight repair remains Track-only after recommendation analysis."""
+
+    facts = normalize_analysis_facts(
+        {
+            "id": "cost-1",
+            "category": "COST-OPTIMIZATION.MACHINE",
+            "status": "ACTIVED",
+            "fixType": "DAY2",
+            "taskInstanceId": "task-1",
+        }
+    )
+
+    assert facts["taskInstanceId"] == "task-1"
+    assert tuple(
+        operation.operation_id
+        for operation in available_cost_operations(facts)
+    ) == ("analyze", "track")
+
+
+def test_cost_recommendation_rejects_security_before_cost_enrichment():
+    """Security violations must not be interpreted as cost recommendations."""
+
+    seen_paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_paths.append(request.url.path)
+        return httpx.Response(
+            200,
+            json={"id": "security-vio", "category": "SECURITY.MACHINE"},
+            request=request,
+        )
+
+    async def invoke():
+        async with SmartCmpClient(
+            make_request(),
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            await get_cost_recommendation_facts(
+                client,
+                CostRecommendationFactsQuery(violation_id="security-vio"),
+            )
+
+    with pytest.raises(SmartCmpValidationError, match="not a Cost Optimization"):
+        asyncio.run(invoke())
+    assert seen_paths == [
+        "/platform-api/compliance-policies/violations/security-vio"
+    ]
+
+
+def test_cost_recommendation_rejects_mismatched_identity_before_enrichment():
+    """A Cost detail for another ID cannot authorize recommendation analysis."""
+
+    seen_paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_paths.append(request.url.path)
+        return httpx.Response(
+            200,
+            json={"id": "cost-other", "category": "COST-OPTIMIZATION"},
+            request=request,
+        )
+
+    async def invoke():
+        async with SmartCmpClient(
+            make_request(),
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            await get_cost_recommendation_facts(
+                client,
+                CostRecommendationFactsQuery(violation_id="cost-requested"),
+            )
+
+    with pytest.raises(SmartCmpTargetResolutionError, match="mismatched identity"):
+        asyncio.run(invoke())
+    assert seen_paths == [
+        "/platform-api/compliance-policies/violations/cost-requested"
+    ]
+
+
+def test_cost_tracking_revalidates_target_before_execution_queries():
+    """Tracking must not query execution records for a non-Cost target."""
+
+    seen_paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_paths.append(request.url.path)
+        return httpx.Response(
+            200,
+            json={"id": "security-vio", "category": "SECURITY.MACHINE"},
+            request=request,
+        )
+
+    async def invoke():
+        async with SmartCmpClient(
+            make_request(),
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            await get_cost_execution_status(
+                client,
+                CostExecutionStatusQuery(violation_id="security-vio"),
+            )
+
+    with pytest.raises(SmartCmpValidationError, match="not a Cost Optimization"):
+        asyncio.run(invoke())
+    assert seen_paths == [
+        "/platform-api/compliance-policies/violations/security-vio"
+    ]
+
+
+def test_cost_recommendation_resolves_stale_resource_id_by_visible_name():
+    """Resolve a stale recommendation resource ID through its exact visible name."""
 
     seen: list[tuple[str, str]] = []
 
@@ -567,14 +732,17 @@ def test_cost_recommendation_resolves_resource_fallback_inside_provider():
             )
         if path.endswith("/nodes/missing-resource/view"):
             return httpx.Response(404, json={}, request=request)
-        if path.endswith("/nodes/missing-resource"):
-            return httpx.Response(404, json={}, request=request)
         if path.endswith("/tenants/current/setting"):
             return httpx.Response(200, json={}, request=request)
         if path.endswith("/compliance-policies/search"):
             return httpx.Response(
                 200,
-                json={"content": [{"id": "policy-1"}], "last": True},
+                json={
+                    "content": [
+                        {"id": "policy-1", "category": "COST-OPTIMIZATION"}
+                    ],
+                    "last": True,
+                },
                 request=request,
             )
         if path.endswith(
@@ -634,6 +802,7 @@ def test_resource_cost_attaches_exact_execution_evidence_inside_provider():
                         {
                             "id": "policy-1",
                             "name": "Idle VM",
+                            "category": "COST-OPTIMIZATION.MACHINE",
                             "resourceType": ["resource.iaas.machine"],
                             "lastExecutionId": "execution-1",
                             "lastExecuteStatus": "FINISHED",

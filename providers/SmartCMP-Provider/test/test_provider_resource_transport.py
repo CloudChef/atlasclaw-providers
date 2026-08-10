@@ -1504,3 +1504,36 @@ def test_resource_evidence_is_normalized_inside_provider():
     assert normalized["properties"]["cpu"] == 2
     assert normalized["properties"]["memoryMb"] == 4096
     assert "nested" not in normalized["properties"]
+
+
+def test_resource_evidence_does_not_substitute_legacy_get_endpoints():
+    """Propagate an authoritative view failure without issuing another read."""
+
+    request_scope = make_request(
+        instance_name="cmp-a",
+        base_url="https://cmp.example",
+        user_id="user-a",
+        token="session-a",
+    )
+    seen: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path))
+        assert request.method == "PATCH"
+        assert request.url.path.endswith("/nodes/resource-1/view")
+        return httpx.Response(404, json={}, request=request)
+
+    async def invoke():
+        async with SmartCmpClient(
+            request_scope,
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            await load_resource_evidence(
+                client,
+                ResourceEvidenceQuery(resource_ids=("resource-1",)),
+            )
+
+    with pytest.raises(SmartCmpNotFoundError):
+        asyncio.run(invoke())
+
+    assert seen == [("PATCH", "/platform-api/nodes/resource-1/view")]

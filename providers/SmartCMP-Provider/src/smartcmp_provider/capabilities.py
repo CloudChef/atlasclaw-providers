@@ -124,14 +124,26 @@ def shared_capabilities() -> tuple[CapabilitySpec, ...]:
         RequestSubmissionResult,
     )
     from smartcmp_provider.models.resources import (
-        ResourceComplianceQuery,
-        ResourceComplianceResult,
         ResourceDetailQuery,
         ResourceDetailView,
         ResourceListQuery,
         ResourceListResult,
         ResourceOperationsQuery,
         ResourceOperationsView,
+    )
+    from smartcmp_provider.models.security_compliance import (
+        ResourceSecurityAnalysisQuery,
+        ResourceSecurityAnalysisResult,
+        ResourceSecurityViolationQuery,
+        ResourceSecurityViolationResult,
+        SecurityOverviewQuery,
+        SecurityOverviewResult,
+        SecurityViolationAnalysisQuery,
+        SecurityViolationAnalysisResult,
+        SecurityViolationListQuery,
+        SecurityViolationListResult,
+        SecurityViolationMarkFixedInput,
+        SecurityViolationMarkFixedResult,
     )
     from smartcmp_provider.models.views import (
         ApprovalAnalysisEvidence,
@@ -142,8 +154,8 @@ def shared_capabilities() -> tuple[CapabilitySpec, ...]:
 
     both = frozenset({"atlasclaw", "mcp"})
 
-    # These builders keep retry and confirmation semantics uniform across a
-    # large declarative registry; they do not hide runtime fallback behavior.
+    # Centralize effect, retry, and confirmation declarations so AtlasClaw and
+    # MCP publish the same safety contract for every capability.
     def read(
         capability_id: str,
         tool_name: str,
@@ -342,11 +354,40 @@ def shared_capabilities() -> tuple[CapabilitySpec, ...]:
             destructive=True,
         ),
         read(
-            "smartcmp.resources.analysis_evidence",
-            "smartcmp_analyze_resource",
-            ResourceComplianceQuery,
-            ResourceComplianceResult,
-            atlasclaw_tool_name="smartcmp_analyze_resource_compliance",
+            "smartcmp.resources.security.analyze",
+            "smartcmp_analyze_resource_security",
+            ResourceSecurityAnalysisQuery,
+            ResourceSecurityAnalysisResult,
+        ),
+        read(
+            "smartcmp.resources.security.violations.list",
+            "smartcmp_list_resource_security_violations",
+            ResourceSecurityViolationQuery,
+            ResourceSecurityViolationResult,
+        ),
+        read(
+            "smartcmp.security.overview",
+            "smartcmp_get_security_overview",
+            SecurityOverviewQuery,
+            SecurityOverviewResult,
+        ),
+        read(
+            "smartcmp.security.violations.list",
+            "smartcmp_list_security_violations",
+            SecurityViolationListQuery,
+            SecurityViolationListResult,
+        ),
+        read(
+            "smartcmp.security.violation.analyze",
+            "smartcmp_analyze_security_violation",
+            SecurityViolationAnalysisQuery,
+            SecurityViolationAnalysisResult,
+        ),
+        write(
+            "smartcmp.security.violation.mark_fixed",
+            "smartcmp_mark_security_violation_fixed",
+            SecurityViolationMarkFixedInput,
+            SecurityViolationMarkFixedResult,
         ),
         read(
             "smartcmp.alarms.analyze",

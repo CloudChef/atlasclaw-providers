@@ -222,9 +222,13 @@ def tool_error(error: Exception) -> dict[str, Any]:
     }
 
 
-def split_values(value: str | list[str] | tuple[str, ...]) -> tuple[str, ...]:
+def split_values(
+    value: str | list[str] | tuple[str, ...] | None,
+) -> tuple[str, ...]:
     """Normalize Tool string-or-list identifiers without changing their order."""
 
+    if value is None:
+        return ()
     if isinstance(value, str):
         values = value.replace(",", " ").split()
     else:

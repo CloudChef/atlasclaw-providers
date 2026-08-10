@@ -17,6 +17,7 @@ if str(PROVIDER_SRC) not in sys.path:
 
 from smartcmp_provider.auth.resolver import resolve_provided_request  # noqa: E402
 from smartcmp_provider.errors import (  # noqa: E402
+    SmartCmpTargetResolutionError,
     SmartCmpUnknownOutcomeError,
     SmartCmpValidationError,
 )
@@ -96,16 +97,22 @@ def test_alarm_operation_preserves_endpoint_payload_and_confirmation_contract():
 def test_cost_execution_quotes_target_and_preserves_confirmation_contract():
     """Cost remediation uses the exact violation endpoint and an empty body."""
 
-    seen: list[tuple[str, str, dict[str, object]]] = []
+    seen: list[tuple[str, str, dict[str, object] | None]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(
             (
                 request.method,
                 request.url.path,
-                json.loads(request.content),
+                json.loads(request.content) if request.content else None,
             )
         )
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json={"id": "vio/1", "category": "COST-OPTIMIZATION.MACHINE"},
+                request=request,
+            )
         return httpx.Response(
             200,
             json={"taskInstanceId": "task-1"},
@@ -125,6 +132,11 @@ def test_cost_execution_quotes_target_and_preserves_confirmation_contract():
     result = asyncio.run(invoke())
 
     assert seen == [
+        (
+            "GET",
+            "/platform-api/compliance-policies/violations/vio/1",
+            None,
+        ),
         (
             "POST",
             "/platform-api/compliance-policies/violations/day2/fix/vio/1",
@@ -158,6 +170,12 @@ def test_write_transport_failure_is_reported_as_unknown_outcome(
     """A transport failure after write start must prohibit automatic retry."""
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if operation is execute_cost_optimization and request.method == "GET":
+            return httpx.Response(
+                200,
+                json={"id": "vio-1", "category": "COST-OPTIMIZATION"},
+                request=request,
+            )
         raise httpx.ConnectError("connection lost", request=request)
 
     async def invoke():
@@ -175,6 +193,12 @@ def test_definite_cost_validation_failure_remains_validation_error():
     """A definite upstream 400 must not be mislabeled as unknown outcome."""
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json={"id": "vio-1", "category": "COST-OPTIMIZATION"},
+                request=request,
+            )
         return httpx.Response(
             400,
             json={"message": "no repair action configured"},
@@ -218,6 +242,12 @@ def test_write_operations_accept_contractually_empty_success(
     """Legacy-compatible empty write responses must remain successful."""
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if operation is execute_cost_optimization and request.method == "GET":
+            return httpx.Response(
+                200,
+                json={"id": "vio-1", "category": "COST-OPTIMIZATION"},
+                request=request,
+            )
         return httpx.Response(status_code, content=b"", request=request)
 
     async def invoke():
@@ -229,3 +259,59 @@ def test_write_operations_accept_contractually_empty_success(
 
     result = asyncio.run(invoke())
     assert result.response == {}
+
+
+def test_cost_execution_rejects_security_violation_before_write():
+    """Security findings cannot reach the Cost Optimization Day-2 endpoint."""
+
+    seen_methods: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_methods.append(request.method)
+        return httpx.Response(
+            200,
+            json={"id": "security-vio", "category": "SECURITY.MACHINE"},
+            request=request,
+        )
+
+    async def invoke():
+        async with SmartCmpClient(
+            make_request(),
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            await execute_cost_optimization(
+                client,
+                CostExecutionInput(violation_id="security-vio"),
+            )
+
+    with pytest.raises(SmartCmpValidationError, match="not a Cost Optimization"):
+        asyncio.run(invoke())
+    assert seen_methods == ["GET"]
+
+
+def test_cost_execution_rejects_mismatched_identity_before_write():
+    """A different Cost detail cannot authorize the requested Day-2 target."""
+
+    seen_methods: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_methods.append(request.method)
+        return httpx.Response(
+            200,
+            json={"id": "cost-other", "category": "COST-OPTIMIZATION"},
+            request=request,
+        )
+
+    async def invoke():
+        async with SmartCmpClient(
+            make_request(),
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            await execute_cost_optimization(
+                client,
+                CostExecutionInput(violation_id="cost-requested"),
+            )
+
+    with pytest.raises(SmartCmpTargetResolutionError, match="mismatched identity"):
+        asyncio.run(invoke())
+    assert seen_methods == ["GET"]

@@ -307,7 +307,7 @@ async def _load_violation_resource_records(
     client: SmartCmpClient,
     violation: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """Resolve violation resource evidence through one explicit fallback chain."""
+    """Resolve violation resource evidence through verified alternate identifiers."""
 
     direct_id = str(violation.get("resourceId") or "").strip()
     records = await _optional_resource_records(client, [direct_id])
@@ -366,16 +366,16 @@ async def _load_violation_resource_records(
         if candidates:
             resolved_ids.extend(candidates)
             break
-    fallback_ids = list(
+    alternate_ids = list(
         dict.fromkeys(
             resource_id
             for resource_id in resolved_ids
             if resource_id and resource_id != direct_id
         )
     )
-    if not fallback_ids:
+    if not alternate_ids:
         return records
-    return records + await _optional_resource_records(client, fallback_ids)
+    return records + await _optional_resource_records(client, alternate_ids)
 
 
 async def _enrich_resource_executions(

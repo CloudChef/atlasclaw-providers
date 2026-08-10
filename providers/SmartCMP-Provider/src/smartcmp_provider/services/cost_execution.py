@@ -18,6 +18,7 @@ from smartcmp_provider.models.cost import (
     CostResourceExecutionCollection,
 )
 from smartcmp_provider.operations.cost import (
+    get_cost_violation_facts,
     list_resource_executions,
     list_violation_instances,
 )
@@ -35,14 +36,30 @@ async def get_cost_execution_status(
     client: SmartCmpClient,
     query: CostExecutionStatusQuery,
 ) -> CostExecutionStatusResult:
-    """Collect and aggregate violation-instance and resource execution facts."""
+    """Collect execution facts for one freshly verified Cost recommendation.
 
+    Args:
+        client: Client bound to the acting SmartCMP principal.
+        query: Exact Cost violation selected for tracking.
+
+    Returns:
+        Aggregated violation-instance and resource-execution status evidence.
+
+    Raises:
+        SmartCmpValidationError: If the fresh target is outside Cost Optimization.
+        SmartCmpTargetResolutionError: If the fresh detail is absent or returns
+            a different identifier.
+        SmartCmpError: If the required target or violation-instance read fails.
+    """
+
+    violation_id = query.violation_id.strip()
+    await get_cost_violation_facts(client, violation_id)
     violation_result = await list_violation_instances(
         client,
         CostListQuery(
             filters={
-                "violationId": query.violation_id,
-                "queryValue": query.violation_id,
+                "violationId": violation_id,
+                "queryValue": violation_id,
             },
             page=0,
             size=100,
@@ -64,7 +81,7 @@ async def get_cost_execution_status(
             "resource executions were not queried."
         )
     return build_cost_execution_status(
-        query.violation_id,
+        violation_id,
         violations,
         list(collection.items),
         resource_available=collection.available,

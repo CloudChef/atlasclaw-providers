@@ -34,8 +34,8 @@ def available_resource_operations(
         ),
         available_operation(
             "analyze",
-            "smartcmp.resources.analysis_evidence",
-            arguments={"resource_ids": [normalized_id]},
+            "smartcmp.resources.security.analyze",
+            arguments={"resource_id": normalized_id},
         ),
         available_operation(
             "list_operations",

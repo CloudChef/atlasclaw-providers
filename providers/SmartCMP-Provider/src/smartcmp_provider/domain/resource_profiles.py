@@ -320,11 +320,7 @@ def build_resource_profile(
         "state": state,
         "attributes": sanitized_attributes,
         "evidenceMetadata": {
-            "source": (
-                "cmp_legacy_fallback"
-                if record.get("fallbackUsed")
-                else "cmp_resource_view"
-            ),
+            "source": "cmp_resource_view",
             "fieldCount": 0,
             "attributeCount": 0,
             "redactedFieldCount": projection_state["redacted"],
@@ -350,7 +346,7 @@ def build_evidence_coverage(
 
     Args:
         profile: Sanitized profile returned by :func:`build_resource_profile`.
-        record: Source record including fallback and collection errors.
+        record: Source record including collection errors.
 
     Returns:
         Present profile groups, structurally missing core fields, and projection flags.
@@ -381,7 +377,6 @@ def build_evidence_coverage(
         "internalIdentifiersOmitted": metadata.get("internalIdentifiersOmitted", 0),
         "assessmentFieldsOmitted": metadata.get("assessmentFieldsOmitted", 0),
         "truncated": bool(metadata.get("truncated")),
-        "fallbackUsed": bool(record.get("fallbackUsed")),
         "collectionErrorCount": len(record.get("errors") or []),
     }
 
@@ -401,8 +396,8 @@ def structural_missing_evidence(profile: dict[str, Any], record: dict[str, Any])
 def redact_sensitive(value: Any, *, key: str = "") -> Any:
     """Return a bounded copy with sensitive values redacted.
 
-    This compatibility helper uses the same projection rules as the generic
-    profile and is safe for tests or legacy call sites that only have a value.
+    Resource-health evidence uses this projection when it has a bounded payload
+    rather than a complete resource record.
     """
     state = {
         "redacted": 0,

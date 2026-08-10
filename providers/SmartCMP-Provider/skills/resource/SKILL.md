@@ -1,6 +1,6 @@
 ---
 name: "resource"
-description: "SmartCMP resource browsing, detail inspection, comprehensive single-resource analysis coordination, and user-scoped resource operation skill. Use when the user asks to list resources, show resource details, comprehensively analyze one resource across alerts, monitoring health, compliance risk, and cost optimization, execute resource operations, or run day-2 changes. The comprehensive Analyze workflow coordinates existing alarm, resource-compliance, and cost-optimization tools; it does not implement another domain analyzer."
+description: "SmartCMP resource browsing, detail inspection, resource-first Security posture and violation analysis, comprehensive single-resource analysis coordination, and user-scoped operations. Use when the user asks whether a named or selected resource is secure or has Security violations, wants an overall resource review across alerts, health, Security, and cost, or wants to browse, inspect, or operate a resource. CMP-wide policy posture and violation-object workflows belong to security-compliance."
 provider_type: "smartcmp"
 instance_required: "true"
 
@@ -15,8 +15,17 @@ triggers:
   - 查看主机详情
   - 查看云主机详情
   - 分析云主机属性
+  - 分析资源安全
+  - 分析云主机安全
+  - 分析 VM 安全
+  - 分析资源合规
+  - 资源安全合规
+  - 资源安全分析
+  - 查看资源安全违规
+  - 资源是否有安全违规
   - 综合分析资源
   - 综合分析云资源
+  - 资源综合分析
   - 分析资源告警健康合规费用
   - 云资源开机
   - 云资源关机
@@ -41,6 +50,11 @@ triggers:
   - show vm details
   - comprehensively analyze resource
   - analyze resource alerts health compliance and cost
+  - analyze resource security
+  - analyze resource compliance
+  - resource security compliance
+  - list resource security violations
+  - does this resource have security violations
   - list resource operations
   - show resource operations
   - executable resource operations
@@ -72,12 +86,14 @@ use_when:
   - User wants a standalone list of SmartCMP cloud hosts or virtual machines with current status
   - User wants to inspect one cloud host by exact visible resource name or resource ID and analyze its current properties
   - User wants one comprehensive, read-only analysis covering resource alerts, monitoring health, compliance risk, and cost optimization
+  - User wants LLM analysis of one named or selected resource's security, patch, lifecycle, configuration, exposure, resilience, or management risk
+  - User wants to determine whether one exact resource has CMP-confirmed Security violations
   - User wants to search resources or virtual machines by keyword through the CMP UI list endpoint
   - User wants to see which resource operations the current SmartCMP user can execute on a resource
   - User wants to execute an enabled no-parameter operation on an existing SmartCMP cloud resource or virtual machine
 
 avoid_when:
-  - User wants only compliance, lifecycle, supportability, or security analysis without the other resource dimensions (use resource-compliance skill)
+  - User wants the CMP-wide Security compliance overview, global violation list, or one violation-object workflow (use security-compliance skill)
   - User wants only monitoring health analysis (use alarm skill)
   - User wants only cost optimization analysis (use cost-optimization skill)
   - User wants generic reference data browsing unrelated to resources (use datasource skill)
@@ -100,7 +116,7 @@ related:
   - datasource
   - alarm
   - cost-optimization
-  - resource-compliance
+  - security-compliance
   - resource-pool
   - request
 
@@ -235,9 +251,10 @@ tool_power_parameters: |
 
 # Comprehensive-analysis aliases deliberately point at the existing domain
 # scripts. Provider skill projection is scoped to one selected skill, so these
-# aliases make the four read-only analyzers available to the resource
-# coordinator without changing ownership of the domain tools or copying their
-# analysis implementations.
+# aliases make the externally owned read-only analyzers available to the
+# resource coordinator without changing ownership of those domain tools or
+# copying their analysis implementations. Resource Security remains directly
+# owned by this Skill below.
 tool_comprehensive_alerts_name: "smartcmp_resource_analyze_alerts"
 tool_comprehensive_alerts_description: "Resource-coordinator alias for the alarm skill's exact-resource alert evidence collector. Use only during comprehensive resource Analyze. Resolve one exact SmartCMP Resource.id and use it as the targetEntityId filter to collect current ALERT_FIRING/ALERT_MUTED alerts and currently ALERT_RESOLVED alerts whose triggerAt is within the requested lookback. This is not a resolveAt window. Do not associate alerts by resource name, nodeInstanceId, or entityInstanceId. Preserve association coverage; if associationStatus is partial or indeterminate, do not claim there are no current alerts or no matched resolved alerts in the trigger-time lookback."
 tool_comprehensive_alerts_entrypoint: "../alarm/scripts/adapter.py:list_alerts"
@@ -312,7 +329,7 @@ tool_comprehensive_health_parameters: |
       },
       "resource_id": {
         "type": "string",
-        "description": "Compatibility-only internal SmartCMP resource ID. Never request or expose it."
+        "description": "Trusted internal SmartCMP Resource ID from object or workflow metadata. Never request or expose it."
       },
       "window_hours": {
         "type": "integer",
@@ -324,19 +341,18 @@ tool_comprehensive_health_parameters: |
     }
   }
 
-tool_comprehensive_compliance_name: "smartcmp_resource_analyze_compliance"
-tool_comprehensive_compliance_description: "Resource-coordinator alias for the resource-compliance skill's bounded fact collector. Use only during comprehensive resource Analyze. Preserve compliant, at_risk, non_compliant, or needs_review semantics and never present generic LLM risk analysis as a CMP policy attestation."
-tool_comprehensive_compliance_entrypoint: "../resource-compliance/scripts/adapter.py:analyze_resource"
-tool_comprehensive_compliance_groups:
+tool_security_analysis_name: "smartcmp_analyze_resource_security"
+tool_security_analysis_description: "Analyze one exact SmartCMP resource's Security posture. Combine bounded resource configuration and exposure facts, patch/lifecycle/configuration risk evidence, and CMP-confirmed associated Security violations. The associated-violation scan is enabled by default. Keep CMP-confirmed violations separate from LLM-inferred posture, preserve coverage and evidence gaps, and provide manual remediation and validation guidance without changing the resource."
+tool_security_analysis_entrypoint: "scripts/adapter.py:analyze_resource_security"
+tool_security_analysis_groups:
   - cmp
   - resource
+  - security
   - compliance
-tool_comprehensive_compliance_capability_class: "provider:smartcmp"
-tool_comprehensive_compliance_priority: 128
-tool_comprehensive_compliance_result_mode: "llm"
-tool_comprehensive_compliance_cli_split:
-  - resource_ids
-tool_comprehensive_compliance_parameters: |
+tool_security_analysis_capability_class: "provider:smartcmp"
+tool_security_analysis_priority: 128
+tool_security_analysis_result_mode: "llm"
+tool_security_analysis_parameters: |
   {
     "type": "object",
     "properties": {
@@ -352,14 +368,51 @@ tool_comprehensive_compliance_parameters: |
         "type": "string",
         "description": "Hidden JSON metadata from the latest resource list or Current Workflow Context."
       },
-      "resource_ids": {
+      "resource_id": {
         "type": "string",
-        "description": "Compatibility-only internal SmartCMP resource IDs. Never request or expose them."
+        "description": "Trusted internal SmartCMP Resource ID from object or workflow metadata. Never request or expose it."
+      }
+    }
+  }
+
+tool_security_violations_name: "smartcmp_list_resource_security_violations"
+tool_security_violations_description: "Find CMP-confirmed Security violations for one exact SmartCMP resource. Because the CMP resourceId filter is unreliable, scan root-category SECURITY pages at size 100 and post-filter by exact item.resourceId. Return complete, partial, or failed coverage and always report every exact match that was returned. Complete coverage with no matches supports a no-associated-violation conclusion. Partial coverage with matches means confirmed violations were found but the inventory is incomplete; partial coverage without matches means only that none were found in the scanned pages. Failed coverage supports no absence conclusion."
+tool_security_violations_entrypoint: "scripts/adapter.py:list_resource_security_violations"
+tool_security_violations_groups:
+  - cmp
+  - resource
+  - security
+  - compliance
+tool_security_violations_capability_class: "provider:smartcmp"
+tool_security_violations_priority: 124
+tool_security_violations_result_mode: "llm"
+tool_security_violations_parameters: |
+  {
+    "type": "object",
+    "properties": {
+      "resource_name": {
+        "type": "string",
+        "description": "Exact visible SmartCMP resource name."
       },
-      "trigger_source": {
+      "resource_index": {
+        "type": "integer",
+        "description": "Visible table # value from the latest resource list.",
+        "minimum": 1
+      },
+      "resource_directory_json": {
         "type": "string",
-        "description": "Evidence request source. Default: user.",
-        "default": "user"
+        "description": "Hidden JSON metadata from the latest resource list or Current Workflow Context."
+      },
+      "resource_id": {
+        "type": "string",
+        "description": "Trusted internal SmartCMP Resource ID from object or workflow metadata. Never request or expose it."
+      },
+      "max_pages": {
+        "type": "integer",
+        "description": "Maximum root-SECURITY pages to scan at 100 rows per page. Default: 50.",
+        "default": 50,
+        "minimum": 1,
+        "maximum": 50
       }
     }
   }
@@ -392,7 +445,7 @@ tool_comprehensive_cost_parameters: |
       },
       "resource_id": {
         "type": "string",
-        "description": "Compatibility-only internal SmartCMP resource ID. Never request or expose it."
+        "description": "Trusted internal SmartCMP Resource ID from object or workflow metadata. Never request or expose it."
       }
     }
   }
@@ -422,11 +475,14 @@ comprehensive analysis coordination, and day2 resource operations.
 - Use `smartcmp_list_all_resource` when the user asks for 云资源 or 云主机 lists.
 - Use `smartcmp_resource_detail` when the user asks for one cloud host detail or property analysis by exact visible resource name or resource ID.
 - Use the Comprehensive Resource Analysis workflow when the user asks for an overall resource review or invokes an Analyze object action.
-- Keep single-dimension questions in their owning skills: Alarm for monitoring health, resource-compliance for generic compliance risk, and cost-optimization for resource cost analysis.
+- Keep single-dimension questions in their owning workflows: Alarm for monitoring health, this Resource Skill for resource-first Security analysis, security-compliance for violation-object workflows, and cost-optimization for resource cost analysis.
 - If the user provides an exact visible cloud-host name for detail, call `smartcmp_resource_detail` with `resource_name` directly. Do not call `smartcmp_list_all_resource` first just to resolve or display the name.
 - Use `smartcmp_list_resource_operations` when the user asks what operations the current user can execute on a resource.
 - Use `smartcmp_operate_resource` when the user wants to execute an enabled no-parameter operation on an existing cloud resource.
 - Treat "我的" and "所有" the same for now because the provided UI URLs do not expose a separate owner-only filter; rely on SmartCMP access control and the current user's visible scope.
+
+For resource-first Security analysis and violation-correlation rules, read
+[references/SECURITY_ANALYSIS.md](references/SECURITY_ANALYSIS.md).
 
 ## Comprehensive Resource Analysis
 
@@ -442,14 +498,14 @@ health score.
 2. Collect every default dimension in the same turn:
    - `smartcmp_resource_analyze_alerts`: resource-scoped alias of `smartcmp_list_alerts`; resolve the target to SmartCMP `Resource.id`, then query current firing or muted alerts plus alerts whose current status is resolved and whose `triggerAt` is within the last seven days, using the exact `targetEntityId` filter. Do not describe this as a `resolveAt` window.
    - `smartcmp_resource_analyze_health`: resource-scoped alias of `analyze_resource_health`; the current 24-hour monitoring window and seven-day statistical baseline.
-   - `smartcmp_resource_analyze_compliance`: resource-scoped alias of `smartcmp_analyze_resource_compliance`; generic resource-fact compliance risk, not a CMP policy attestation.
+   - `smartcmp_analyze_resource_security`: resource configuration, exposure, patch/lifecycle risk evidence, and CMP-confirmed Security violations. Associated violations are included by default and remain separate from LLM inference.
    - `smartcmp_resource_analyze_cost`: resource-scoped alias of `smartcmp_analyze_resource_cost`; platform-confirmed findings and separately labeled `llm_potential` opportunities.
 3. Treat every dimension as best-effort. If one call fails or has insufficient evidence, continue the remaining calls and mark only that dimension indeterminate or needs review.
 4. Return the final answer with exactly these eight section concepts and in this order. Use the Chinese heading verbatim when replying in Chinese, otherwise use the English heading:
    - `资源概况` / `Resource overview`
    - `当前及近期告警` / `Current and recent alerts`
    - `运行健康` / `Runtime health`
-   - `合规风险` / `Compliance risk`
+   - `安全与合规风险` / `Security and compliance risk`
    - `费用优化` / `Cost optimization`
    - `跨维度关联发现` / `Cross-dimensional findings`
    - `证据缺口` / `Evidence gaps`
@@ -464,6 +520,13 @@ health score.
    - Resource alert association uses only exact `targetEntityId=Resource.id`.
      Resource name, `nodeInstanceId`, and `entityInstanceId` are not fallback
      evidence.
+   - For Security violation evidence, always report exact returned matches before
+     interpreting coverage. With `complete` coverage, an empty result supports
+     "no associated CMP Security violation." With `partial` coverage, returned
+     matches remain confirmed but the inventory is incomplete; an empty result
+     means only "none found in the scanned pages." With `failed` coverage, report
+     the collection failure and make no absence claim; do not suppress any
+     returned match if the payload contains one.
 6. Do not mute or resolve alerts, operate the resource, repair compliance, or
    execute cost remediation unless the user makes a separate explicit request
    and the owning workflow performs its required validation and confirmation.
@@ -493,7 +556,7 @@ When operation intent is present, a resource lookup is only a target-resolution 
 
 ## Critical Rules
 
-- Do not call resource-compliance for ordinary browsing or detail requests. Call it for an explicit compliance question or as one required dimension of the Comprehensive Resource Analysis workflow.
+- Do not call security-compliance for ordinary resource browsing, detail, or posture requests. Use `smartcmp_analyze_resource_security` for a resource-first Security question and security-compliance only for CMP-wide or violation-object workflows.
 - Do not use `smartcmp_list_all_resource` when the user asks for detail of one exact cloud-host name; call `smartcmp_resource_detail` with `resource_name` and let the tool resolve the unique match internally.
 - Do not use the list endpoint when the user already provided a concrete resource ID for host detail analysis.
 - `smartcmp_resource_detail` uses `PATCH /nodes/{id}/view` to fetch the host evidence view until the CMP view API bug is fixed. Do not use older resource/detail APIs as fallback in this interactive detail skill.
@@ -543,12 +606,14 @@ Never show:
 
 ## Handlers and helpers
 
-All four resource Tool commands are co-located in `scripts/adapter.py`:
+All six resource-owned Tool commands are co-located in `scripts/adapter.py`:
 
 | Handler | Description |
 |--------|-------------|
 | `scripts/adapter.py:list_all_resource` | Call the standalone resource list endpoint and emit a Markdown resource table with visible status |
 | `scripts/adapter.py:resource_detail` | Fetch one cloud host view and emit a compact grouped detail summary |
+| `scripts/adapter.py:analyze_resource_security` | Combine bounded resource facts, associated Security violations, inference inputs, and evidence gaps |
+| `scripts/adapter.py:list_resource_security_violations` | Scan root-category Security violations and retain exact resource-ID matches with coverage |
 | `scripts/adapter.py:list_resource_operations` | List enabled no-parameter operations executable by the current SmartCMP user for one resource |
 | `scripts/adapter.py:operate_resource` | Submit SmartCMP no-parameter resource operations for one or more resource IDs |
 

@@ -7,19 +7,47 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from smartcmp_provider.domain.object_operations import available_operation
 from smartcmp_provider.models.object_operations import AvailableOperation
 
 _COMPLETED_REMEDIATION_STATUSES = {"FIXED", "RESOLVED", "SUCCESS", "DONE", "CLOSED"}
+_COST_CATEGORY = "COST-OPTIMIZATION"
+
+
+def is_cost_category(value: Any) -> bool:
+    """Return whether a category belongs to the Cost Optimization hierarchy.
+
+    Args:
+        value: Raw SmartCMP category value.
+
+    Returns:
+        ``True`` only for ``COST-OPTIMIZATION`` or one of its dot-separated
+        child categories.
+    """
+
+    category = str(value or "").strip().upper()
+    return category == _COST_CATEGORY or category.startswith(f"{_COST_CATEGORY}.")
 
 
 def available_cost_operations(
-    item: dict,
+    item: dict[str, Any],
 ) -> tuple[AvailableOperation, ...]:
-    """Return analysis and remediation operations supported by current facts."""
+    """Return Cost-only analysis and remediation operations supported by facts.
 
+    Args:
+        item: Fresh or list-projected recommendation facts. The category must be
+            positively identified as Cost Optimization before any action is exposed.
+
+    Returns:
+        Cost analysis plus one justified tracking or remediation operation, or
+        an empty tuple for unidentified and non-Cost records.
+    """
+
+    if not is_cost_category(item.get("category")):
+        return ()
     violation_id = str(item.get("id") or item.get("violationId") or "").strip()
     if not violation_id:
         return ()
@@ -46,7 +74,9 @@ def available_cost_operations(
     return tuple(operations)
 
 
-def available_cost_recommendation_actions(item: dict) -> tuple[str, ...]:
+def available_cost_recommendation_actions(
+    item: dict[str, Any],
+) -> tuple[str, ...]:
     """Return follow-up actions justified by SmartCMP remediation facts.
 
     Args:
@@ -58,6 +88,8 @@ def available_cost_recommendation_actions(item: dict) -> tuple[str, ...]:
         empty tuple.
     """
 
+    if not is_cost_category(item.get("category")):
+        return ()
     if item.get("taskInstanceId"):
         return ("track",)
     executable = bool(

@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import quote
 
 from smartcmp_provider.capabilities import capability_by_id
+from smartcmp_provider.domain.cost import is_cost_category
 from smartcmp_provider.errors import (
     SmartCmpAuthenticationError,
     SmartCmpError,
@@ -38,12 +39,26 @@ async def list_cost_violations(
     client: SmartCmpClient,
     query: CostListQuery,
 ) -> CostItemsResult:
-    """List cost optimization violation facts."""
+    """List only Cost Optimization violation facts.
+
+    Args:
+        client: Client bound to the acting SmartCMP principal.
+        query: Bounded paging and filters. A missing category is fixed to the
+            Cost root; a non-Cost category is rejected before the request.
+
+    Returns:
+        Cost-only rows returned by the bounded upstream search.
+
+    Raises:
+        SmartCmpValidationError: If a caller supplies a non-Cost category.
+        SmartCmpUpstreamError: If SmartCMP returns a non-Cost row.
+    """
 
     return await _list_paged(
         client,
         "/compliance-policies/violations/search",
-        query,
+        _normalize_cost_list_query(client, query),
+        require_cost_rows=True,
     )
 
 
@@ -51,12 +66,26 @@ async def list_cost_policies(
     client: SmartCmpClient,
     query: CostListQuery,
 ) -> CostItemsResult:
-    """List cost optimization policy facts."""
+    """List only Cost Optimization policy facts.
+
+    Args:
+        client: Client bound to the acting SmartCMP principal.
+        query: Bounded paging and filters. A missing category is fixed to the
+            Cost root; a non-Cost category is rejected before the request.
+
+    Returns:
+        Cost-only policy rows returned by the bounded upstream search.
+
+    Raises:
+        SmartCmpValidationError: If a caller supplies a non-Cost category.
+        SmartCmpUpstreamError: If SmartCMP returns a non-Cost row.
+    """
 
     return await _list_paged(
         client,
         "/compliance-policies/search",
-        query,
+        _normalize_cost_list_query(client, query),
+        require_cost_rows=True,
     )
 
 
@@ -103,18 +132,27 @@ async def get_cost_recommendation_facts(
     client: SmartCmpClient,
     query: CostRecommendationFactsQuery,
 ) -> CostRecommendationFactsResult:
-    """Load one recommendation and bounded optional analysis evidence."""
+    """Load one exact Cost recommendation and bounded optional evidence.
+
+    The required fresh detail is identity- and category-validated before any
+    policy, execution, overview, currency, or resource enrichment can occur.
+
+    Args:
+        client: Client bound to the acting SmartCMP principal.
+        query: Exact Cost recommendation identifier.
+
+    Returns:
+        The verified violation with optional Cost supporting evidence.
+
+    Raises:
+        SmartCmpTargetResolutionError: If the detail is absent or its returned
+            identifier differs from the requested target.
+        SmartCmpValidationError: If the target is not Cost Optimization.
+        SmartCmpError: If the required detail read fails.
+    """
 
     violation_id = query.violation_id.strip()
-    violation = await client.request_json(
-        "GET",
-        f"/compliance-policies/violations/{quote(violation_id, safe='')}",
-    )
-    if not isinstance(violation, dict) or not violation:
-        raise SmartCmpTargetResolutionError(
-            f"Cost recommendation '{violation_id}' was not found.",
-            trace_id=client.request.context.trace_id,
-        )
+    violation = await get_cost_violation_facts(client, violation_id)
 
     policy_id = str(violation.get("policyId") or "").strip()
     policy = (
@@ -177,6 +215,59 @@ async def get_cost_recommendation_facts(
     )
 
 
+async def get_cost_violation_facts(
+    client: SmartCmpClient,
+    violation_id: str,
+) -> dict[str, Any]:
+    """Read and validate one exact Cost Optimization violation.
+
+    Args:
+        client: Client bound to the acting SmartCMP principal.
+        violation_id: Exact violation identifier selected by the caller.
+
+    Returns:
+        The fresh upstream violation detail after identity and category checks.
+
+    Raises:
+        SmartCmpValidationError: If the identifier is blank or the returned
+            record is outside Cost Optimization.
+        SmartCmpTargetResolutionError: If the detail is absent or its returned
+            identifier does not exactly match the requested identifier.
+        SmartCmpError: If SmartCMP cannot serve the required detail read.
+    """
+
+    normalized_id = str(violation_id or "").strip()
+    if not normalized_id:
+        raise SmartCmpValidationError(
+            "Violation ID must not be empty.",
+            trace_id=client.request.context.trace_id,
+        )
+    payload = await client.request_json(
+        "GET",
+        f"/compliance-policies/violations/{quote(normalized_id, safe='')}",
+    )
+    violation = _extract_record(payload)
+    if not violation:
+        raise SmartCmpTargetResolutionError(
+            f"Cost recommendation '{normalized_id}' was not found.",
+            trace_id=client.request.context.trace_id,
+        )
+    returned_id = str(
+        violation.get("id") or violation.get("violationId") or ""
+    ).strip()
+    if returned_id != normalized_id:
+        raise SmartCmpTargetResolutionError(
+            f"Cost recommendation '{normalized_id}' returned mismatched identity.",
+            trace_id=client.request.context.trace_id,
+        )
+    if not is_cost_category(violation.get("category")):
+        raise SmartCmpValidationError(
+            f"Violation '{normalized_id}' is not a Cost Optimization violation.",
+            trace_id=client.request.context.trace_id,
+        )
+    return violation
+
+
 async def get_currency_evidence(
     client: SmartCmpClient,
 ) -> CurrencyEvidenceResult:
@@ -223,17 +314,16 @@ async def execute_cost_optimization(
         Submission facts and the upstream response.
 
     Raises:
-        SmartCmpValidationError: If the violation ID is blank.
+        SmartCmpValidationError: If the violation ID is blank or the fresh
+            target detail is outside Cost Optimization.
+        SmartCmpTargetResolutionError: If the fresh detail is absent or returns
+            a different violation identifier.
         SmartCmpUnknownOutcomeError: If the write may have reached SmartCMP.
         SmartCmpError: If SmartCMP definitely rejects the operation.
     """
 
     violation_id = execution_input.violation_id.strip()
-    if not violation_id:
-        raise SmartCmpValidationError(
-            "Violation ID must not be empty.",
-            trace_id=client.request.context.trace_id,
-        )
+    await get_cost_violation_facts(client, violation_id)
     try:
         payload = await client.request_json(
             "POST",
@@ -261,6 +351,8 @@ async def _list_paged(
     client: SmartCmpClient,
     path: str,
     query: CostListQuery,
+    *,
+    require_cost_rows: bool = False,
 ) -> CostItemsResult:
     items: list[dict[str, Any]] = []
     total: int | None = None
@@ -270,6 +362,13 @@ async def _list_paged(
         params.update({"page": page, "size": query.size})
         payload = await client.request_json("GET", path, params=params)
         page_items = _extract_items(payload)
+        if require_cost_rows and any(
+            not is_cost_category(item.get("category")) for item in page_items
+        ):
+            raise SmartCmpUpstreamError(
+                "SmartCMP returned a non-Cost row for a Cost Optimization search.",
+                trace_id=client.request.context.trace_id,
+            )
         items.extend(page_items)
         if total is None:
             total = _extract_total(payload)
@@ -288,6 +387,22 @@ async def _list_paged(
             trace_id=client.request.context.trace_id,
         )
     return CostItemsResult(items=tuple(items), total=total)
+
+
+def _normalize_cost_list_query(
+    client: SmartCmpClient,
+    query: CostListQuery,
+) -> CostListQuery:
+    filters = dict(query.filters)
+    raw_category = filters.get("category")
+    category = str(raw_category or "COST-OPTIMIZATION").strip().upper()
+    if not is_cost_category(category):
+        raise SmartCmpValidationError(
+            "Cost searches require category COST-OPTIMIZATION or one of its children.",
+            trace_id=client.request.context.trace_id,
+        )
+    filters["category"] = category
+    return query.model_copy(update={"filters": filters})
 
 
 async def _optional_payload(
@@ -356,6 +471,16 @@ def _extract_items(payload: Any) -> list[dict[str, Any]]:
     raise SmartCmpUpstreamError(
         "SmartCMP returned an unexpected cost list payload."
     )
+
+
+def _extract_record(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    for key in ("data", "result", "item"):
+        value = payload.get(key)
+        if isinstance(value, dict):
+            return dict(value)
+    return dict(payload)
 
 
 def _extract_total(payload: Any) -> int | None:

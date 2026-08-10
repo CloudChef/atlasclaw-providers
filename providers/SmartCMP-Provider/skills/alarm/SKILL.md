@@ -40,7 +40,8 @@ avoid_when:
   - User wants approval actions (use approval skill)
   - User wants resource requests (use request skill)
   - User only wants standalone reference data browsing without alarm analysis (use datasource skill)
-  - User wants compliance, lifecycle, version, patch, or security analysis (use resource-compliance skill)
+  - User wants resource-first compliance, lifecycle, version, patch, or security analysis (use resource skill)
+  - User wants CMP-wide Security posture or a Security violation workflow (use security-compliance skill)
 
 examples:
   - "Show current alarms"
@@ -58,7 +59,7 @@ related:
   - approval
   - datasource
   - resource
-  - resource-compliance
+  - security-compliance
 
 tool_list_name: "smartcmp_list_alerts"
 tool_list_description: "List SmartCMP triggered alerts with optional filters through the CMP comprehensive-query mapping GET /alarm-alert?query. General mode preserves its status, time, level, deployment, entity, node, target, type, category, keyword, and paging filters. For comprehensive single-resource analysis, pass resource_name, resource_index with resource_directory_json, or internal resource_id and use resource_alert_scope=current_and_recent. Resource mode resolves one exact SmartCMP Resource.id, queries current ALERT_FIRING/ALERT_MUTED alerts without a time limit plus currently ALERT_RESOLVED alerts whose triggerAt is within the requested lookback, through the exact targetEntityId API filter. The CMP search API does not filter this query by resolveAt. The provider verifies the returned targetEntityId and emits association coverage. It does not associate alerts by resource name, nodeInstanceId, or entityInstanceId. Report incomplete association as partial or indeterminate according to the coverage block, never as proof that the resource has no alert."

@@ -36,7 +36,7 @@ def test_each_object_domain_returns_current_provider_capability_ids() -> None:
     )
     assert _capabilities(resource_operations) == (
         "smartcmp.resources.detail",
-        "smartcmp.resources.analysis_evidence",
+        "smartcmp.resources.security.analyze",
         "smartcmp.resources.operations",
     )
     assert resource_operations[0].arguments["category"] == "cloud-resource"
@@ -60,12 +60,24 @@ def test_each_object_domain_returns_current_provider_capability_ids() -> None:
     )
     assert _capabilities(
         available_cost_operations(
-            {"id": "violation-1", "fixType": "DAY2"}
+            {
+                "id": "violation-1",
+                "category": "COST-OPTIMIZATION.MACHINE",
+                "fixType": "DAY2",
+            }
         )
     ) == (
         "smartcmp.cost.analyze_recommendation",
         "smartcmp.cost.execute",
     )
+    assert available_cost_operations(
+        {
+            "id": "security-violation",
+            "category": "SECURITY.MACHINE",
+            "fixType": "DAY2",
+            "taskInstanceId": "task-1",
+        }
+    ) == ()
 
 
 def _capabilities(operations) -> tuple[str, ...]:

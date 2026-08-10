@@ -335,12 +335,15 @@ These are design recommendations, not hard requirements for every provider.
 `SmartCMP-Provider` is the most complete architecture reference in this repository. It demonstrates how to split a provider into business-facing skills instead of one large generic integration:
 
 - `datasource`: read-only reference data lookup
-- `resource`: resource browsing, comprehensive analysis coordination, and day-2 operations
+- `resource`: resource browsing, comprehensive analysis coordination,
+  resource-first Security posture and exact associated-violation lookup, and
+  day-2 operations
 - `request`: resource and application request submission
 - `approval`: approval queue actions
 - `alarm`: alert workflows and component-model-driven resource health evidence
 - `cost-optimization`: recommendation-first and direct resource-cost analysis
-- `resource-compliance`: bounded resource facts for generic LLM compliance analysis
+- `security-compliance`: CMP-wide Security posture plus policy-violation browsing,
+  analysis, and confirmed status handling
 - `preapproval-agent`: webhook-oriented review orchestration
 - `request-decomposition-agent`: converts free-form demand into structured request candidates
 

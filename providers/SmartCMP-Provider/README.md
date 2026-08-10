@@ -3,15 +3,17 @@
 SmartCMP Provider is a service provider module for AtlasClaw, integrating with SmartCMP cloud
 management platform. It supports context-aware page actions, cloud resource provisioning,
 approval workflows, resource analysis and operations, alarm and health analysis, data queries,
-cost optimization, form schema design, and resource compliance analysis.
+cost optimization, form schema design, resource Security analysis, and Security
+compliance violation workflows.
 
 ## Embedded Assistant Context
 
 SmartCMP's AtlasClaw integration dynamically follows SmartCMP navigation and deterministically matches
-twelve normalized page patterns through `assistant_context/routes.json`:
+thirteen normalized page patterns through `assistant_context/routes.json`:
 
 - triggered alarm detail;
 - cost optimization recommendation detail;
+- Security compliance violation collection;
 - pending approval detail;
 - service catalog request;
 - My Application request detail;
@@ -135,11 +137,11 @@ for the complete Cookie and message contract.
 - **Approval Management** - View pending approval tasks, approve requests, or reject requests
 - **Alarm and Resource Health** - List and analyze alerts, collect component-specific resource monitoring evidence, and run explicit alert status operations
 - **Directory Queries** - List business-group scopes such as tenant/租户/部门/BU/项目, resource pools, resources, or cloud hosts from the same UI directory endpoints used by CMP
-- **Resource Analysis and Operations** - Dynamically analyze one resource across alerts, monitoring health, compliance risk, and cost optimization, or run current-user executable day2 operations
+- **Resource Analysis and Operations** - Analyze one resource across alerts, monitoring health, Security posture and associated violations, and cost optimization, or run current-user executable day2 operations
 - **Data Queries** - Query service catalogs, applications, templates, images, and other reference data
 - **Intelligent Agents** - Automated pre-approval and request decomposition capabilities
 - **Cost Optimization** - Review optimization recommendations or directly analyze a resource's optimization potential, execute SmartCMP-native fixes for existing findings, and track remediation progress
-- **Resource Compliance** - Resolve any CMP resource, build a bounded and redacted fact profile, and let the LLM perform one generic compliance analysis without configured CMP rules
+- **Security Compliance** - View the CMP-wide Security posture and violations, analyze one violation with manual remediation guidance, or explicitly mark its status FIXED without modifying the resource
 - **Form Designer** - Generate, read, normalize, and refine SmartCMP Angular form schemas without saving changes to CMP
 - **Script Designer** - Read the current script definition and return a complete same-language replacement for manual review
 - **Optimization Policy Designer** - Read the current cost-optimization policy and return complete replacement fields and rule content
@@ -269,12 +271,15 @@ operations, and operate on SmartCMP resources or cloud hosts.
 - Query resources or virtual machines by keyword without entering the request workflow
 
 **Tools:** `smartcmp_list_all_resource`, `smartcmp_resource_detail`,
+`smartcmp_analyze_resource_security`,
+`smartcmp_list_resource_security_violations`,
 `smartcmp_list_resource_operations`, and `smartcmp_operate_resource`.
 
 The dynamic **Analyze** action on a resolved resource page uses the `resource`
 Skill as a coordinator. It keeps one exact internal resource target and calls
 the existing resource-scoped analyzers for current and recent alerts,
-component-model-driven Prometheus health, generic compliance risk, and
+component-model-driven Prometheus health, resource Security posture with
+CMP-confirmed associated violations, and
 resource-level cost optimization. It then synthesizes the four evidence sets
 without changing the resource. A failure or evidence gap in one dimension does
 not prevent the other read-only dimensions from completing.
@@ -406,45 +411,43 @@ track remediation progress.
 - Execution uses `POST /compliance-policies/violations/day2/fix/{id}`
 - No direct AWS or Azure API calls are made by this skill
 
-### resource-compliance - Resource Compliance
+### security-compliance - Security Compliance
 
-Fetch one or more existing SmartCMP resources by exact resource name or visible
-list selection, build one provider-neutral evidence profile, and let the LLM
-analyze operational state and compliance risk.
+View the overall SmartCMP Security posture and policy-derived violations, then
+analyze or explicitly update one selected violation.
 
 **Workflow:**
-1. Resolve the resource by visible name or latest resource-list index; keep SmartCMP UUIDs internal
-2. Retrieve the canonical CMP resource view and its normalized `type + properties` evidence
-3. Build a bounded, redacted `resourceProfile` for any component type
-4. Emit `analysisTargets: ["llm:generic_cloud_resource"]` and the LLM contract
-5. Let the LLM distinguish confirmed facts, inference, and missing evidence without using CMP compliance rules or external product adapters
-6. Emit a non-judgmental summary and a stable `##RESOURCE_COMPLIANCE_START##` JSON block
 
-Use `smartcmp_list_all_resource` to establish a visible selection and
-`smartcmp_analyze_resource_compliance` to analyze the selected resource.
+1. Use `smartcmp_get_security_overview` for Security-only policy, evaluation,
+   compliance, severity, violation, and trend facts
+2. Use `smartcmp_list_security_violations` to browse `ACTIVED`, `FIXED`, or all
+   Security violations while retaining each real ID in hidden metadata; list
+   rows expose Analyze only
+3. Phase 1 uses `smartcmp_analyze_security_violation` to refresh and display the
+   latest violation status, resource, policy, CMP-confirmed facts, evidence
+   gaps, manual remediation, and the fact that Mark Fixed will not modify the
+   resource; then it stops and waits for confirmation
+4. Phase 2 begins only in the next explicitly confirmed turn and uses
+   `smartcmp_mark_security_violation_fixed` for that exact freshly analyzed
+   `ACTIVED` violation
 
-Interactive resource-compliance workflows should not ask users for SmartCMP
-UUIDs. Resource IDs are internal API and webhook compatibility values only.
-
-Representative output fields:
-```json
-{
-  "results": [
-    {
-      "analysisTargets": ["llm:generic_cloud_resource"],
-      "analysisStatus": "evidence_collected",
-      "resourceProfile": {},
-      "evidenceCoverage": {}
-    }
-  ]
-}
-```
+Resource-first questions stay in the `resource` Skill. Use
+`smartcmp_analyze_resource_security` to combine the canonical resource facts,
+LLM posture evidence, and associated CMP Security violations, or
+`smartcmp_list_resource_security_violations` to inspect only those associated
+violations. Resource violation lookup scans root-category `SECURITY` and
+post-filters exact `resourceId` matches because CMP's server-side resource
+filter is not reliable.
 
 **Safety Boundary:**
-- The Tool collects evidence; the LLM provides the final advisory judgment
-- CMP state, absence of findings, or absence of a product rule is not proof of compliance
-- Patch, lifecycle, and CVE claims remain inferred or missing unless the payload contains authoritative evidence
-- No remediation APIs are called by this skill
+
+- Security analysis never reuses Cost Optimization saving or Day-2 semantics
+- Resource facts and LLM inference never replace CMP-confirmed violations
+- Partial scans report every exact match and label the remaining inventory
+  incomplete; an empty partial result never proves that no violation exists
+- Mark Fixed changes only the violation status and always reports that the
+  resource was not remediated
+- Null task fields expose no native automatic-remediation contract
 
 ### form-designer - SmartCMP Form Schema Design
 
@@ -504,7 +507,7 @@ subprocess-based cross-Skill proxies.
    metadata for programmatic use.
 4. **Alarm and Health Coverage** - Alert workflows and component-model-driven resource health analysis are supported directly by the `alarm` skill
 5. **Error Handling** - On `[ERROR]` output, report to user immediately; do NOT self-debug
-6. **Resource Compliance** - `resource-compliance` builds one bounded CMP fact profile for every resource type and hands it to the LLM; it does not use configured CMP policy results or product-specific external adapters
+6. **Security Boundaries** - `resource` owns resource-first LLM posture and associated-violation analysis; `security-compliance` owns the CMP-wide posture and violation-object workflows
 7. **Localized Responses** - Handlers return stable fields and metadata.
    Agents explain results in the current user's message language.
 8. **No Raw Day2 Dumps** - Resource operations should not print raw request payloads or raw SmartCMP response details after a successful submission.

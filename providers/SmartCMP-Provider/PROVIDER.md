@@ -32,7 +32,8 @@ keywords:
   - self-healing
   - cost optimization
   - finops
-  - resource compliance
+  - security compliance
+  - security violation
   - lifecycle analysis
   - security posture
   - form schema
@@ -55,6 +56,7 @@ capabilities:
   - Review cost optimization recommendations and savings opportunities
   - Execute and track native day2 remediation for cost optimization findings
   - Fetch resource details by ID, reuse the shared normalized resource view, and analyze lifecycle, patch, security, and configuration risk
+  - View the overall Security compliance posture and policy violations, analyze one Security violation, and explicitly mark its status FIXED without changing the resource
   - Generate, read, normalize, and refine SmartCMP Angular form schema JSON without saving forms to CMP
 
 use_when:
@@ -68,7 +70,8 @@ use_when:
   - User describes infrastructure needs in natural language and wants them translated into request drafts
   - User wants to review cost optimization recommendations, savings opportunities, or remediation progress
   - User wants to execute a native day2 fix for a cost finding
-  - User wants to analyze one or more existing resources by exact name or visible list index for compliance or security risk
+  - User wants to analyze one existing resource by exact name or visible list index for Security risk and associated violations
+  - User wants to view Security compliance, list or analyze Security violations, or mark a manually remediated violation FIXED
   - User wants to create, inspect, normalize, or improve a SmartCMP Angular form schema
 
 avoid_when:
@@ -78,7 +81,7 @@ avoid_when:
 
 # SmartCMP Service Provider
 
-Cloud management platform provider for self-service resource requests, approvals, alarms, cost optimization, and resource compliance analysis across hybrid cloud environments.
+Cloud management platform provider for self-service resource requests, approvals, alarms, cost optimization, resource Security analysis, and Security compliance violations across hybrid cloud environments.
 
 ## Quick Start
 
@@ -86,7 +89,7 @@ Cloud management platform provider for self-service resource requests, approvals
    - **Option 1**: Extract session cookie from SmartCMP web console (see [Cookie Extraction](#cookie-extraction))
    - **Option 2**: Set up auto-login credentials (recommended)
 2. Set environment variables (see [Environment Variables](#environment-variables))
-3. Use skills: `datasource` / `resource-pool` / `resource` → `request` → `approval` → `alarm` → `cost-optimization` → `resource-compliance`
+3. Use skills: `datasource` / `resource-pool` / `resource` → `request` → `approval` → `alarm` → `cost-optimization` / `security-compliance`
 
 ## Connection Parameters
 
@@ -304,7 +307,7 @@ CMP_URL=https://cmp.example.com
 | Skill | Type | Description | Key Operations |
 |-------|------|-------------|----------------|
 | `resource-pool` | Directory Query | Standalone listing of all resource pools from the CMP UI directory endpoint | `smartcmp_list_all_resource_pools` |
-| `resource` | Directory Query + Day2 Operation | Standalone listing of all resources or all cloud hosts, one-host detail analysis via `PATCH /nodes/{id}/view`, current-user executable operation discovery, and no-parameter resource operation execution | `smartcmp_list_all_resource`, `smartcmp_resource_detail`, `smartcmp_list_resource_operations`, `smartcmp_operate_resource` |
+| `resource` | Query + Analysis + Day2 Operation | List and inspect resources, analyze one resource's Security posture and associated violations, discover current-user operations, and execute no-parameter resource operations | `smartcmp_list_all_resource`, `smartcmp_resource_detail`, `smartcmp_analyze_resource_security`, `smartcmp_list_resource_security_violations`, `smartcmp_list_resource_operations`, `smartcmp_operate_resource` |
 | `datasource` | Data Query | Read-only business-group, application, component, template and image directories | `smartcmp_list_all_business_groups`, `smartcmp_list_applications`, `smartcmp_list_components`, `smartcmp_query_logical_templates`, `smartcmp_query_images` |
 | `request` | Provisioning | Cloud resource provisioning requests that select a logical template, then follow the generated instruction's physical-template or cloud-image branch | `smartcmp_list_services`, `smartcmp_get_request_catalog`, `smartcmp_list_logical_templates`, `smartcmp_list_physical_templates`, `smartcmp_list_images`, `smartcmp_submit_request`, `smartcmp_get_request_status` |
 | `approval` | Workflow | Approval workflow management | `smartcmp_list_pending`, `smartcmp_get_request_detail`, `smartcmp_analyze_approval_request`, `smartcmp_approve`, `smartcmp_reject` |
@@ -312,7 +315,7 @@ CMP_URL=https://cmp.example.com
 | `preapproval-agent` | Agent | Autonomous approval pre-review | Webhook-triggered, policy-based decisions |
 | `request-decomposition-agent` | Agent | Transform natural-language requirements into request drafts | NL parsing, multi-skill orchestration |
 | `cost-optimization` | Optimization | Analyze savings opportunities and execute platform-native fixes | `smartcmp_list_cost_recommendations`, `smartcmp_analyze_cost_recommendation`, `smartcmp_analyze_resource_cost`, `smartcmp_execute_cost_optimization`, `smartcmp_track_cost_optimization` |
-| `resource-compliance` | Analysis | Resolve any resource by exact name or visible list index, build bounded CMP evidence, and run one generic LLM compliance analysis | `smartcmp_analyze_resource_compliance` |
+| `security-compliance` | Analysis + Status Handling | View the Security posture and violations, analyze one violation, and explicitly mark its status FIXED without remediating the resource | `smartcmp_get_security_overview`, `smartcmp_list_security_violations`, `smartcmp_analyze_security_violation`, `smartcmp_mark_security_violation_fixed` |
 | `form-designer` | Form Design | Generate, read, normalize, and refine SmartCMP Angular form schema JSON without saving CMP forms | `smartcmp_read_current_form_schema`, `smartcmp_read_form_schema`, `smartcmp_design_form_schema` |
 
 ### Provider Skills
@@ -338,7 +341,15 @@ Use this when the user says "查看我的云资源", "查看所有资源", "查�
 "查看可执行操作", "执行资源操作", "云资源开机", "云资源关机", "启动云主机", or "停止云主机".
 
 Use `smartcmp_list_all_resource`, `smartcmp_resource_detail`,
+`smartcmp_analyze_resource_security`,
+`smartcmp_list_resource_security_violations`,
 `smartcmp_list_resource_operations`, and `smartcmp_operate_resource`.
+
+Resource Security analysis combines bounded resource facts, LLM posture
+inference, and CMP-confirmed associated violations by default. It keeps those
+evidence types separate. Association scans root-category `SECURITY` and
+post-filters exact `resourceId` matches; incomplete coverage cannot prove the
+resource has no violations.
 
 The operation list comes from `GET /nodes/{category}/{id}/resource-actions`
 with the current user's SmartCMP credentials. It does not use resource-type
@@ -412,39 +423,27 @@ and only uses the native day2 fix endpoint.
 - Execution uses `POST /compliance-policies/violations/day2/fix/{id}`
 - Do not expect direct AWS or Azure API calls from this skill
 
-#### resource-compliance
+#### security-compliance
 
-Inspect one or more existing resources by exact resource name or visible list
-selection, build a bounded and redacted CMP evidence profile, and let the LLM
-analyze operational state and compliance risk through one generic process.
+View the overall Security compliance posture, browse policy-derived Security
+violations, analyze one selected violation, and explicitly update its status
+after manual remediation.
 
-SmartCMP Provider returns the canonical resource payload and shared
-normalized facts. The compliance Tool treats `componentType` as context rather
-than an analyzer gate and does not read configured CMP policy results. Use
-`smartcmp_list_all_resource` for visible selection and
-`smartcmp_analyze_resource_compliance` for the analysis.
+Use `smartcmp_get_security_overview` for Security-only policy, evaluation,
+compliance, severity, violation, and trend facts. Use
+`smartcmp_list_security_violations` for the collection and retain its real CMP
+IDs in hidden metadata. Use `smartcmp_analyze_security_violation` for a fresh
+detail read with best-effort policy/resource enrichment and manual remediation
+guidance.
 
-Interactive resource-compliance workflows must not ask users for SmartCMP
-UUIDs. Resource IDs are internal API and webhook compatibility values only.
+`smartcmp_mark_security_violation_fixed` requires explicit confirmation and is
+a status-only write. It does not change the resource, does not advertise a
+Day-2 repair, is submitted at most once, and re-reads the violation afterward.
+The result always distinguishes `FIXED` from actual resource remediation.
 
-Representative output fields:
-
-```json
-{
-  "results": [
-    {
-      "analysisTargets": ["llm:generic_cloud_resource"],
-      "analysisStatus": "evidence_collected",
-      "resourceProfile": {},
-      "evidenceCoverage": {}
-    }
-  ]
-}
-```
-
-The Tool does not call product-specific lifecycle or CVE sources. The final
-LLM answer must distinguish confirmed CMP facts, model inference, and missing
-evidence. It never performs remediation automatically.
+Questions that start from a named or selected resource belong to the
+`resource` Skill. Interactive workflows must not ask users for SmartCMP UUIDs;
+Resource IDs and Violation IDs come from trusted object or list metadata.
 
 #### form-designer
 

@@ -30,24 +30,26 @@ EXPECTED_SKILL_PATHS = {
     "preapproval-agent/SKILL.md",
     "request-decomposition-agent/SKILL.md",
     "request/SKILL.md",
-    "resource-compliance/SKILL.md",
     "resource-pool/SKILL.md",
     "resource/SKILL.md",
     "script-designer/SKILL.md",
+    "security-compliance/SKILL.md",
 }
 EXPECTED_TOOL_NAMES = {
     "analyze_resource_health",
     "smartcmp_analyze_alert",
     "smartcmp_analyze_approval_request",
     "smartcmp_analyze_cost_recommendation",
-    "smartcmp_analyze_resource_compliance",
     "smartcmp_analyze_resource_cost",
+    "smartcmp_analyze_resource_security",
+    "smartcmp_analyze_security_violation",
     "smartcmp_approve",
     "smartcmp_design_form_schema",
     "smartcmp_execute_cost_optimization",
     "smartcmp_get_request_catalog",
     "smartcmp_get_request_detail",
     "smartcmp_get_request_status",
+    "smartcmp_get_security_overview",
     "smartcmp_list_alerts",
     "smartcmp_list_all_business_groups",
     "smartcmp_list_all_resource",
@@ -64,7 +66,10 @@ EXPECTED_TOOL_NAMES = {
     "smartcmp_list_physical_templates",
     "smartcmp_list_resource_bundles",
     "smartcmp_list_resource_operations",
+    "smartcmp_list_resource_security_violations",
+    "smartcmp_list_security_violations",
     "smartcmp_list_services",
+    "smartcmp_mark_security_violation_fixed",
     "smartcmp_operate_alert",
     "smartcmp_operate_resource",
     "smartcmp_preapproval_analyze_request",
@@ -81,7 +86,6 @@ EXPECTED_TOOL_NAMES = {
     "smartcmp_read_form_schema",
     "smartcmp_reject",
     "smartcmp_resource_analyze_alerts",
-    "smartcmp_resource_analyze_compliance",
     "smartcmp_resource_analyze_cost",
     "smartcmp_resource_analyze_health",
     "smartcmp_resource_detail",
@@ -159,8 +163,40 @@ def test_skill_metadata_keeps_expected_tool_contract() -> None:
     tool_names = _tool_names(frontmatters)
 
     assert set(frontmatters) == EXPECTED_SKILL_PATHS
-    assert len(tool_names) == len(set(tool_names)) == 51
+    assert len(tool_names) == len(set(tool_names)) == 55
     assert set(tool_names) == EXPECTED_TOOL_NAMES
+
+
+def test_security_and_resource_natural_language_routing_metadata_is_distinct() -> None:
+    """Declare deterministic ownership for representative Security prompts.
+
+    Skill selection is performed by the LLM from metadata rather than by a
+    deterministic NLP router, so this test verifies the exact trigger and
+    avoid-contract evidence supplied to that selection step.
+    """
+
+    frontmatters = _skill_frontmatters()
+    owners = {
+        "security-compliance/SKILL.md": (
+            "查看全部安全违规",
+            "分析第 1 条违规",
+        ),
+        "resource/SKILL.md": (
+            "分析 VM 安全",
+            "资源综合分析",
+        ),
+    }
+    for owner, prompts in owners.items():
+        other = next(candidate for candidate in owners if candidate != owner)
+        owner_triggers = set(frontmatters[owner]["triggers"])
+        other_triggers = set(frontmatters[other]["triggers"])
+        assert set(prompts) <= owner_triggers
+        assert not set(prompts) & other_triggers
+
+    security_avoid = " ".join(frontmatters["security-compliance/SKILL.md"]["avoid_when"])
+    resource_avoid = " ".join(frontmatters["resource/SKILL.md"]["avoid_when"])
+    assert "named or selected resource" in security_avoid
+    assert "global violation list" in resource_avoid
 
 
 def test_atlasclaw_bootstrap_imports_colocated_provider_without_config(

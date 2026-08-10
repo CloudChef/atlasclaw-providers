@@ -119,7 +119,7 @@ def normalize_analysis_facts(violation: dict, policy: dict | None = None) -> dic
     task_definition = violation.get("taskDefinition") or {}
     policy_remedie = policy.get("remedie")
     return {
-        "violationId": violation.get("id", ""),
+        "violationId": violation.get("id") or violation.get("violationId") or "",
         "policyId": violation.get("policyId") or policy.get("id", ""),
         "policyName": violation.get("policyName") or policy.get("name", ""),
         "resourceId": violation.get("resourceId", ""),
@@ -131,6 +131,7 @@ def normalize_analysis_facts(violation: dict, policy: dict | None = None) -> dic
         "monthlySaving": violation.get("monthlySaving"),
         "savingOperationType": violation.get("savingOperationType", ""),
         "fixType": violation.get("fixType", ""),
+        "taskInstanceId": violation.get("taskInstanceId", ""),
         "taskDefinitionName": task_definition.get("name", ""),
         "policyDescription": policy.get("description", ""),
         "remedie": violation.get("remedie") or policy_remedie or "",
@@ -500,7 +501,7 @@ def build_recommendation_analysis_payload(
     latest_execution = policy_executions[0] if policy_executions else {}
     return {
         "violationId": facts.get("violationId")
-        or str(violation.get("id") or ""),
+        or str(violation.get("id") or violation.get("violationId") or ""),
         "facts": facts,
         "assessment": {
             "optimizationTheme": theme,

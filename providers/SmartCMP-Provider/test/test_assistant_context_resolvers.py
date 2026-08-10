@@ -191,6 +191,7 @@ def _load(monkeypatch):
         "_approval_object_actions",
         "_request_object_actions",
         "_resource_object_actions",
+        "_security_object_actions",
         "_alarm_object_actions",
         "_cost_object_actions",
     )
@@ -231,6 +232,7 @@ def test_resolver_import_restores_process_import_state(monkeypatch) -> None:
         "_object_actions_common",
         "_request_object_actions",
         "_resource_object_actions",
+        "_security_object_actions",
     )
     original_path = list(sys.path)
     original_modules = {name: sys.modules.get(name) for name in local_names}
@@ -416,11 +418,12 @@ def test_alert_and_cost_context_return_state_aware_actions(monkeypatch) -> None:
             )
         assert url.endswith(f"/compliance-policies/violations/{RECOMMENDATION_ID}")
         return _Response(
-            {
-                "id": RECOMMENDATION_ID,
-                "policyName": "Right-size VM",
-                "status": "ACTIVED",
-                "resourceId": RESOURCE_ID,
+                {
+                    "id": RECOMMENDATION_ID,
+                    "policyName": "Right-size VM",
+                    "category": "COST-OPTIMIZATION.MACHINE",
+                    "status": "ACTIVED",
+                    "resourceId": RESOURCE_ID,
                 "monthlySaving": 120,
                 "fixType": "RESIZE",
             }
@@ -457,6 +460,70 @@ def test_alert_and_cost_context_return_state_aware_actions(monkeypatch) -> None:
         "remediate",
     ]
     assert cost["object_actions"][1]["requires_confirmation"] is True
+
+
+def test_cost_context_rejects_security_violation_with_matching_id(monkeypatch) -> None:
+    """A matching ID cannot turn a Security violation into a Cost page object."""
+
+    module = _load(monkeypatch)
+
+    def fake_get(url, **_kwargs):
+        assert url.endswith(
+            f"/compliance-policies/violations/{RECOMMENDATION_ID}"
+        )
+        return _Response(
+            {
+                "id": RECOMMENDATION_ID,
+                "category": "SECURITY.MACHINE",
+                "status": "ACTIVED",
+                "fixType": "DAY2",
+            }
+        )
+
+    result = _resolve_page_context(
+        module,
+        "cost-optimization-detail",
+        f"/main/measurement-billing/resource-usage-analysis/{RECOMMENDATION_ID}",
+        {"recommendation_id": RECOMMENDATION_ID},
+        "cost-optimization-detail",
+        "cost_optimization_recommendation",
+        reader=_Reader(fake_get),
+    )
+
+    assert result == {
+        "success": False,
+        "reason": "recommendation_category_mismatch",
+    }
+
+
+def test_security_collection_context_lists_violations_without_provider_io(
+    monkeypatch,
+) -> None:
+    """The records page routes to the Security skill without inventing an object ID."""
+
+    module = _load(monkeypatch)
+
+    def fail_http(*_args, **_kwargs):
+        raise AssertionError("Collection context must not call SmartCMP")
+
+    result = _resolve_page_context(
+        module,
+        "security-compliance-violations",
+        "/main/resource-management/records",
+        {},
+        "security-compliance-violations",
+        "security_compliance_violation_collection",
+        reader=_Reader(fail_http),
+    )
+
+    assert result["success"] is True
+    assert result["object"]["id"] == "security"
+    assert result["object"]["attributes"] == {"category": "SECURITY"}
+    assert [action["action_id"] for action in result["object_actions"]] == [
+        "list"
+    ]
+    prompt = result["object_actions"][0]["agent_prompt"]["default"]
+    assert "smartcmp_list_security_violations" in prompt
 
 
 def test_edit_pages_resolve_minimal_current_objects_without_business_content(

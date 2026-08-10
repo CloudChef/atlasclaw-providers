@@ -36,10 +36,14 @@ avoid_when:
   - User wants to provision new resources (use request skill)
   - User only wants standalone read-only resource browsing without optimization analysis (use datasource skill)
   - User wants approval workflow actions (use approval skill)
+  - User wants a Security compliance overview, Security violation list, violation analysis, or Mark Fixed status workflow (use security-compliance skill)
+  - User asks about a named, selected, listed, or current resource without explicit Cost Optimization or FinOps intent, including resource-first Security questions (use resource skill)
 
 related:
   - datasource
   - approval
+  - resource
+  - security-compliance
 
 tool_list_name: "smartcmp_list_cost_recommendations"
 tool_list_description: "List SmartCMP cost optimization recommendations with optional related policy counts."

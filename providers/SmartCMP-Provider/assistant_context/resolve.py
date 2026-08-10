@@ -50,6 +50,9 @@ ALARM_SCRIPTS_ROOT = os.path.join(ASSISTANT_CONTEXT_ROOT, "..", "skills", "alarm
 COST_SCRIPTS_ROOT = os.path.join(
     ASSISTANT_CONTEXT_ROOT, "..", "skills", "cost-optimization", "scripts"
 )
+SECURITY_SCRIPTS_ROOT = os.path.join(
+    ASSISTANT_CONTEXT_ROOT, "..", "skills", "security-compliance", "scripts"
+)
 _LOCAL_IMPORT_NAMES = (
     "_provider_bootstrap",
     "_alarm_object_actions",
@@ -60,6 +63,7 @@ _LOCAL_IMPORT_NAMES = (
     "_object_actions_common",
     "_request_object_actions",
     "_resource_object_actions",
+    "_security_object_actions",
 )
 _MISSING_MODULE = object()
 _original_sys_path = list(sys.path)
@@ -68,6 +72,7 @@ _previous_local_modules = {
 }
 try:
     sys.path[:0] = [
+        os.path.abspath(SECURITY_SCRIPTS_ROOT),
         os.path.abspath(COST_SCRIPTS_ROOT),
         os.path.abspath(ALARM_SCRIPTS_ROOT),
         os.path.abspath(RESOURCE_SCRIPTS_ROOT),
@@ -96,6 +101,10 @@ try:
     from _resource_object_actions import build_resource_object_actions  # noqa: E402
     from _alarm_object_actions import build_alert_object_actions  # noqa: E402
     from _cost_object_actions import build_cost_object_actions  # noqa: E402
+    from smartcmp_provider.domain.cost import is_cost_category  # noqa: E402
+    from _security_object_actions import (  # noqa: E402
+        build_security_violation_collection_actions,
+    )
 finally:
     sys.path[:] = _original_sys_path
     for _module_name, _previous_module in _previous_local_modules.items():
@@ -118,8 +127,22 @@ _OBJECT_PARAMETER_NAMES: dict[str, frozenset[str]] = {
     "request": frozenset(("application_type", "request_id")),
     "resource": frozenset(("resource_id",)),
     "script_definition": frozenset(("script_id",)),
+    "security_compliance_violation_collection": frozenset(),
     "virtual_machine": frozenset(("resource_id",)),
 }
+
+
+def _resolve_security_violation_collection() -> dict[str, Any]:
+    """Resolve the Security Compliance records page without provider I/O."""
+
+    return success_object(
+        object_type="security_compliance_violation_collection",
+        object_id="security",
+        name="Security compliance violations",
+        state="",
+        attributes={"category": "SECURITY"},
+        object_actions=build_security_violation_collection_actions(),
+    )
 
 
 async def _resolve_form_definition(
@@ -293,6 +316,8 @@ async def _resolve_cost_recommendation(
         return _failure("provider_unavailable")
     if not isinstance(recommendation, dict) or exact_uuid(recommendation.get("id")) != recommendation_id:
         return _failure("recommendation_id_mismatch")
+    if not is_cost_category(recommendation.get("category")):
+        return _failure("recommendation_category_mismatch")
     task_definition = recommendation.get("taskDefinition")
     task_definition = task_definition if isinstance(task_definition, dict) else {}
     action_source = dict(recommendation)
@@ -603,6 +628,8 @@ async def resolve_page_context(
         return await _resolve_alert(route_parameters, reader=reader)
     if normalized_object_type == "cost_optimization_recommendation":
         return await _resolve_cost_recommendation(route_parameters, reader=reader)
+    if normalized_object_type == "security_compliance_violation_collection":
+        return _resolve_security_violation_collection()
     return await _resolve_resource(
         route_parameters,
         expected_kind=normalized_object_type,

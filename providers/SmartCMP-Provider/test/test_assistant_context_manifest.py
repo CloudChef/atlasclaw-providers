@@ -72,6 +72,11 @@ def test_routes_match_context_to_existing_skills_with_one_provider_resolver() ->
             "smartcmp:cost-optimization",
         ),
         (
+            "security-compliance-violations",
+            "/main/resource-management/records",
+            "smartcmp:security-compliance",
+        ),
+        (
             "pending-approval-detail",
             "/main/new-application/pendingApproval/{approval_type}/{approval_id}",
             "smartcmp:approval",

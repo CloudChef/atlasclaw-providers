@@ -89,6 +89,21 @@ from smartcmp_provider.models.resources import (
     ResourceOperationsResult,
     ResourceSummarySearchQuery,
 )
+from smartcmp_provider.models.security_compliance import (
+    ResourceSecurityAnalysisQuery,
+    ResourceSecurityAnalysisResult,
+    ResourceSecurityViolationQuery,
+    ResourceSecurityViolationResult,
+    SecurityOverviewQuery,
+    SecurityOverviewResult,
+    SecurityRecordCollection,
+    SecurityViolationAnalysisQuery,
+    SecurityViolationAnalysisResult,
+    SecurityViolationListQuery,
+    SecurityViolationListResult,
+    SecurityViolationMarkFixedInput,
+    SecurityViolationMarkFixedResult,
+)
 
 __all__ = [
     "AlarmAnalysisFactsQuery",
@@ -161,5 +176,18 @@ __all__ = [
     "ResourceOperationsQuery",
     "ResourceOperationsResult",
     "ResourceSummarySearchQuery",
+    "ResourceSecurityAnalysisQuery",
+    "ResourceSecurityAnalysisResult",
+    "ResourceSecurityViolationQuery",
+    "ResourceSecurityViolationResult",
+    "SecurityOverviewQuery",
+    "SecurityOverviewResult",
+    "SecurityRecordCollection",
+    "SecurityViolationAnalysisQuery",
+    "SecurityViolationAnalysisResult",
+    "SecurityViolationListQuery",
+    "SecurityViolationListResult",
+    "SecurityViolationMarkFixedInput",
+    "SecurityViolationMarkFixedResult",
     "ScriptDefinitionView",
 ]
