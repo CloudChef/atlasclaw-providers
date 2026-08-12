@@ -39,6 +39,8 @@ from smartcmp_provider.models.operations import (  # noqa: E402
     ResourceActionTarget,
 )
 from smartcmp_provider.models.resources import (  # noqa: E402
+    PermanentResourceRemovalInput,
+    RecycledResourceQuery,
     ResourceDetailQuery,
     ResourceListQuery,
     ResourceOperationsQuery,
@@ -49,6 +51,10 @@ from smartcmp_provider.models.security_compliance import (  # noqa: E402
 )
 from smartcmp_provider.operations.resource_actions import (  # noqa: E402
     execute_resource_action,
+)
+from smartcmp_provider.operations.recycle_bin import (  # noqa: E402
+    list_recycled_resources as list_recycled_resources_operation,
+    permanently_remove_recycled_resource as permanently_remove_recycled_resource_operation,
 )
 from smartcmp_provider.operations.resources import list_resources  # noqa: E402
 from smartcmp_provider.services.resources import (  # noqa: E402
@@ -137,6 +143,79 @@ async def resource_detail(
                 f"{result.status or 'status unavailable'}."
             ),
         )
+    except (ValueError, RuntimeError) as error:
+        return tool_error(error)
+
+
+async def list_recycled_resources(
+    ctx: RunContext[Any],
+    resource_id: str = "",
+    resource_name: str = "",
+    deployment_id: str = "",
+    deployment_name: str = "",
+    page: int = 1,
+    size: int = 20,
+) -> dict[str, Any]:
+    """List recycle-bin resources using an optional resource or deployment locator.
+
+    Names remain exact-match data. The Provider returns every candidate rather
+    than selecting an ambiguous resource or deployment for a later write.
+    """
+
+    try:
+        result = await execute(
+            ctx,
+            list_recycled_resources_operation,
+            RecycledResourceQuery(
+                resource_id=resource_id,
+                resource_name=resource_name,
+                deployment_id=deployment_id,
+                deployment_name=deployment_name,
+                page=page,
+                size=size,
+            ),
+        )
+        return tool_result(
+            result,
+            summary=f"Found {len(result.items)} recycled resource rows.",
+        )
+    except (ValueError, RuntimeError) as error:
+        return tool_error(error)
+
+
+async def permanently_remove_recycled_resource(
+    ctx: RunContext[Any],
+    expected_deployment_id: str,
+    expected_resource_ids: list[str],
+    resource_id: str = "",
+    resource_name: str = "",
+    deployment_id: str = "",
+    deployment_name: str = "",
+    confirmed: bool = False,
+) -> dict[str, Any]:
+    """Submit one irreversible recycle-bin removal after explicit confirmation.
+
+    Exactly one resource or deployment locator is accepted. The Provider
+    resolves the deployment and affected resources again, requires an exact
+    match with the confirmed expected scope, rechecks the current user's
+    recycle-bin action, and submits at most once.
+    """
+
+    try:
+        result = await execute(
+            ctx,
+            permanently_remove_recycled_resource_operation,
+            PermanentResourceRemovalInput(
+                expected_deployment_id=expected_deployment_id,
+                expected_resource_ids=tuple(expected_resource_ids),
+                resource_id=resource_id,
+                resource_name=resource_name,
+                deployment_id=deployment_id,
+                deployment_name=deployment_name,
+                confirmed=confirmed,
+            ),
+        )
+        return tool_result(result, summary=result.message)
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
 

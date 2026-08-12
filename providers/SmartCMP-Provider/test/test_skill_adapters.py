@@ -150,7 +150,6 @@ def test_every_registered_tool_uses_a_schema_compatible_callable() -> None:
                 f"{entrypoint} requires unregistered fields "
                 f"{sorted(required_handler_parameters - properties)}"
             )
-    assert tool_count == 55
 
 
 def test_multi_tool_skills_use_one_adapter_entrypoint_module() -> None:
@@ -239,6 +238,69 @@ def test_atlasclaw_auth_context_distinguishes_cookie_user_and_webhook_robot() ->
         "page-user-session"
     )
     assert "Authorization" not in page_request.credential.headers()
+
+
+def test_resource_recycle_adapters_bind_public_locators_to_dedicated_operations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep resource/deployment locators and confirmation at the Provider boundary."""
+
+    adapter = _load(
+        SKILLS_ROOT / "resource" / "scripts" / "adapter.py",
+        "test_resource_recycle_adapter_binding",
+    )
+    calls: list[tuple[Any, Any]] = []
+
+    async def fake_execute(_ctx, operation, operation_input):
+        calls.append((operation, operation_input))
+        if operation is adapter.list_recycled_resources_operation:
+            return SimpleNamespace(items=())
+        return SimpleNamespace(message="Permanent removal request submitted.")
+
+    monkeypatch.setattr(adapter, "execute", fake_execute)
+    monkeypatch.setattr(
+        adapter,
+        "tool_result",
+        lambda _result, *, summary: {"success": True, "output": summary},
+    )
+
+    listed = asyncio.run(
+        adapter.list_recycled_resources(object(), resource_name="vm-a")
+    )
+    removed = asyncio.run(
+        adapter.permanently_remove_recycled_resource(
+            object(),
+            expected_deployment_id="deployment-1",
+            expected_resource_ids=["resource-1"],
+            deployment_name="application-a",
+            confirmed=True,
+        )
+    )
+
+    assert listed == {"success": True, "output": "Found 0 recycled resource rows."}
+    assert removed == {
+        "success": True,
+        "output": "Permanent removal request submitted.",
+    }
+    assert calls[0][0] is adapter.list_recycled_resources_operation
+    assert calls[0][1].model_dump() == {
+        "resource_id": "",
+        "resource_name": "vm-a",
+        "deployment_id": "",
+        "deployment_name": "",
+        "page": 1,
+        "size": 20,
+    }
+    assert calls[1][0] is adapter.permanently_remove_recycled_resource_operation
+    assert calls[1][1].model_dump() == {
+        "expected_deployment_id": "deployment-1",
+        "expected_resource_ids": ("resource-1",),
+        "resource_id": "",
+        "resource_name": "",
+        "deployment_id": "",
+        "deployment_name": "application-a",
+        "confirmed": True,
+    }
 
 
 def test_embedded_object_uses_server_owned_turn_context() -> None:

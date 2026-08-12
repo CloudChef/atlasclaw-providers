@@ -67,6 +67,13 @@ async def execute_resource_action(
             "action is required.",
             trace_id=client.request.context.trace_id,
         )
+    if action == "permanently_delete_deployment":
+        raise SmartCmpValidationError(
+            "Permanent deletion is available only through the dedicated "
+            "smartcmp_permanently_remove_recycled_resource, which resolves the "
+            "owning recycled deployment and requires explicit confirmation.",
+            trace_id=client.request.context.trace_id,
+        )
 
     resource_ids: list[str] = []
     categories: set[str] = set()
@@ -126,32 +133,16 @@ async def execute_resource_action(
             trace_id=client.request.context.trace_id,
         )
 
-    schedule = {
-        "cronExpression": "",
-        "cycleDescription": "",
-        "cycled": False,
-        "scheduleEnabled": False,
-        "scheduledTime": None,
-    }
     if categories == {"deployments"}:
-        payload = {
-            resource_id: {
-                "operationName": str(operation.get("id") or ""),
-                "scheduledTaskMetadataRequest": schedule,
-                "operationParamJson": json.dumps(
-                    {"systemForm": None}, separators=(",", ":")
-                ),
-                **(
-                    {"recycle": True, "manual": True}
-                    if action == "permanently_delete_deployment"
-                    else {}
-                ),
-            }
-            for resource_id, operation in zip(
-                resource_ids, selected_operations, strict=True
-            )
-        }
-        operation_path = "/deployments/execute-action"
+        await submit_deployment_actions_once(
+            client,
+            operations=tuple(
+                (resource_id, str(operation.get("id") or ""))
+                for resource_id, operation in zip(
+                    resource_ids, selected_operations, strict=True
+                )
+            ),
+        )
     else:
         payload = {
             "operationId": action,
@@ -160,13 +151,84 @@ async def execute_resource_action(
                 if len(resource_ids) == 1
                 else ",".join(resource_ids)
             ),
-            "scheduledTaskMetadataRequest": schedule,
+            "scheduledTaskMetadataRequest": _schedule_metadata(),
         }
-        operation_path = "/nodes/resource-operations"
+        await _submit_resource_operation_once(
+            client,
+            path="/nodes/resource-operations",
+            payload=payload,
+        )
+    return ResourceActionResult(
+        action=action,
+        resource_ids=tuple(resource_ids),
+        message=f"SmartCMP {action} request submitted.",
+        verification_hint=(
+            "Refresh the resource list or resource detail to confirm the latest state."
+        ),
+    )
+
+
+async def submit_deployment_actions_once(
+    client: SmartCmpClient,
+    *,
+    operations: tuple[tuple[str, str], ...],
+    recycled: bool = False,
+) -> Any:
+    """Submit already-authorized deployment operations in one non-retried write.
+
+    Args:
+        client: Client bound to the acting SmartCMP principal.
+        operations: ``(deployment_id, operation_id)`` pairs authorized through
+            the current-user action endpoint immediately before this call.
+        recycled: Include SmartCMP's recycle-bin flags for permanent removal.
+
+    Returns:
+        The validated SmartCMP response payload. Callers that need stronger
+        acceptance evidence must inspect the operation-specific response shape.
+
+    Raises:
+        SmartCmpUnknownOutcomeError: If the request may have reached SmartCMP.
+        SmartCmpError: If SmartCMP definitely rejects the submission.
+    """
+
+    payload = {
+        deployment_id: {
+            "operationName": operation_id,
+            "scheduledTaskMetadataRequest": _schedule_metadata(),
+            "operationParamJson": json.dumps(
+                {"systemForm": None}, separators=(",", ":")
+            ),
+            **({"recycle": True, "manual": True} if recycled else {}),
+        }
+        for deployment_id, operation_id in operations
+    }
+    return await _submit_resource_operation_once(
+        client,
+        path="/deployments/execute-action",
+        payload=payload,
+    )
+
+
+def _schedule_metadata() -> dict[str, Any]:
+    return {
+        "cronExpression": "",
+        "cycleDescription": "",
+        "cycled": False,
+        "scheduleEnabled": False,
+        "scheduledTime": None,
+    }
+
+
+async def _submit_resource_operation_once(
+    client: SmartCmpClient,
+    *,
+    path: str,
+    payload: dict[str, Any],
+) -> Any:
     try:
         response_payload = await client.request_json(
             "POST",
-            operation_path,
+            path,
             json_body=payload,
         )
     except SmartCmpError as exc:
@@ -184,14 +246,7 @@ async def execute_resource_action(
             "SmartCMP business error: " + business_error,
             trace_id=client.request.context.trace_id,
         )
-    return ResourceActionResult(
-        action=action,
-        resource_ids=tuple(resource_ids),
-        message=f"SmartCMP {action} request submitted.",
-        verification_hint=(
-            "Refresh the resource list or resource detail to confirm the latest state."
-        ),
-    )
+    return response_payload
 
 
 async def _fetch_current_user_operations(

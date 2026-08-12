@@ -66,12 +66,14 @@ EXPECTED_TOOL_NAMES = {
     "smartcmp_list_physical_templates",
     "smartcmp_list_resource_bundles",
     "smartcmp_list_resource_operations",
+    "smartcmp_list_recycled_resources",
     "smartcmp_list_resource_security_violations",
     "smartcmp_list_security_violations",
     "smartcmp_list_services",
     "smartcmp_mark_security_violation_fixed",
     "smartcmp_operate_alert",
     "smartcmp_operate_resource",
+    "smartcmp_permanently_remove_recycled_resource",
     "smartcmp_preapproval_analyze_request",
     "smartcmp_preapproval_approve",
     "smartcmp_preapproval_get_catalog_detail",
@@ -163,7 +165,7 @@ def test_skill_metadata_keeps_expected_tool_contract() -> None:
     tool_names = _tool_names(frontmatters)
 
     assert set(frontmatters) == EXPECTED_SKILL_PATHS
-    assert len(tool_names) == len(set(tool_names)) == 55
+    assert len(tool_names) == len(set(tool_names))
     assert set(tool_names) == EXPECTED_TOOL_NAMES
 
 

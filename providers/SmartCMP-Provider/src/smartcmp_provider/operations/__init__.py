@@ -46,6 +46,10 @@ from smartcmp_provider.operations.requests import (
     get_request_status,
     submit_request,
 )
+from smartcmp_provider.operations.recycle_bin import (
+    list_recycled_resources,
+    permanently_remove_recycled_resource,
+)
 from smartcmp_provider.operations.resource_actions import execute_resource_action
 from smartcmp_provider.operations.resources import (
     build_flat_resource_properties,
@@ -119,9 +123,11 @@ __all__ = [
     "list_resource_pool_directory",
     "list_resource_executions",
     "list_resource_bundles",
+    "list_recycled_resources",
     "list_resources",
     "list_violation_instances",
     "mark_security_violation_fixed_once",
+    "permanently_remove_recycled_resource",
     "query_resource_security_violations",
     "query_security_policies",
     "query_security_policy_executions",
