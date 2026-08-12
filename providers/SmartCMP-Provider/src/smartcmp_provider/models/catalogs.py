@@ -67,9 +67,9 @@ class ResourceBundleQuery(BaseModel):
     """Select resource pools and resolve their request-time placement choices.
 
     ``placement_fields`` contains only fields declared by the selected catalog.
-    ``placement_values`` carries the selected ``catalogId`` and ``node`` context
-    together with choices already made in the dependency chain. Keeping that
-    context in the existing map preserves the shared MCP Tool signature.
+    ``catalog_id`` and ``node_template_name`` identify that catalog context,
+    while ``placement_values`` carries only choices already made in the field
+    dependency chain.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -77,6 +77,8 @@ class ResourceBundleQuery(BaseModel):
     business_group_id: str
     component_type: str
     node_type: str
+    catalog_id: str
+    node_template_name: str
     cloud_entry_type_id: str = ""
     resource_bundle_id: str = ""
     placement_fields: tuple[PlacementFieldName, ...] = ()

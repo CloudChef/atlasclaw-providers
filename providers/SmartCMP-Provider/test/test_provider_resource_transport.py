@@ -42,6 +42,7 @@ try:
         SmartCmpValidationError,
     )
     from smartcmp_provider.models.catalogs import (
+        CatalogDetailQuery,
         CatalogListQuery,
         FlavorQuery,
         ImageQuery,
@@ -69,6 +70,7 @@ try:
         list_resources,
     )
     from smartcmp_provider.operations.catalogs import (
+        get_catalog_detail,
         list_catalogs,
         list_flavors,
         list_images,
@@ -626,6 +628,63 @@ Collect the VM shape before submission.
     assert result.catalogs[1]["type"] == "cloudchef.nodes.Compute"
 
 
+def test_catalog_detail_includes_normalized_request_metadata() -> None:
+    """Selected catalog details retain parsed request and preapproval metadata."""
+
+    request_scope = make_request(
+        instance_name="cmp-a",
+        base_url="https://cmp.example",
+        user_id="user-a",
+        token="session-a",
+    )
+    markdown = """
+# Request Parameter Instructions
+
+catalog:
+  component_type: resource.iaas.machine.instance.abstract
+resource_specs:
+- node: Compute
+  type: cloudchef.nodes.Compute
+
+# Preapproval Instructions
+
+Require an owner review.
+""".strip()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/catalogs/catalog-1")
+        return httpx.Response(
+            200,
+            json={
+                "id": "catalog-1",
+                "name": "Linux VM",
+                "serviceCategory": "CLOUD_COMPONENT_SERVICE",
+                "instructions": markdown,
+            },
+            request=request,
+        )
+
+    async def invoke():
+        async with SmartCmpClient(
+            request_scope,
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            return await get_catalog_detail(
+                client,
+                CatalogDetailQuery(catalog_id="catalog-1"),
+            )
+
+    result = asyncio.run(invoke())
+
+    assert result.metadata["componentType"] == (
+        "resource.iaas.machine.instance.abstract"
+    )
+    assert result.metadata["node"] == "Compute"
+    assert result.metadata["type"] == "cloudchef.nodes.Compute"
+    assert result.metadata["instructions"]["resourceSpecs"][0]["node"] == "Compute"
+    assert result.metadata["preApprovalInstructions"] == "Require an owner review."
+
+
 @pytest.mark.parametrize(
     ("cloud_entry_type", "expected_resource_type"),
     [
@@ -703,8 +762,10 @@ def test_resource_bundle_resolves_declared_placement_fields() -> None:
         user_id="user-a",
         token="session-a",
     )
+    lookup_calls = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal lookup_calls
         if request.url.path.endswith("/resource-bundles"):
             return httpx.Response(
                 200,
@@ -744,7 +805,20 @@ def test_resource_bundle_resolves_declared_placement_fields() -> None:
                 request=request,
             )
         if request.url.path.endswith("/components"):
-            return httpx.Response(200, json=[], request=request)
+            assert request.url.params.get("all") == ""
+            assert request.url.params.get("types") == (
+                "cloudchef.nodes.SecurityGroup"
+            )
+            assert request.url.params.get("resourceType") is None
+            return httpx.Response(
+                200,
+                json=[{
+                    "id": "component-security-group",
+                    "resourceType": "resource.security-group",
+                    "model": {"typeName": "cloudchef.nodes.SecurityGroup"},
+                }],
+                request=request,
+            )
         if request.url.path.endswith("/cloudentries"):
             return httpx.Response(
                 200,
@@ -760,10 +834,38 @@ def test_resource_bundle_resolves_declared_placement_fields() -> None:
                                     "vpc_id": {
                                         "type": "string",
                                         "required": {"inRequest": {"value": True}},
-                                        "cloudResourceType": "generic-resource",
-                                        "queryProperties": {"resourceType": "vpc"},
                                         "dependencies": {
                                             "account_id": "accountId",
+                                        },
+                                        "config": {
+                                            "value": {
+                                                "source": "api",
+                                                "method": "POST",
+                                                "expression": (
+                                                    "/cloudprovider?"
+                                                    "action=queryCloudResource"
+                                                ),
+                                                "body": {
+                                                    "businessGroupId": (
+                                                        "${businessGroupId}"
+                                                    ),
+                                                    "cloudEntryId": "${cloudEntryId}",
+                                                    "cloudResourceType": (
+                                                        "generic-resource"
+                                                    ),
+                                                    "queryProperties": {
+                                                        "componentId": (
+                                                            "${componentId}"
+                                                        ),
+                                                        "resourceType": "vpc",
+                                                        "resourceBundleId": (
+                                                            "${resource_bundle_config."
+                                                            "policy_resource}"
+                                                        ),
+                                                        "accountId": "{$.account_id}",
+                                                    },
+                                                },
+                                            }
                                         },
                                     },
                                     "group_description": {
@@ -778,15 +880,21 @@ def test_resource_bundle_resolves_declared_placement_fields() -> None:
                 request=request,
             )
         if request.url.path.endswith("/cloudprovider"):
+            lookup_calls += 1
             body = json.loads(request.content)
             assert body["queryProperties"] == {
+                "componentId": "component-security-group",
                 "resourceType": "vpc",
                 "resourceBundleId": "resource-bundle-1",
                 "accountId": "account-1",
             }
             return httpx.Response(
                 200,
-                json=[{"id": "vpc-a", "name": "VPC A"}],
+                json=(
+                    []
+                    if lookup_calls == 4
+                    else [{"id": 0, "name": "VPC A"}]
+                ),
                 request=request,
             )
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
@@ -800,34 +908,60 @@ def test_resource_bundle_resolves_declared_placement_fields() -> None:
                 client,
                 ResourceBundleQuery(
                     business_group_id="business-group-1",
-                    component_type="cloudchef.nodes.SecurityGroup",
+                    component_type="catalog-resource-type",
                     node_type="cloudchef.nodes.SecurityGroup",
+                    catalog_id="catalog-1",
+                    node_template_name="SecurityGroup",
                     resource_bundle_id="resource-bundle-1",
                     placement_fields=("vpc_id",),
-                    placement_values={
-                        "catalogId": "catalog-1",
-                        "node": "SecurityGroup",
-                    },
                 ),
             )
             complete = await list_resource_bundles(
                 client,
                 ResourceBundleQuery(
                     business_group_id="business-group-1",
-                    component_type="cloudchef.nodes.SecurityGroup",
+                    component_type="catalog-resource-type",
                     node_type="cloudchef.nodes.SecurityGroup",
+                    catalog_id="catalog-1",
+                    node_template_name="SecurityGroup",
                     resource_bundle_id="resource-bundle-1",
                     placement_values={
-                        "catalogId": "catalog-1",
-                        "node": "SecurityGroup",
-                        "vpc_id": "vpc-a",
+                        "vpc_id": "0",
                         "group_description": "MCP acceptance group",
                     },
                 ),
             )
-            return pending, complete
+            invalid_selection = await list_resource_bundles(
+                client,
+                ResourceBundleQuery(
+                    business_group_id="business-group-1",
+                    component_type="catalog-resource-type",
+                    node_type="cloudchef.nodes.SecurityGroup",
+                    catalog_id="catalog-1",
+                    node_template_name="SecurityGroup",
+                    resource_bundle_id="resource-bundle-1",
+                    placement_values={
+                        "vpc_id": "vpc-unavailable",
+                        "group_description": "Invalid selection",
+                    },
+                ),
+            )
+            empty_lookup = await list_resource_bundles(
+                client,
+                ResourceBundleQuery(
+                    business_group_id="business-group-1",
+                    component_type="catalog-resource-type",
+                    node_type="cloudchef.nodes.SecurityGroup",
+                    catalog_id="catalog-1",
+                    node_template_name="SecurityGroup",
+                    resource_bundle_id="resource-bundle-1",
+                    placement_fields=("vpc_id",),
+                    placement_values={"group_description": "No VPC available"},
+                ),
+            )
+            return pending, complete, invalid_selection, empty_lookup
 
-    pending, complete = asyncio.run(invoke())
+    pending, complete, invalid_selection, empty_lookup = asyncio.run(invoke())
 
     fields = {
         field["key"]: field
@@ -835,12 +969,173 @@ def test_resource_bundle_resolves_declared_placement_fields() -> None:
     }
     assert fields["account_id"]["value"] == "account-1"
     assert fields["vpc_id"]["dependsOn"] == ["account_id"]
-    assert pending.items[0]["placementOptions"]["vpc_id"][0]["id"] == "vpc-a"
+    assert pending.items[0]["placementOptions"]["vpc_id"][0]["id"] == 0
     assert set(pending.items[0]["missingRequiredFields"]) == {
         "vpc_id",
         "group_description",
     }
+    assert set(pending.items[0]["missingSelectionFields"]) == {
+        "vpc_id",
+        "group_description",
+    }
     assert complete.items[0]["valid"] is True
+    assert invalid_selection.items[0]["valid"] is False
+    assert "not selectable" in invalid_selection.items[0]["configurationErrors"][0]
+    assert empty_lookup.items[0]["valid"] is False
+    assert "no selectable options" in empty_lookup.items[0]["configurationErrors"][0]
+
+
+@pytest.mark.parametrize(
+    "components, error_pattern",
+    [
+        ([], "exactly one component"),
+        (
+            [{"model": {"typeName": "cloudchef.nodes.Compute"}}],
+            "component without an ID",
+        ),
+        (
+            [
+                {
+                    "id": "component-1",
+                    "model": {"typeName": "cloudchef.nodes.Compute"},
+                },
+                {
+                    "id": "component-2",
+                    "model": {"typeName": "cloudchef.nodes.Compute"},
+                },
+            ],
+            "exactly one component",
+        ),
+        (
+            [
+                {
+                    "id": "component-1",
+                    "model": {"typeName": "cloudchef.nodes.Compute"},
+                },
+                {"model": {"typeName": "cloudchef.nodes.Compute"}},
+            ],
+            "exactly one component",
+        ),
+    ],
+)
+def test_resource_bundle_rejects_ambiguous_or_missing_node_component(
+    components: list[dict[str, object]],
+    error_pattern: str,
+) -> None:
+    """Component resolution must fail closed before request-field lookup."""
+
+    request_scope = make_request(
+        instance_name="cmp-a",
+        base_url="https://cmp.example",
+        user_id="user-a",
+        token="session-a",
+    )
+    requested_paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested_paths.append(request.url.path)
+        if request.url.path.endswith("/resource-bundles"):
+            return httpx.Response(
+                200,
+                json=[{"id": "resource-bundle-1"}],
+                request=request,
+            )
+        if request.url.path.endswith("/catalogs/catalog-1"):
+            return httpx.Response(
+                200,
+                json={
+                    "id": "catalog-1",
+                    "blueprint": {
+                        "mainYaml": (
+                            "node_templates:\n"
+                            "  Compute:\n"
+                            "    type: cloudchef.nodes.Compute\n"
+                        )
+                    },
+                },
+                request=request,
+            )
+        if request.url.path.endswith("/components"):
+            assert request.url.params.get("types") == "cloudchef.nodes.Compute"
+            return httpx.Response(200, json=components, request=request)
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    async def invoke() -> None:
+        async with SmartCmpClient(
+            request_scope,
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            await list_resource_bundles(
+                client,
+                ResourceBundleQuery(
+                    business_group_id="business-group-1",
+                    component_type="catalog-resource-type",
+                    node_type="cloudchef.nodes.Compute",
+                    catalog_id="catalog-1",
+                    node_template_name="Compute",
+                    resource_bundle_id="resource-bundle-1",
+                ),
+            )
+
+    with pytest.raises(SmartCmpValidationError, match=error_pattern):
+        asyncio.run(invoke())
+
+    assert requested_paths == [
+        "/platform-api/resource-bundles",
+        "/platform-api/catalogs/catalog-1",
+        "/platform-api/components",
+    ]
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        ResourceBundleQuery(
+            business_group_id="business-group-1",
+            component_type="cloudchef.nodes.Compute",
+            node_type="cloudchef.nodes.Compute",
+            catalog_id="",
+            node_template_name="",
+        ),
+        ResourceBundleQuery(
+            business_group_id="business-group-1",
+            component_type="cloudchef.nodes.Compute",
+            node_type="cloudchef.nodes.Compute",
+            catalog_id="catalog-1",
+            node_template_name="Compute",
+            placement_values={"catalogId": "catalog-1", "node": "Compute"},
+        ),
+    ],
+)
+def test_resource_bundle_rejects_implicit_context_before_http(
+    query: ResourceBundleQuery,
+) -> None:
+    """Missing or map-encoded catalog context fails before any SmartCMP call."""
+
+    request_scope = make_request(
+        instance_name="cmp-a",
+        base_url="https://cmp.example",
+        user_id="user-a",
+        token="session-a",
+    )
+    request_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        return httpx.Response(200, json=[], request=request)
+
+    async def invoke() -> None:
+        async with SmartCmpClient(
+            request_scope,
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            await list_resource_bundles(client, query)
+
+    with pytest.raises(SmartCmpValidationError):
+        asyncio.run(invoke())
+
+    assert request_count == 0
 
 
 def test_windows_compute_uses_shared_compute_cloud_schema() -> None:
@@ -881,7 +1176,20 @@ def test_windows_compute_uses_shared_compute_cloud_schema() -> None:
                 request=request,
             )
         if request.url.path.endswith("/components"):
-            return httpx.Response(200, json=[], request=request)
+            assert request.url.params.get("types") == (
+                "cloudchef.nodes.WindowsCompute"
+            )
+            return httpx.Response(
+                200,
+                json=[{
+                    "id": "component-windows-compute",
+                    "resourceType": (
+                        "resource.iaas.machine.windows_instance.abstract"
+                    ),
+                    "model": {"typeName": "cloudchef.nodes.WindowsCompute"},
+                }],
+                request=request,
+            )
         if request.url.path.endswith("/cloudentries"):
             return httpx.Response(
                 200,
@@ -922,12 +1230,10 @@ def test_windows_compute_uses_shared_compute_cloud_schema() -> None:
                     business_group_id="business-group-1",
                     component_type="resource.iaas.machine.windows_instance.abstract",
                     node_type="cloudchef.nodes.WindowsCompute",
+                    catalog_id="catalog-windows",
+                    node_template_name="WindowsCompute",
                     resource_bundle_id="resource-bundle-1",
                     placement_fields=("networkId",),
-                    placement_values={
-                        "catalogId": "catalog-windows",
-                        "node": "WindowsCompute",
-                    },
                 ),
             )
 
@@ -1104,6 +1410,7 @@ def test_request_submission_normalizes_payload_and_submits_exactly_once():
                         "resourceSpecs": {
                             "node": "Compute",
                             "type": "cloudchef.nodes.Compute",
+                            "credentialPassword": "real-vm-password",
                         },
                     },
                     actor=RequestActorIdentity(
@@ -1120,10 +1427,60 @@ def test_request_submission_normalizes_payload_and_submits_exactly_once():
     assert submit_calls == 1
     assert submitted[0]["quantity"] == 2
     assert isinstance(submitted[0]["resourceSpecs"], list)
+    assert (
+        submitted[0]["resourceSpecs"][0]["credentialPassword"]
+        == "real-vm-password"
+    )
     assert submitted[0]["userId"] == "user-1"
     assert submitted[0]["userLoginId"] == "admin"
     assert result.items[0].outcome == "success"
     assert result.items[0].request_id == "RES20260731009991"
+
+
+@pytest.mark.parametrize(
+    ("secret_field", "preview_mask"),
+    [("credentialPassword", "***"), ("password", "******")],
+)
+def test_request_submission_rejects_nested_preview_mask_before_http(
+    secret_field: str,
+    preview_mask: str,
+) -> None:
+    """Presentation masks must never cross the Provider submit boundary."""
+
+    request_scope = make_request(
+        instance_name="cmp-a",
+        base_url="https://cmp.example",
+        user_id="user-a",
+        token="session-a",
+    )
+    request_calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal request_calls
+        request_calls += 1
+        raise AssertionError(f"Preview mask reached HTTP: {request.url}")
+
+    async def invoke():
+        async with SmartCmpClient(
+            request_scope,
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            return await submit_request(
+                client,
+                RequestSubmissionInput(
+                    body={
+                        "catalogId": "catalog-linux",
+                        "resourceSpecs": [
+                            {"nested": {secret_field: preview_mask}}
+                        ],
+                    },
+                ),
+            )
+
+    with pytest.raises(SmartCmpValidationError, match="preview masks"):
+        asyncio.run(invoke())
+
+    assert request_calls == 0
 
 
 
