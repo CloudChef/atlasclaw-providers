@@ -32,6 +32,8 @@ _UUID_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _FALLBACK_QUANTITY_FIELD = "quantity"
+_PREVIEW_SECRET_MASKS = {"***", "******"}
+_REQUEST_SECRET_FIELDS = {"credentialpassword", "password"}
 _MATCH_FIELDS = (
     "requestId",
     "workflowId",
@@ -145,10 +147,11 @@ def normalize_request_contract(body: dict[str, Any]) -> dict[str, Any]:
         ``resourceSpecs`` converted to a one-item list.
 
     Raises:
-        SmartCmpValidationError: If quantity or resourceSpecs violates the
-            established Skill contract.
+        SmartCmpValidationError: If quantity, resourceSpecs, or a submitted
+            secret violates the established Skill contract.
     """
 
+    _reject_preview_secret_masks(body)
     normalized = dict(body)
     if _FALLBACK_QUANTITY_FIELD in normalized:
         raw_value = normalized.get(_FALLBACK_QUANTITY_FIELD)
@@ -172,6 +175,30 @@ def normalize_request_contract(body: dict[str, Any]) -> dict[str, Any]:
             "`resourceSpecs` must be an object or an array."
         )
     return normalized
+
+
+def _reject_preview_secret_masks(value: Any) -> None:
+    """Reject presentation-only secret masks anywhere in a request body."""
+
+    if isinstance(value, dict):
+        for key, item in value.items():
+            normalized_key = "".join(
+                character
+                for character in str(key).casefold()
+                if character.isalnum()
+            )
+            if (
+                normalized_key in _REQUEST_SECRET_FIELDS
+                and isinstance(item, str)
+                and item in _PREVIEW_SECRET_MASKS
+            ):
+                raise SmartCmpValidationError(
+                    "Request secrets must contain original values, not preview masks."
+                )
+            _reject_preview_secret_masks(item)
+    elif isinstance(value, list):
+        for item in value:
+            _reject_preview_secret_masks(item)
 
 
 async def get_request_status(

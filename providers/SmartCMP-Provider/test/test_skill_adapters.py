@@ -21,6 +21,7 @@ from smartcmp_provider.models.approvals import (
     ApprovalDecisionResult,
 )
 from smartcmp_provider.models.catalogs import (
+    CatalogDetailResult,
     CatalogItemsResult,
     CatalogListResult,
 )
@@ -914,10 +915,185 @@ def test_request_adapter_parses_confirmed_json_once(monkeypatch) -> None:
     assert result["success"] is True
     assert captured["input"].body["catalogId"] == "catalog-1"
     assert "RES20260731000002" in result["output"]
+    assert result["requestId"] == "RES20260731000002"
     assert result["normalized_body"]["credentialPassword"] == "***"
     assert result["normalized_body"]["nested"]["password"] == "***"
     assert "vm-secret" not in result["_internal"]
     assert "nested-secret" not in result["_internal"]
+
+
+def test_request_adapter_does_not_confirm_failed_submission(monkeypatch) -> None:
+    """Do not publish success evidence when Provider reports an overall failure."""
+
+    adapter = _load(
+        SKILLS_ROOT / "request" / "scripts" / "adapter.py",
+        "test_request_adapter_failed_submission",
+    )
+
+    async def fake_execute(_ctx, _operation, operation_input):
+        return RequestSubmissionResult(
+            normalized_body=operation_input.body,
+            items=(
+                RequestSubmissionItem(
+                    outcome="failed",
+                    request_id="RES20260731000003",
+                    error="workflow initialization failed",
+                ),
+            ),
+            overall_failed=True,
+        )
+
+    monkeypatch.setattr(adapter, "execute", fake_execute)
+    result = asyncio.run(
+        adapter.submit(
+            object(),
+            '{"catalogId":"catalog-1","name":"failed-request"}',
+        )
+    )
+
+    assert "requestId" not in result
+    assert "did not return a confirmed Request ID" in result["output"]
+
+
+def test_request_adapter_does_not_confirm_unknown_submission(monkeypatch) -> None:
+    """Keep an unknown write outcome out of the successful evidence contract."""
+
+    adapter = _load(
+        SKILLS_ROOT / "request" / "scripts" / "adapter.py",
+        "test_request_adapter_unknown_submission",
+    )
+
+    async def fake_execute(_ctx, _operation, _operation_input):
+        raise RuntimeError("submission outcome is unknown; do not resubmit")
+
+    monkeypatch.setattr(adapter, "execute", fake_execute)
+    result = asyncio.run(
+        adapter.submit(
+            object(),
+            '{"catalogId":"catalog-1","name":"unknown-request"}',
+        )
+    )
+
+    assert result["success"] is False
+    assert "requestId" not in result
+    assert "do not resubmit" in result["error"]
+
+
+def test_request_resource_bundle_contract_is_explicit_and_redacted(monkeypatch) -> None:
+    """Pass exact catalog context explicitly and keep lookup secrets out of results."""
+
+    adapter = _load(
+        SKILLS_ROOT / "request" / "scripts" / "adapter.py",
+        "test_request_resource_bundle_adapter",
+    )
+    captured: dict[str, Any] = {}
+
+    async def fake_execute_with_request(_ctx, operation, operation_input):
+        captured["operation"] = operation
+        captured["input"] = operation_input
+        result = CatalogItemsResult(
+            items=(
+                {
+                    "id": "bundle-1",
+                    "name": "vSphere",
+                    "blueprint": {"raw": "must-not-enter-internal"},
+                    "requestFields": [
+                        {
+                            "key": "credentialPassword",
+                            "value": "lookup-secret",
+                        }
+                    ],
+                    "missingRequiredFields": [],
+                    "missingSelectionFields": [],
+                    "configurationErrors": [],
+                    "valid": True,
+                },
+            )
+        )
+        request = SimpleNamespace(context=SimpleNamespace(trace_id="trace-1"))
+        return result, request
+
+    monkeypatch.setattr(
+        adapter,
+        "execute_with_request",
+        fake_execute_with_request,
+    )
+    result = asyncio.run(
+        adapter.list_resource_bundles(
+            object(),
+            business_group_id="business-group-1",
+            component_type="cloudchef.nodes.Compute",
+            node_type="cloudchef.nodes.Compute",
+            catalog_id="catalog-1",
+            node_template_name="Compute",
+            resource_bundle_id="bundle-1",
+            placement_values={"credentialPassword": "lookup-secret"},
+        )
+    )
+
+    operation_input = captured["input"]
+    assert operation_input.catalog_id == "catalog-1"
+    assert operation_input.node_template_name == "Compute"
+    assert "catalogId" not in operation_input.placement_values
+    assert "node" not in operation_input.placement_values
+    assert result["items"][0]["requestFields"][0]["value"] == "lookup-secret"
+    internal = json.loads(result["_internal"])
+    assert internal["placementValues"]["credentialPassword"] == "***"
+    assert internal["items"][0]["requestFields"][0]["value"] == "***"
+    assert "lookup-secret" not in result["_internal"]
+    assert "must-not-enter-internal" not in result["_internal"]
+
+
+def test_request_resource_bundle_schema_requires_explicit_catalog_context() -> None:
+    """Expose catalog and node context as required first-class Tool arguments."""
+
+    metadata = _frontmatter(SKILLS_ROOT / "request" / "SKILL.md")
+    schema = json.loads(metadata["tool_resource_bundles_parameters"])
+
+    assert {"catalog_id", "node_template_name"} <= set(schema["required"])
+    assert "Never include catalogId or node" in (
+        schema["properties"]["placement_values"]["description"]
+    )
+
+
+def test_request_catalog_internal_omits_raw_catalog(monkeypatch) -> None:
+    """Keep normalized request metadata without copying the raw catalog internally."""
+
+    adapter = _load(
+        SKILLS_ROOT / "request" / "scripts" / "adapter.py",
+        "test_request_catalog_compact_internal",
+    )
+
+    async def fake_execute_with_request(_ctx, _operation, _operation_input):
+        result = CatalogDetailResult(
+            catalog={"id": "catalog-1", "blueprint": "raw-catalog-marker"},
+            metadata={
+                "id": "catalog-1",
+                "name": "Linux VM",
+                "instructions": {"resourceSpecs": [{"node": "Compute"}]},
+            },
+        )
+        request = SimpleNamespace(
+            context=SimpleNamespace(
+                trace_id="trace-1",
+                instance=SimpleNamespace(ui_base_url="https://cmp.example.com"),
+            )
+        )
+        return result, request
+
+    monkeypatch.setattr(
+        adapter,
+        "execute_with_request",
+        fake_execute_with_request,
+    )
+    result = asyncio.run(adapter.get_request_catalog(object(), "catalog-1"))
+
+    internal = json.loads(result["_internal"])
+    assert internal["internal_request_trace_id"] == "trace-1"
+    assert internal["metadata"]["instructions"]["resourceSpecs"][0]["node"] == (
+        "Compute"
+    )
+    assert "raw-catalog-marker" not in result["_internal"]
 
 
 def test_form_adapter_normalizes_omitted_optional_strings(monkeypatch) -> None:

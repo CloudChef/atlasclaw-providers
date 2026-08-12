@@ -105,7 +105,7 @@ tool_catalog_detail_parameters: |
     "required": ["catalog_id"]
   }
 tool_submit_name: "smartcmp_submit_request"
-tool_submit_description: "Submit resource request to SmartCMP. RULES: (1) NEVER claim submitted without calling this tool. (2) Reuse resolved workflow lookup evidence, build the preview from the exact generated instruction contract, mask credential secrets, and wait for user confirmation BEFORE calling. (3) json_body is REQUIRED. (4) catalogId MUST be UUID from catalog metadata id field. (5) Same-type multi-instance requests must use the selected catalog's declared count field, or fallback top-level quantity when no such field exists, without duplicating resourceSpecs; per-instance differences belong in request-decomposition-agent. See Field Placement table in skill body for exact structure rules."
+tool_submit_description: "Submit resource request to SmartCMP. RULES: (1) NEVER claim submitted without calling this tool. (2) Reuse resolved workflow lookup evidence, display a preview from the exact generated instruction contract with credential secrets masked, and wait for user confirmation BEFORE calling. The displayed masked preview is not the submit body. (3) json_body is REQUIRED and must contain the corresponding original secret values; never submit ***, ******, or another preview mask. If an original secret is unavailable, stop, collect it again, revalidate, and obtain fresh confirmation. (4) catalogId MUST be UUID from catalog metadata id field. (5) Same-type multi-instance requests must use the selected catalog's declared count field, or fallback top-level quantity when no such field exists, without duplicating resourceSpecs; per-instance differences belong in request-decomposition-agent. See Field Placement table in skill body for exact structure rules."
 tool_submit_entrypoint: "scripts/adapter.py:submit"
 tool_submit_groups:
   - cmp
@@ -123,7 +123,7 @@ tool_submit_parameters: |
     "properties": {
       "json_body": {
         "type": "string",
-        "description": "REQUIRED. The complete request JSON as a string. For cloud/resource requests: include catalogId, catalogName, businessGroupId, name, resourceSpecs built from generated Markdown instructions.resourceSpecs, and optional top-level params built from instructions.params. Put resourceBundleId at resourceSpecs[].resourceBundleId, resourceBundleTags at resourceSpecs[].resourceBundleTags, resourceBundleParams under resourceSpecs[].resourceBundleParams, resource-spec params under resourceSpecs[].params, resource-spec fields under resourceSpecs[] directly, and catalog form params under top-level params. For same-type multi-instance requests, use the selected catalog's declared quantity/count field in its declared location; when no catalog field exists, add top-level quantity. Do not duplicate resourceSpecs just to represent count. If resourceBundleTags is used, omit resourceBundleId for the same resource spec. For tickets: build genericRequest.description and optional genericRequest.processForm from generated Markdown instructions.genericRequest; for tickets without Markdown, include catalogId, catalogName, businessGroupId, name, and genericRequest {description}. Do NOT include userLoginId (auto-injected by script). FORBIDDEN fields: never add priority, category, requestor, parameters, impactScope, urgency, contactName, or any field not listed above. DO NOT omit this parameter."
+        "description": "REQUIRED. The complete unmasked request JSON as a string. It must contain each corresponding original secret value and must never contain preview masks such as *** or ******. For cloud/resource requests: include catalogId, catalogName, businessGroupId, name, resourceSpecs built from generated Markdown instructions.resourceSpecs, and optional top-level params built from instructions.params. Put resourceBundleId at resourceSpecs[].resourceBundleId, resourceBundleTags at resourceSpecs[].resourceBundleTags, resourceBundleParams under resourceSpecs[].resourceBundleParams, resource-spec params under resourceSpecs[].params, resource-spec fields under resourceSpecs[] directly, and catalog form params under top-level params. For same-type multi-instance requests, use the selected catalog's declared quantity/count field in its declared location; when no catalog field exists, add top-level quantity. Do not duplicate resourceSpecs just to represent count. If resourceBundleTags is used, omit resourceBundleId for the same resource spec. For tickets: build genericRequest.description and optional genericRequest.processForm from generated Markdown instructions.genericRequest; for tickets without Markdown, include catalogId, catalogName, businessGroupId, name, and genericRequest {description}. Do NOT include userLoginId (auto-injected by script). FORBIDDEN fields: never add priority, category, requestor, parameters, impactScope, urgency, contactName, or any field not listed above. DO NOT omit this parameter."
       }
     },
     "required": ["json_body"]
@@ -188,7 +188,7 @@ tool_facets_parameters: |
     "required": ["business_group_id"]
   }
 tool_resource_bundles_name: "smartcmp_list_resource_bundles"
-tool_resource_bundles_description: "List request-flow resource pools and resolve the active request fields for an exact selected or defaulted pool. Use when generated Markdown declares an active resourceBundleId or runtime_fields.resolver. With resource_bundle_id, pass catalogId, node, and current field values in placement_values; request options through placement_fields and follow the returned requestFields, targets, dependencies, missingRequiredFields, and configurationErrors. Requires selected business_group_id, component_type from generated Markdown catalog/component metadata, and node_type from resourceSpecs[].type. Fixed API filters: strategy=RB_POLICY_STATIC, enabled=true, readOnly=false. If resourceBundleId has ask:true, present the returned names and wait for the user's selection even when only one result exists. Ask the user to identify the resource-pool field and selected number when replying; never suggest that a bare number is sufficient."
+tool_resource_bundles_description: "List request-flow resource pools and resolve the active request fields for an exact selected or defaulted pool. Use when generated Markdown declares an active resourceBundleId or runtime_fields.resolver. Always pass catalog_id and node_template_name as explicit context; placement_values contains business field selections only. With resource_bundle_id, request options through placement_fields and follow the returned requestFields, targets, dependencies, missingRequiredFields, missingSelectionFields, and configurationErrors. Requires selected business_group_id, component_type from generated Markdown catalog/component metadata, and node_type from resourceSpecs[].type. Fixed API filters: strategy=RB_POLICY_STATIC, enabled=true, readOnly=false. If resourceBundleId has ask:true, present the returned names and wait for the user's selection even when only one result exists. Ask the user to identify the resource-pool field and selected number when replying; never suggest that a bare number is sufficient."
 tool_resource_bundles_entrypoint: "scripts/adapter.py:list_resource_bundles"
 tool_resource_bundles_group: "cmp"
 tool_resource_bundles_capability_class: "provider:smartcmp"
@@ -215,6 +215,14 @@ tool_resource_bundles_parameters: |
         "type": "string",
         "description": "REQUIRED. Node type from generated Markdown resourceSpecs[].type."
       },
+      "catalog_id": {
+        "type": "string",
+        "description": "REQUIRED. Selected catalog UUID from smartcmp_get_request_catalog metadata."
+      },
+      "node_template_name": {
+        "type": "string",
+        "description": "REQUIRED. Literal generated resourceSpecs[].node for the current request spec."
+      },
       "cloud_entry_type_id": {
         "type": "string",
         "description": "Optional cloud entry type id filter. Omit or pass empty string when not declared."
@@ -235,10 +243,10 @@ tool_resource_bundles_parameters: |
         "additionalProperties": {
           "type": "string"
         },
-        "description": "Catalog context and selected values. Encode boolean and number values as strings and array values as JSON array strings. Include catalogId and node whenever resource_bundle_id is supplied, then retain every selected field value while resolving later fields."
+        "description": "Selected business field values only. Encode boolean and number values as strings and array values as JSON array strings. Never include catalogId or node; retain every selected field value while resolving later fields."
       }
     },
-    "required": ["business_group_id", "component_type", "node_type"]
+    "required": ["business_group_id", "component_type", "node_type", "catalog_id", "node_template_name"]
   }
 tool_bgs_name: "smartcmp_list_available_bgs"
 tool_bgs_description: "List available business groups for a specific service catalog. Call this AFTER selecting a catalog to get the list of business groups the user can choose from. catalog_id MUST be the selected catalog metadata UUID, never the displayed list number. Use the returned id or name (depending on the catalog parameter key) for the business group field in the request body."
@@ -537,9 +545,16 @@ Status semantics:
    `instructions.topLevelFields`.
 6. Ask only for active required fields with no default, plus fields explicitly
    marked `ask: true`. Defaults are used silently.
-7. Reuse resolved workflow lookup evidence, show a schema-exact JSON preview
-   with credential secrets masked, ask for confirmation, and stop.
-8. After the user confirms, call `smartcmp_submit_request` with the preview JSON.
+7. Reuse resolved workflow lookup evidence. For every spec with an active
+   `resourceBundleId`, first require a successful latest exact resource-pool
+   revalidation whose returned item matches that ID, has `valid: true`, and has
+   empty `missingRequiredFields`, `missingSelectionFields`, and
+   `configurationErrors`. Only then show a schema-exact JSON preview with
+   credential secrets masked, ask for confirmation, and stop. A failed or
+   incomplete revalidation blocks both preview and confirmation.
+8. After the user confirms, call `smartcmp_submit_request` with the corresponding
+   unmasked request body. The displayed preview is presentation-only; restore
+   each original secret value and never submit a preview mask.
 
 Steps 1 through 3 are mandatory for every new request. Never ask the user to type a
 business group before calling `smartcmp_list_available_bgs`.
@@ -776,9 +791,10 @@ scope.
   Markdown does not declare it.
 - Put `resourceBundleParams.<key>` values under
   `resourceSpecs[].resourceBundleParams.<key>`.
-- For a selected or defaulted pool, include the catalog UUID as `catalogId` and
-  the generated resource-spec node as `node` in `placement_values`. Pass any
-  currently requested fields as `placement_fields`. The returned
+- For every resource-pool call, pass the catalog UUID as `catalog_id` and the
+  generated resource-spec node as `node_template_name`. Keep only business field
+  selections in `placement_values`; never put `catalogId` or `node` there. Pass
+  any currently requested fields as `placement_fields`. The returned
   `requestFields` is the authoritative active field set for that pool and the
   current selections.
 - When a spec declares `runtime_fields.resolver: resource_bundle_placement`,
@@ -792,9 +808,12 @@ scope.
   infer field names, dependencies, or request locations from a cloud platform
   or from another catalog.
 - Put `params.<key>` values under `resourceSpecs[].params.<key>`.
-- Collect every active field marked required or `ask: true`. Before submission,
-  resolve the selected pool once more with all selected values and submit only
-  when `missingRequiredFields` and `configurationErrors` are both empty.
+- Collect every active field marked required or `ask: true`. Before showing the
+  preview, resolve the selected pool once more with all selected values. Continue
+  only when the exact returned item matches the selected `resourceBundleId`, has
+  `valid: true`, and has empty `missingRequiredFields`,
+  `missingSelectionFields`, and `configurationErrors`. Otherwise stop before
+  preview and resolve the reported selection or configuration problem.
 - `logicTemplateId` is the independent logical OS-template field. When it is
   active without a default, query logical templates with the selected
   `resourceBundleId` plus catalog/node/OS filters and serialize the selected
@@ -939,9 +958,10 @@ for a value that cannot be taken from the user or a default.
 - `smartcmp_list_resource_bundles`: use when generated Markdown declares an
   active `resourceBundleId` without a default, or when the selected/defaulted
   resource pool must supply request-time fields. Pass the selected business
-  group id, `component_type`, `node_type`, requested `placement_fields`, the
-  exact `resource_bundle_id`, and `placement_values` containing `catalogId`,
-  `node`, and all selections. The tool applies fixed
+  group id, `component_type`, `node_type`, explicit `catalog_id`, explicit
+  `node_template_name`, requested `placement_fields`, the exact
+  `resource_bundle_id`, and `placement_values` containing only business field
+  selections. The tool applies fixed
   `strategy=RB_POLICY_STATIC`, `enabled=true`, and `readOnly=false` filters.
 - `smartcmp_list_flavors`: without `compute_profile_id`, resolve an active
   required `computeProfileId` from SmartCMP compute-profile data, or support the
@@ -1075,15 +1095,26 @@ after collecting `name` and description:
 
 Before submit:
 
-1. Show a short summary in the user's language.
-2. Show `JSON 预览` / `JSON Preview` with a fenced JSON block.
-3. Mask `credentialPassword` as `"******"`.
-4. Ask the user to confirm.
-5. Stop. Do not call `smartcmp_submit_request` until the user confirms.
+1. For each active `resourceBundleId`, verify that the latest exact
+   `smartcmp_list_resource_bundles` result matches the selected ID, has
+   `valid: true`, and has no missing or configuration fields. If this check
+   fails, stop without showing a preview or asking for confirmation.
+2. Show a short summary in the user's language.
+3. Show `JSON 预览` / `JSON Preview` with a fenced JSON block. This block is a
+   presentation-only copy, not the `json_body` passed to the submit tool.
+4. Mask `credentialPassword` as `"******"` only in that displayed copy. Preserve
+   the corresponding original value for the eventual request body.
+5. Ask the user to confirm.
+6. Stop. Do not call `smartcmp_submit_request` until the user confirms.
 
 After confirmation:
 
-- User says yes → call `smartcmp_submit_request` with `json_body`.
+- User says yes → call `smartcmp_submit_request` with the unmasked `json_body`
+  corresponding to the confirmed preview. Never submit `***`, `******`, or any
+  other preview mask as a secret value.
+- If an original secret is unavailable after confirmation, fail closed: do not
+  call submit. Collect the secret again, run exact revalidation again, display a
+  new masked preview, and ask for fresh confirmation.
 - User says no → ask what to change.
 - Any field added or changed after a preview or failed submission changes the
   request payload and invalidates every earlier confirmation. Show the updated

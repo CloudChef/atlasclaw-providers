@@ -52,6 +52,29 @@ from smartcmp_provider.operations.requests import (  # noqa: E402
 )
 
 
+def _redact_request_secrets(value: Any) -> Any:
+    """Clone request lookup data while masking credential and password fields."""
+
+    if isinstance(value, dict):
+        redacted: dict[str, Any] = {}
+        field_key = str(value.get("key") or "").replace("_", "").replace("-", "").casefold()
+        secret_field = field_key in {"credentialpassword", "password"}
+        for key, item in value.items():
+            normalized_key = str(key).replace("_", "").replace("-", "").casefold()
+            redacted[key] = (
+                "***"
+                if normalized_key in {"credentialpassword", "password"}
+                or (secret_field and normalized_key == "value")
+                else _redact_request_secrets(item)
+            )
+        return redacted
+    if isinstance(value, list):
+        return [_redact_request_secrets(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_request_secrets(item) for item in value)
+    return value
+
+
 async def list_services(
     ctx: RunContext[Any],
     keyword: str | None = None,
@@ -106,6 +129,12 @@ async def get_request_catalog(
         return tool_result(
             result,
             summary="Loaded the selected SmartCMP request catalog.",
+            internal=_redact_request_secrets(
+                {
+                    "internal_request_trace_id": request.context.trace_id,
+                    "metadata": result.metadata,
+                }
+            ),
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -134,7 +163,12 @@ async def submit(
             if request_ids and not result.overall_failed
             else "SmartCMP request submission did not return a confirmed Request ID."
         )
-        return tool_result(result, summary=summary)
+        projected = tool_result(result, summary=summary)
+        if request_ids and not result.overall_failed:
+            # The Skill success contract intentionally accepts only the
+            # canonical user-facing Request ID, not internal record UUIDs.
+            projected["requestId"] = request_ids[0]
+        return projected
     except (json.JSONDecodeError, ValueError, RuntimeError) as error:
         return tool_error(error)
 
@@ -195,6 +229,8 @@ async def list_resource_bundles(
     business_group_id: str,
     component_type: str,
     node_type: str,
+    catalog_id: str,
+    node_template_name: str,
     cloud_entry_type_id: str | None = None,
     resource_bundle_id: str | None = None,
     placement_fields: list[str] | None = None,
@@ -203,22 +239,56 @@ async def list_resource_bundles(
     """List resource pools and Provider-resolved catalog placement choices."""
 
     try:
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             list_resource_bundles_operation,
             ResourceBundleQuery(
                 business_group_id=business_group_id,
                 component_type=component_type,
                 node_type=node_type,
+                catalog_id=catalog_id,
+                node_template_name=node_template_name,
                 cloud_entry_type_id=cloud_entry_type_id or "",
                 resource_bundle_id=resource_bundle_id or "",
                 placement_fields=tuple(placement_fields or ()),
                 placement_values=placement_values or {},
             ),
         )
+        internal = None
+        if resource_bundle_id:
+            structured_result = result.model_dump(mode="json")
+            compact_items = [
+                {
+                    key: item[key]
+                    for key in (
+                        "id",
+                        "name",
+                        "cloudEntryTypeId",
+                        "requestFields",
+                        "missingRequiredFields",
+                        "missingSelectionFields",
+                        "configurationErrors",
+                        "valid",
+                    )
+                    if key in item
+                }
+                for item in structured_result["items"]
+            ]
+            internal = _redact_request_secrets(
+                {
+                    "internal_request_trace_id": request.context.trace_id,
+                    "catalogId": catalog_id,
+                    "node": node_template_name,
+                    "businessGroupId": business_group_id,
+                    "resourceBundleId": resource_bundle_id,
+                    "placementValues": placement_values or {},
+                    "items": compact_items,
+                }
+            )
         return tool_result(
             result,
             summary=f"Found {len(result.items)} resource pools.",
+            internal=internal,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
