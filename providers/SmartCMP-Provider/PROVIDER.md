@@ -25,6 +25,10 @@ keywords:
   - 部门
   - 项目
   - resource pool
+  - recycle bin
+  - permanent removal
+  - 回收站
+  - 永久卸除
   - approval
   - alarm
   - alert
@@ -47,7 +51,7 @@ keywords:
 
 capabilities:
   - Browse available services, business-group scopes such as tenant/租户/部门/BU/项目, resource pools, resources, cloud hosts, host details, templates, and other reference data before making a request
-  - Start or stop existing cloud resources or virtual machines after resolving their SmartCMP resource IDs
+  - Start, stop, tear down, delete metadata for, or permanently remove existing cloud resources or deployments after resolving one exact SmartCMP target
   - Submit self-service requests for virtual machines, cloud resources, application environments, or ticket/work order services
   - View pending approvals and approve or reject service requests
   - List alerts, analyze alert context, and update alert status with remediation guidance
@@ -63,7 +67,7 @@ use_when:
   - User wants to request a VM, database, application environment, or other service catalog item
   - User wants to submit a ticket or work order for infrastructure or support needs
   - User asks what services, business groups, tenants, departments, projects, resource pools, resources, or cloud hosts are available before making a request
-  - User wants to start or stop an existing cloud resource or virtual machine
+  - User wants to start, stop, tear down, delete metadata for, or permanently remove an existing cloud resource, virtual machine, or recycled deployment
   - User needs to approve or reject a request
   - User wants to check pending approvals
   - User wants to inspect, analyze, or operate on resource alarms
@@ -307,7 +311,7 @@ CMP_URL=https://cmp.example.com
 | Skill | Type | Description | Key Operations |
 |-------|------|-------------|----------------|
 | `resource-pool` | Directory Query | Standalone listing of all resource pools from the CMP UI directory endpoint | `smartcmp_list_all_resource_pools` |
-| `resource` | Query + Analysis + Day2 Operation | List and inspect resources, analyze one resource's Security posture and associated violations, discover current-user operations, and execute no-parameter resource operations | `smartcmp_list_all_resource`, `smartcmp_resource_detail`, `smartcmp_analyze_resource_security`, `smartcmp_list_resource_security_violations`, `smartcmp_list_resource_operations`, `smartcmp_operate_resource` |
+| `resource` | Query + Analysis + Day2 Operation | List and inspect resources, analyze one resource's Security posture and associated violations, discover current-user operations, browse recycle-bin resources, and execute confirmed resource or permanent-removal operations | `smartcmp_list_all_resource`, `smartcmp_resource_detail`, `smartcmp_analyze_resource_security`, `smartcmp_list_resource_security_violations`, `smartcmp_list_resource_operations`, `smartcmp_operate_resource`, `smartcmp_list_recycled_resources`, `smartcmp_permanently_remove_recycled_resource` |
 | `datasource` | Data Query | Read-only business-group, application, component, template and image directories | `smartcmp_list_all_business_groups`, `smartcmp_list_applications`, `smartcmp_list_components`, `smartcmp_query_logical_templates`, `smartcmp_query_images` |
 | `request` | Provisioning | Cloud resource provisioning requests that select a logical template, then follow the generated instruction's physical-template or cloud-image branch | `smartcmp_list_services`, `smartcmp_get_request_catalog`, `smartcmp_list_logical_templates`, `smartcmp_list_physical_templates`, `smartcmp_list_images`, `smartcmp_submit_request`, `smartcmp_get_request_status` |
 | `approval` | Workflow | Approval workflow management | `smartcmp_list_pending`, `smartcmp_get_request_detail`, `smartcmp_analyze_approval_request`, `smartcmp_approve`, `smartcmp_reject` |
@@ -335,15 +339,19 @@ Use `smartcmp_list_all_resource_pools`, optionally with `query_value`.
 
 List all resources or all cloud hosts directly from the CMP UI list endpoint,
 inspect one cloud host by resource ID with the `/nodes/{id}/view` evidence view, and
-list or execute current-user no-parameter operations on existing resources.
+list or execute current-user no-parameter operations on existing resources or
+their recycled deployments.
 Use this when the user says "查看我的云资源", "查看所有资源", "查看我的云主机",
 "查看所有云主机", "查看某个云主机详情", "分析某个云主机属性",
-"查看可执行操作", "执行资源操作", "云资源开机", "云资源关机", "启动云主机", or "停止云主机".
+"查看可执行操作", "执行资源操作", "云资源开机", "云资源关机", "启动云主机",
+"停止云主机", "卸除资源", "删除资源元数据", or "从回收站永久卸除资源".
 
 Use `smartcmp_list_all_resource`, `smartcmp_resource_detail`,
 `smartcmp_analyze_resource_security`,
 `smartcmp_list_resource_security_violations`,
-`smartcmp_list_resource_operations`, and `smartcmp_operate_resource`.
+`smartcmp_list_resource_operations`, `smartcmp_operate_resource`,
+`smartcmp_list_recycled_resources`, and
+`smartcmp_permanently_remove_recycled_resource`.
 
 Resource Security analysis combines bounded resource facts, LLM posture
 inference, and CMP-confirmed associated violations by default. It keeps those
@@ -354,6 +362,35 @@ resource has no violations.
 The operation list comes from `GET /nodes/{category}/{id}/resource-actions`
 with the current user's SmartCMP credentials. It does not use resource-type
 definition endpoints as executable-operation fallback.
+
+Removal follows three separate SmartCMP operations:
+
+1. `tear_down_in_resource`: active → stopped or torn down;
+2. `delete_metadata_in_resource`: node metadata deleted, node
+   `status=deleted`, and owning deployment placed in the recycle bin;
+3. `permanently_delete_deployment`: recycled deployment permanently removed.
+
+The user may locate the target with `resource_id`, `resource_name`,
+`deployment_id`, or `deployment_name`. A name must resolve to exactly one
+visible object. Zero matches or ambiguous matches fail before any write. When a
+resource is supplied for permanent removal, resolve and retain its owning
+recycle-bin deployment; do not assume a deployment contains only that resource.
+
+Automatic exact-locator resolution scans at most 2,000 recycled deployments
+and fails closed beyond that bound. For list browsing, `total`, `page`, and
+`size` describe deployments; expanded `items` are resource rows and may contain
+several rows for one deployment.
+
+Permanent removal is irreversible and applies to the entire deployment. Before
+submission, show the resolved deployment, warn that every resource in it is in
+scope, and require explicit confirmation of that impact. Bind the confirmed
+deployment ID and complete resource-ID set to the write, and fail before POST
+if the freshly resolved scope differs. After submission,
+verify the deployment reaches `deleted=true` and `state=DELETED` and exposes no
+recycled actions. It may remain listed until SmartCMP's retention period
+expires, after which disappearance is also a valid completed outcome. Node
+`status=deleted` is expected after metadata deletion and cannot establish that
+permanent removal completed.
 
 #### datasource
 

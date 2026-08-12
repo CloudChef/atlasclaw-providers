@@ -124,6 +124,10 @@ def shared_capabilities() -> tuple[CapabilitySpec, ...]:
         RequestSubmissionResult,
     )
     from smartcmp_provider.models.resources import (
+        PermanentResourceRemovalInput,
+        PermanentResourceRemovalResult,
+        RecycledResourceListResult,
+        RecycledResourceQuery,
         ResourceDetailQuery,
         ResourceDetailView,
         ResourceListQuery,
@@ -319,6 +323,19 @@ def shared_capabilities() -> tuple[CapabilitySpec, ...]:
             "smartcmp_operate_resource",
             ResourceActionInput,
             ResourceActionResult,
+            destructive=True,
+        ),
+        read(
+            "smartcmp.resources.recycle_bin.list",
+            "smartcmp_list_recycled_resources",
+            RecycledResourceQuery,
+            RecycledResourceListResult,
+        ),
+        write(
+            "smartcmp.resources.recycle_bin.permanently_remove",
+            "smartcmp_permanently_remove_recycled_resource",
+            PermanentResourceRemovalInput,
+            PermanentResourceRemovalResult,
             destructive=True,
         ),
         read(

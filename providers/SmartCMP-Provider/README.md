@@ -137,7 +137,7 @@ for the complete Cookie and message contract.
 - **Approval Management** - View pending approval tasks, approve requests, or reject requests
 - **Alarm and Resource Health** - List and analyze alerts, collect component-specific resource monitoring evidence, and run explicit alert status operations
 - **Directory Queries** - List business-group scopes such as tenant/租户/部门/BU/项目, resource pools, resources, or cloud hosts from the same UI directory endpoints used by CMP
-- **Resource Analysis and Operations** - Analyze one resource across alerts, monitoring health, Security posture and associated violations, and cost optimization, or run current-user executable day2 operations
+- **Resource Analysis and Operations** - Analyze one resource across alerts, monitoring health, Security posture and associated violations, and cost optimization, or run current-user executable day2 operations, including the staged tear-down, metadata-deletion, and recycle-bin permanent-removal lifecycle
 - **Data Queries** - Query service catalogs, applications, templates, images, and other reference data
 - **Intelligent Agents** - Automated pre-approval and request decomposition capabilities
 - **Cost Optimization** - Review optimization recommendations or directly analyze a resource's optimization potential, execute SmartCMP-native fixes for existing findings, and track remediation progress
@@ -268,12 +268,16 @@ operations, and operate on SmartCMP resources or cloud hosts.
 - 执行云主机操作
 - 把某个云资源关机
 - 把某个云主机开机
+- 卸除云资源并删除资源元数据
+- 从 CMP 回收站永久卸除资源
 - Query resources or virtual machines by keyword without entering the request workflow
 
 **Tools:** `smartcmp_list_all_resource`, `smartcmp_resource_detail`,
 `smartcmp_analyze_resource_security`,
 `smartcmp_list_resource_security_violations`,
-`smartcmp_list_resource_operations`, and `smartcmp_operate_resource`.
+`smartcmp_list_resource_operations`, `smartcmp_operate_resource`,
+`smartcmp_list_recycled_resources`, and
+`smartcmp_permanently_remove_recycled_resource`.
 
 The dynamic **Analyze** action on a resolved resource page uses the `resource`
 Skill as a coordinator. It keeps one exact internal resource target and calls
@@ -290,6 +294,39 @@ whether a start or stop action is needed.
 The operation list comes from `GET /nodes/{category}/{id}/resource-actions`
 with the current user's SmartCMP credentials. It does not use resource-type
 definition endpoints as executable-operation fallback.
+
+Resource removal has three distinct stages:
+
+1. `tear_down_in_resource` moves an active resource to its stopped or
+   torn-down state.
+2. `delete_metadata_in_resource` deletes the node metadata. The node becomes
+   `status=deleted`, and its owning deployment enters the CMP recycle bin.
+3. `permanently_delete_deployment` permanently removes that recycled
+   deployment. Because this is a deployment-level action, it can affect every
+   resource in the same deployment.
+
+The resulting progression is **active → stopped/torn down → node metadata
+deleted and deployment recycled → deployment permanently removed**. Users may
+identify a target with `resource_id`, `resource_name`, `deployment_id`, or
+`deployment_name`. Names must resolve to exactly one visible object; missing or
+ambiguous matches are rejected before an operation is submitted.
+
+Automatic exact-locator resolution currently scans at most 2,000 recycled
+deployments and fails closed beyond that bound. In an unfiltered list response,
+`total`, `page`, and `size` describe deployments, while `items` contains expanded
+resource rows and may contain several rows per deployment.
+
+Before permanent removal, the response must show the resolved deployment, warn
+that all resources in it are in scope, and require explicit confirmation of
+that irreversible impact. The confirmed deployment ID and complete resource-ID
+set are bound to the write; if either changes during re-resolution, the
+operation stops for a fresh display and confirmation. Submission does not by
+itself prove completion. The
+deployment must reach `deleted=true` and `state=DELETED`, and its recycled
+operation list must be empty. SmartCMP may retain the deleted deployment in the
+recycle-bin list for a configured period; disappearance after retention is also
+a completed outcome. Node `status=deleted` alone proves only metadata deletion,
+not permanent removal.
 
 Resource operation output is intentionally concise. Successful operation results
 show only the action, resource ID(s), submitted flag, message, and verification

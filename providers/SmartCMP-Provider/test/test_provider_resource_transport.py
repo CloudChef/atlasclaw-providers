@@ -1248,7 +1248,6 @@ def test_windows_compute_uses_shared_compute_cloud_schema() -> None:
     ("action", "extra"),
     [
         ("Tear Down", {}),
-        ("permanently_delete_deployment", {"recycle": True, "manual": True}),
     ],
 )
 def test_deployment_operation_rechecks_and_submits_once(action: str, extra: dict) -> None:

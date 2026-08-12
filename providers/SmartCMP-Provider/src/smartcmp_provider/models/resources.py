@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from smartcmp_provider.models.object_operations import AvailableOperation
 
 ResourceScope = Literal["all_resources", "virtual_machines"]
+RECYCLE_BIN_PAGE_SIZE_MAX = 100
 
 
 class ResourceListQuery(BaseModel):
@@ -29,6 +30,72 @@ class ResourceListResult(BaseModel):
 
     items: tuple[dict[str, Any], ...] = ()
     total: int | None = None
+
+
+class RecycleBinLocator(BaseModel):
+    """Identify one recycled resource or deployment by one exact field."""
+
+    model_config = ConfigDict(frozen=True)
+
+    resource_id: str = ""
+    resource_name: str = ""
+    deployment_id: str = ""
+    deployment_name: str = ""
+
+
+class RecycledResourceQuery(RecycleBinLocator):
+    """Select recycled resources, optionally through one exact locator.
+
+    At most one locator may be supplied. Locator uniqueness is checked against
+    the current credential's recycle bin before a destructive operation.
+    """
+
+    page: int = Field(default=1, ge=1)
+    size: int = Field(default=20, ge=1, le=RECYCLE_BIN_PAGE_SIZE_MAX)
+
+
+class RecycledResourceListResult(BaseModel):
+    """Return resource rows with pagination for the deployment source page.
+
+    ``total``, ``page``, and ``size`` describe recycled deployments, while
+    ``items`` contains the expanded resource rows. One deployment can therefore
+    produce multiple items and the two counts must not be compared directly.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    items: tuple[dict[str, Any], ...] = ()
+    total: int = Field(default=0, ge=0)
+    page: int = Field(default=1, ge=1)
+    size: int = Field(default=20, ge=1)
+
+
+class PermanentResourceRemovalInput(RecycleBinLocator):
+    """Request permanent removal through exactly one recycled-object locator.
+
+    ``confirmed`` is an independent safety boundary and must be true even when
+    an adapter already displayed a confirmation prompt. The two required
+    ``expected_*`` values bind that confirmation to the exact deployment scope
+    returned by the preceding recycle-bin list call.
+    """
+
+    confirmed: bool = False
+    expected_deployment_id: str
+    expected_resource_ids: tuple[str, ...]
+
+
+class PermanentResourceRemovalResult(BaseModel):
+    """Report an accepted permanent-removal submission, never completion."""
+
+    model_config = ConfigDict(frozen=True)
+
+    action: str = "permanently_delete_deployment"
+    deployment_id: str
+    deployment_name: str = ""
+    affected_resources: tuple[dict[str, Any], ...] = ()
+    submitted: bool = True
+    message: str
+    verification_hint: str
 
 
 class ResourceDetailQuery(BaseModel):

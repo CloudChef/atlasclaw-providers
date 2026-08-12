@@ -1,6 +1,6 @@
 ---
 name: "resource"
-description: "SmartCMP resource browsing, detail inspection, resource-first Security posture and violation analysis, comprehensive single-resource analysis coordination, and user-scoped operations. Use when the user asks whether a named or selected resource is secure or has Security violations, wants an overall resource review across alerts, health, Security, and cost, or wants to browse, inspect, or operate a resource. CMP-wide policy posture and violation-object workflows belong to security-compliance."
+description: "SmartCMP resource browsing, detail inspection, recycle-bin management, resource-first Security posture and violation analysis, comprehensive single-resource analysis coordination, and user-scoped operations. Use when the user asks whether a named or selected resource is secure or has Security violations, wants an overall resource review across alerts, health, Security, and cost, or wants to browse, inspect, operate, or permanently remove a recycled resource. CMP-wide policy posture and violation-object workflows belong to security-compliance."
 provider_type: "smartcmp"
 instance_required: "true"
 
@@ -43,6 +43,8 @@ triggers:
   - 查看云主机可执行操作
   - 执行资源操作
   - 执行云主机操作
+  - 查看资源回收站
+  - 永久卸除资源
   - list resources
   - show resources
   - list virtual machines
@@ -62,6 +64,8 @@ triggers:
   - run resource operation
   - execute day-2 operation
   - run day-2 change
+  - list recycled resources
+  - permanently remove recycled resource
   - change resource state
   - start resource
   - stop resource
@@ -91,6 +95,7 @@ use_when:
   - User wants to search resources or virtual machines by keyword through the CMP UI list endpoint
   - User wants to see which resource operations the current SmartCMP user can execute on a resource
   - User wants to execute an enabled no-parameter operation on an existing SmartCMP cloud resource or virtual machine
+  - User wants to browse resources in the SmartCMP recycle bin or permanently remove one recycled deployment through a resource-centered workflow
 
 avoid_when:
   - User wants the CMP-wide Security compliance overview, global violation list, or one violation-object workflow (use security-compliance skill)
@@ -109,6 +114,7 @@ examples:
   - "List executable operations for vm-a"
   - "Stop vm-a"
   - "Execute create_snapshot on this virtual machine"
+  - "Permanently remove recycled resource vm-a"
   - "Start the first virtual machine"
   - "Stop resource 3615d791-36b4-4fa1-be61-f8550c7fbcb8"
 
@@ -243,11 +249,51 @@ tool_power_parameters: |
       },
       "action": {
         "type": "string",
-        "description": "Exact SmartCMP operation ID returned by smartcmp_list_resource_operations, such as restart, refresh, Tear Down, or permanently_delete_deployment."
+        "description": "Exact SmartCMP operation ID returned by smartcmp_list_resource_operations, such as restart, refresh, or Tear Down. Permanent recycle-bin removal must use smartcmp_permanently_remove_recycled_resource."
       }
     },
     "required": ["resource_ids", "action"]
   }
+
+tool_recycle_list_name: "smartcmp_list_recycled_resources"
+tool_recycle_list_description: "List recycle-bin resources with their owning deployments. Accept at most one exact resource/deployment ID or name. Pagination describes deployments; items are expanded resource rows. Use immediately before permanent removal to obtain the complete affected scope."
+tool_recycle_list_entrypoint: "scripts/adapter.py:list_recycled_resources"
+tool_recycle_list_groups:
+  - cmp
+  - resource
+  - recycle-bin
+tool_recycle_list_parameters:
+  type: object
+  properties:
+    resource_id: {type: string, description: "Exact recycled resource ID; use only one locator."}
+    resource_name: {type: string, description: "Exact recycled resource name; use only one locator."}
+    deployment_id: {type: string, description: "Exact recycle-bin deployment ID; use only one locator."}
+    deployment_name: {type: string, description: "Exact recycle-bin deployment name; use only one locator."}
+    page: {type: integer, description: "One-based deployment page.", default: 1, minimum: 1}
+    size: {type: integer, description: "Deployment page size.", default: 20, minimum: 1, maximum: 100}
+
+tool_recycle_purge_name: "smartcmp_permanently_remove_recycled_resource"
+tool_recycle_purge_description: "Permanently remove one recycle-bin deployment. Requires exactly one resource/deployment locator, explicit confirmation, and the deployment/resource scope returned by a fresh recycle-bin read. A successful response means submitted, not completed."
+tool_recycle_purge_entrypoint: "scripts/adapter.py:permanently_remove_recycled_resource"
+tool_recycle_purge_groups:
+  - cmp
+  - resource
+  - recycle-bin
+tool_recycle_purge_result_mode: "tool_only_ok"
+tool_recycle_purge_parameters:
+  type: object
+  properties:
+    resource_id: {type: string, description: "Exact recycled resource ID; provide exactly one locator."}
+    resource_name: {type: string, description: "Exact recycled resource name; provide exactly one locator."}
+    deployment_id: {type: string, description: "Exact recycle-bin deployment ID; provide exactly one locator."}
+    deployment_name: {type: string, description: "Exact recycle-bin deployment name; provide exactly one locator."}
+    expected_deployment_id: {type: string, description: "Deployment ID from affected_scope."}
+    expected_resource_ids:
+      type: array
+      items: {type: string}
+      description: "Complete resource_ids from affected_scope; use [] for deployment-only scope."
+    confirmed: {type: boolean, description: "True after confirming the displayed scope.", default: false}
+  required: [expected_deployment_id, expected_resource_ids, confirmed]
 
 # Comprehensive-analysis aliases deliberately point at the existing domain
 # scripts. Provider skill projection is scoped to one selected skill, so these
@@ -454,8 +500,8 @@ tool_comprehensive_cost_parameters: |
 # resource
 
 Browse SmartCMP resources, inspect cloud host details, coordinate comprehensive
-single-resource analysis, list current-user executable operations, and execute
-enabled no-parameter resource operations.
+single-resource analysis, manage recycle-bin resources, list current-user
+executable operations, and execute enabled no-parameter resource operations.
 
 ## Purpose
 
@@ -469,6 +515,7 @@ comprehensive analysis coordination, and day2 resource operations.
 - Coordinate existing domain tools for comprehensive single-resource analysis without duplicating their evidence collection or LLM verdict rules
 - Use `GET /nodes/{category}/{id}/resource-actions` to list enabled no-parameter operations executable by the current SmartCMP user
 - Use `POST /nodes/resource-operations` for immediate no-parameter resource operations
+- Manage deployment-oriented recycle-bin records through resource rows and a confirmed permanent-removal workflow.
 
 ## Scope Rules
 
@@ -554,6 +601,24 @@ When operation intent is present, a resource lookup is only a target-resolution 
    - After explicit confirmation, call `smartcmp_operate_resource` with concrete resource UUIDs or detail URLs and the operation ID.
    - The latest explicit operation command supersedes older unfinished operation intent. For example, if the previous turn was about snapshots but the latest user message says `stop 1 vm-a`, handle `stop`.
 
+## Recycle-bin permanent removal
+
+Removal is `tear_down_in_resource` → `delete_metadata_in_resource` →
+`permanently_delete_deployment`; node `status=deleted` proves only the second stage.
+
+1. Call `smartcmp_list_recycled_resources` with zero or one of `resource_id`,
+   `resource_name`, `deployment_id`, or `deployment_name`. Names must match exactly;
+   ambiguity fails closed. Pagination counts deployments, while `items` are resource
+   rows. Exact lookup scans at most 2,000 deployments.
+2. Freshly list the selected target, display its deployment and every affected
+   resource, warn that removal is irreversible, then stop for explicit confirmation.
+3. After confirmation, call `smartcmp_permanently_remove_recycled_resource` once
+   with the same locator, `expected_deployment_id`, complete
+   `expected_resource_ids`, and `confirmed=true`. Scope/action changes require a
+   fresh confirmation; unknown outcomes must not be retried.
+4. Report `submitted`, not completed. Completion requires deployment
+   `deleted=true`, `state=DELETED`, and no recycled actions, or later disappearance.
+
 ## Critical Rules
 
 - Do not call security-compliance for ordinary resource browsing, detail, or posture requests. Use `smartcmp_analyze_resource_security` for a resource-first Security question and security-compliance only for CMP-wide or violation-object workflows.
@@ -568,6 +633,7 @@ When operation intent is present, a resource lookup is only a target-resolution 
   not use definition-level or built-in action endpoints as fallback.
 - Only show enabled no-parameter operations as executable choices. Operations that are disabled, web-only, have `inputsForm`, or require non-empty `parameters` are outside this tool's execution scope.
 - **NEVER claim a resource operation was submitted or succeeded without actually calling `smartcmp_operate_resource`.** You must call the tool and receive a real response before telling the user the operation is done.
+- **NEVER pass `permanently_delete_deployment` to `smartcmp_operate_resource`; use the dedicated confirmed workflow above.**
 - **Before calling the operation tool, confirm with the user:** show the target resource name + operation ID/name, ask `Confirm this operation?`, and STOP. An exact operation command made after that resource and operation were just displayed is the confirmation; call the tool instead of adding a redundant confirmation turn.
 - After a resource operation succeeds, respond with only the action, resource ID(s), submitted status, message, and verification hint. Do not print raw request payloads or raw response details.
 - Resolve every target to a concrete SmartCMP resource UUID before calling `smartcmp_operate_resource`.
@@ -606,7 +672,7 @@ Never show:
 
 ## Handlers and helpers
 
-All six resource-owned Tool commands are co-located in `scripts/adapter.py`:
+All eight resource-owned Tool commands are co-located in `scripts/adapter.py`:
 
 | Handler | Description |
 |--------|-------------|
@@ -616,6 +682,8 @@ All six resource-owned Tool commands are co-located in `scripts/adapter.py`:
 | `scripts/adapter.py:list_resource_security_violations` | Scan root-category Security violations and retain exact resource-ID matches with coverage |
 | `scripts/adapter.py:list_resource_operations` | List enabled no-parameter operations executable by the current SmartCMP user for one resource |
 | `scripts/adapter.py:operate_resource` | Submit SmartCMP no-parameter resource operations for one or more resource IDs |
+| `scripts/adapter.py:list_recycled_resources` | Project recycle-bin deployments as resource rows and support resource/deployment locators |
+| `scripts/adapter.py:permanently_remove_recycled_resource` | Re-resolve and submit one explicitly confirmed permanent recycle-bin removal |
 
 `scripts/_resource_object_actions.py` remains separate because the embedded
 assistant Context resolver calls it to build resource page actions. It is not
