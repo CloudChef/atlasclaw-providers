@@ -1247,6 +1247,27 @@ def _append_lookup_option_errors(
             f"Lookup field '{field_name}' contains a value that is not "
             "selectable for the current request context."
         )
+        return
+    options_by_id = {str(option.get("id")): option for option in options}
+    for selected_value in selected_values:
+        properties = options_by_id[str(selected_value)].get("properties")
+        if not isinstance(properties, dict):
+            continue
+        allocation_method = str(
+            properties.get("ipAllocationMethod") or ""
+        ).casefold()
+        available_ip_size = properties.get("availableIpSize")
+        if (
+            allocation_method == "ip_pool"
+            and isinstance(available_ip_size, (int, float))
+            and not isinstance(available_ip_size, bool)
+            and available_ip_size <= 0
+        ):
+            configuration_errors.append(
+                f"Lookup field '{field_name}' selects an IP pool with no "
+                "available IP addresses."
+            )
+            return
 
 
 def _field_type(schema: dict[str, Any]) -> str:

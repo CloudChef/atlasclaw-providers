@@ -127,7 +127,7 @@ async def submit_request(
             ),
         )
         outcomes.append(outcome)
-        if outcome.outcome == "failed":
+        if outcome.outcome in {"failed", "initialization_failed"}:
             overall_failed = True
     return RequestSubmissionResult(
         normalized_body=normalized_body,

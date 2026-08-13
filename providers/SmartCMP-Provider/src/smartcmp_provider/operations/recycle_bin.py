@@ -152,6 +152,21 @@ async def permanently_remove_recycled_resource(
             trace_id=client.request.context.trace_id,
         )
     deployment_id = next(iter(deployment_ids))
+    owning_deployment = next(
+        (
+            item.get("owning_deployment")
+            for item in rows
+            if isinstance(item.get("owning_deployment"), dict)
+        ),
+        {},
+    )
+    if owning_deployment.get("deleted") is True:
+        raise SmartCmpValidationError(
+            "The recycled deployment is a deleted tombstone and has no "
+            "executable permanent-removal action; refresh the recycle bin "
+            "instead of resubmitting deletion.",
+            trace_id=client.request.context.trace_id,
+        )
     deployment_name = next(
         (
             str(item.get("deployment_name") or "").strip()
@@ -520,11 +535,12 @@ async def _expand_deployments(
             payload,
             deployment_id=deployment_id,
         )
-        operations = (
-            await _fetch_recycled_deployment_actions(client, deployment_id)
-            if include_actions
-            else []
-        )
+        operations = []
+        if include_actions and deployment.get("deleted") is not True:
+            operations = await _fetch_recycled_deployment_actions(
+                client,
+                deployment_id,
+            )
         rows.extend(
             _project_deployment_rows(
                 client,
@@ -671,6 +687,9 @@ def _project_deployment_rows(
                     "state": deployment_state,
                     "deleted": deployment_deleted,
                     "recycled": deployment_recycled,
+                    "recycle_delete_time": deployment.get(
+                        "recycleDeleteTime"
+                    ),
                 },
                 "affected_scope": {
                     "deployment_id": deployment_id,

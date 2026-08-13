@@ -268,14 +268,14 @@ tool_bgs_parameters: |
     "required": ["catalog_id"]
   }
 tool_flavors_name: "smartcmp_list_flavors"
-tool_flavors_description: "Resolve the two request flavor fields declared by generated Markdown. Without compute_profile_id, list requestable MACHINE compute profiles and use the selected id as computeProfileId. When flavorId is also active, call again with the selected compute_profile_id and resource_bundle_id; this returns mapped cloud flavors whose selected id must be used as flavorId. Pass catalog_id and node_template_name when known for the compute-profile query. Omit resource_bundle_id only for an intentional global compute-profile query; it is required for a cloud-flavor query. For any ask:true field, show the current filtered names and ask the user to identify the pending field and selected number instead of replying with a bare number or typed specification."
+tool_flavors_description: "Resolve the request flavor fields declared by generated Markdown. Without compute_profile_id, list requestable MACHINE compute profiles and use the selected id as computeProfileId. When flavorId is also active, call again with the selected compute_profile_id and resource_bundle_id unless the exact selected resource-pool item has cloudEntryTypeId equal to yacmp:cloudentry:type:vsphere. For that exact vSphere platform and only after computeProfileId is resolved, SmartCMP resolves flavorId from the compute profile: skip the cloud-flavor query and omit flavorId from preview and submit JSON. Never send an empty flavorId or copy computeProfileId into flavorId. A missing platform marker, a different platform, or an unresolved computeProfileId remains fail-closed. Pass catalog_id and node_template_name when known for the compute-profile query. Omit resource_bundle_id only for an intentional global compute-profile query; it is required for a cloud-flavor query. For any ask:true field that requires an explicit selection, show the current filtered names and ask the user to identify the pending field and selected number instead of replying with a bare number or typed specification."
 tool_flavors_entrypoint: "scripts/adapter.py:list_flavors"
 tool_flavors_group: "cmp"
 tool_flavors_capability_class: "provider:smartcmp"
 tool_flavors_priority: 108
 tool_flavors_use_when:
   - "Generated Markdown declares an active computeProfileId without a default, after resource pool selection and before any template lookup"
-  - "Generated Markdown declares an active flavorId without a default, after computeProfileId and resource pool selection"
+  - "Generated Markdown declares an active flavorId without a default after computeProfileId and resource pool selection, and the exact selected resource-pool item is not identified as yacmp:cloudentry:type:vsphere"
 tool_flavors_cli_flag_overrides:
   query: "--query"
   resource_bundle_id: "--resource-bundle-id"
@@ -296,7 +296,7 @@ tool_flavors_parameters: |
       },
       "compute_profile_id": {
         "type": "string",
-        "description": "Selected computeProfileId. Omit to list compute profiles; provide it to list mapped cloud flavors for flavorId."
+        "description": "Selected computeProfileId. Omit to list compute profiles; provide it to list mapped cloud flavors for flavorId only when the exact selected resource-pool item is not yacmp:cloudentry:type:vsphere."
       },
       "catalog_id": {
         "type": "string",
@@ -309,7 +309,7 @@ tool_flavors_parameters: |
     }
   }
 tool_logical_templates_name: "smartcmp_list_logical_templates"
-tool_logical_templates_description: "List logical OS templates for a SmartCMP request. Call only after resource-pool and all declared flavor-field selections when generated Markdown declares logicTemplateId. Pass resource_bundle_id and the required catalog OS family as os_type; also pass catalog_id and node_template_name when known. Use the selected id as logicTemplateId. The request-projected tool always presents the names as an explicit selection boundary, even when one result exists or generated ask is false."
+tool_logical_templates_description: "List logical OS templates for a SmartCMP request. Call only after resource-pool and all explicit flavor-field selections are complete when generated Markdown declares logicTemplateId. For an exact selected yacmp:cloudentry:type:vsphere resource pool, resolved computeProfileId completes flavor selection and flavorId remains omitted for platform resolution. Pass resource_bundle_id and the required catalog OS family as os_type; also pass catalog_id and node_template_name when known. Use the selected id as logicTemplateId. The request-projected tool always presents the names as an explicit selection boundary, even when one result exists or generated ask is false."
 tool_logical_templates_entrypoint: "../datasource/scripts/adapter.py:list_logical_templates"
 tool_logical_templates_groups:
   - cmp
@@ -318,9 +318,9 @@ tool_logical_templates_capability_class: "provider:smartcmp"
 tool_logical_templates_priority: 112
 tool_logical_templates_result_mode: "llm"
 tool_logical_templates_use_when:
-  - "Generated Markdown declares an active logicTemplateId without a default, after resource pool and all declared flavor-field selections"
+  - "Generated Markdown declares an active logicTemplateId without a default, after resource pool and all explicit flavor-field selections"
 tool_logical_templates_avoid_when:
-  - "An active computeProfileId or flavorId without a default has not been selected yet"
+  - "An active computeProfileId or an explicitly selectable flavorId without a default has not been selected yet"
 tool_logical_templates_cli_positional:
   - query
 tool_logical_templates_cli_flag_overrides:
@@ -367,7 +367,7 @@ tool_physical_templates_result_mode: "silent_ok"
 tool_physical_templates_use_when:
   - "Generated Markdown declares an active physicalTemplateId without a default, after resource pool and logicTemplateId selection"
 tool_physical_templates_avoid_when:
-  - "An active computeProfileId, flavorId, or logicTemplateId without a default has not been selected yet"
+  - "An active computeProfileId, explicitly selectable flavorId, or logicTemplateId without a default has not been selected yet"
 tool_physical_templates_cli_positional:
   - resource_bundle_id
   - logic_template_id
@@ -398,7 +398,7 @@ tool_images_result_mode: "llm"
 tool_images_use_when:
   - "Generated Markdown declares an active templateId without a default, after resource pool and logicTemplateId selection"
 tool_images_avoid_when:
-  - "An active computeProfileId, flavorId, or logicTemplateId without a default has not been selected yet"
+  - "An active computeProfileId, explicitly selectable flavorId, or logicTemplateId without a default has not been selected yet"
 tool_images_cli_positional:
   - resource_bundle_id
   - logic_template_id
@@ -544,7 +544,10 @@ Status semantics:
    `instructions.resourceSpecs`, `instructions.genericRequest`, and
    `instructions.topLevelFields`.
 6. Ask only for active required fields with no default, plus fields explicitly
-   marked `ask: true`. Defaults are used silently.
+   marked `ask: true`. Defaults are used silently. The sole platform-resolved
+   exception is `flavorId` after `computeProfileId` is selected when the exact
+   selected resource-pool item has `cloudEntryTypeId` equal to
+   `yacmp:cloudentry:type:vsphere`; omit that field instead of asking for it.
 7. Reuse resolved workflow lookup evidence. For every spec with an active
    `resourceBundleId`, first require a successful latest exact resource-pool
    revalidation whose returned item matches that ID, has `valid: true`, and has
@@ -579,13 +582,21 @@ business group before calling `smartcmp_list_available_bgs`.
 ### Tool sequencing
 
 - Resolve request lookup fields in dependency order:
-  `resourceBundleId` -> `computeProfileId` -> `flavorId` when declared -> `logicTemplateId` ->
+  `resourceBundleId` -> `computeProfileId` -> explicitly selectable `flavorId`
+  when declared -> `logicTemplateId` ->
   `physicalTemplateId` or `templateId`. Do not call tools for two unresolved
   `ask: true` fields in one model response.
 - After `resourceBundleId` is selected, `smartcmp_list_flavors` is the only
-  valid next lookup while an active `computeProfileId` or `flavorId` remains
-  unresolved. Resolve `computeProfileId` first, then call the same tool with
-  that value to resolve `flavorId`. Do not call any logical-template,
+  valid next lookup while an active `computeProfileId` or explicitly selectable
+  `flavorId` remains unresolved. Resolve `computeProfileId` first, then call the same tool with
+  that value to resolve `flavorId`. Do not perform that second lookup when the
+  exact selected resource-pool item has `cloudEntryTypeId` equal to
+  `yacmp:cloudentry:type:vsphere`: after `computeProfileId` is resolved, omit
+  `flavorId` from preview and submit JSON so SmartCMP resolves it from the
+  compute profile. Never send an empty `flavorId`, never copy
+  `computeProfileId` into it, and never infer this branch from an empty lookup
+  result. A missing or different platform marker remains fail-closed. Do not
+  call any logical-template,
   physical-template, or image lookup first.
 - For each active generated field with `ask: true`, call only that field's
   lookup, present only its current choices, ask the user to select one, and
@@ -749,6 +760,11 @@ scope.
   `credentialUser`, `credentialPassword`, `networkId`, `subnetId`,
   `securityGroupIds`, or `systemDisk` at `resourceSpecs[]` level rather than
   under `params`.
+- The exact vSphere `flavorId` exception above overrides direct-field
+  serialization: when the selected resource-pool item identifies
+  `yacmp:cloudentry:type:vsphere` and `computeProfileId` is resolved, omit
+  `flavorId` entirely even when its generated schema is required or
+  `ask: true`.
 - Preserve each direct field's declared type from Markdown. In particular,
   serialize Compute `securityGroupIds` as a JSON array of security group id
   strings, even when only one security group is selected; never serialize it as
@@ -808,7 +824,8 @@ scope.
   infer field names, dependencies, or request locations from a cloud platform
   or from another catalog.
 - Put `params.<key>` values under `resourceSpecs[].params.<key>`.
-- Collect every active field marked required or `ask: true`. Before showing the
+- Collect every active field marked required or `ask: true`, except the
+  platform-resolved vSphere `flavorId` defined above. Before showing the
   preview, resolve the selected pool once more with all selected values. Continue
   only when the exact returned item matches the selected `resourceBundleId`, has
   `valid: true`, and has empty `missingRequiredFields`,
@@ -967,11 +984,18 @@ for a value that cannot be taken from the user or a default.
   required `computeProfileId` from SmartCMP compute-profile data, or support the
   no-Markdown Compute fallback. When generated Markdown also declares an active
   `flavorId`, call the same tool again with the selected `compute_profile_id`
-  and `resource_bundle_id`, then use the selected returned `id` as `flavorId`.
+  and `resource_bundle_id`, then use the selected returned `id` as `flavorId`,
+  unless the exact selected resource-pool item has `cloudEntryTypeId` equal to
+  `yacmp:cloudentry:type:vsphere`. In that exact case, after
+  `computeProfileId` is selected, skip the second lookup and omit `flavorId`
+  from preview and submit JSON for deterministic platform resolution. Do not
+  send an empty value or substitute `computeProfileId`. Empty cloud-flavor
+  results never authorize omission, and missing or different platform identity
+  remains fail-closed.
   During normal provisioning, pass the selected resource pool, catalog, and
   `resourceSpecs[].node`; omit the pool only for an intentional global
-  compute-profile query. For either field with `ask: true`, show the filtered
-  choices and wait even when only one is returned.
+  compute-profile query. For each explicitly selectable field with `ask: true`,
+  show the filtered choices and wait even when only one is returned.
 - `smartcmp_list_logical_templates`: use after an explicit
   `resourceBundleId` is selected when generated Markdown declares an active
   `logicTemplateId` without a default. Pass the resource pool ID, catalog ID,

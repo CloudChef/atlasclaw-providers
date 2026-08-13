@@ -603,8 +603,12 @@ When operation intent is present, a resource lookup is only a target-resolution 
 
 ## Recycle-bin permanent removal
 
-Removal is `tear_down_in_resource` → `delete_metadata_in_resource` →
-`permanently_delete_deployment`; node `status=deleted` proves only the second stage.
+Removal is `tear_down_in_resource` → a fresh recycle-bin read →
+`permanently_delete_deployment`. Never call `delete_metadata_in_resource` between
+tear down and permanent removal; it deletes CMP management information instead
+of advancing the recycle-bin workflow. A stopped node can already belong to a
+recycled deployment, so wait for the exact recycle row and its complete scope
+rather than inferring progress from node status.
 
 1. Call `smartcmp_list_recycled_resources` with zero or one of `resource_id`,
    `resource_name`, `deployment_id`, or `deployment_name`. Names must match exactly;
@@ -616,8 +620,12 @@ Removal is `tear_down_in_resource` → `delete_metadata_in_resource` →
    with the same locator, `expected_deployment_id`, complete
    `expected_resource_ids`, and `confirmed=true`. Scope/action changes require a
    fresh confirmation; unknown outcomes must not be retried.
-4. Report `submitted`, not completed. Completion requires deployment
-   `deleted=true`, `state=DELETED`, and no recycled actions, or later disappearance.
+4. Report `submitted`, not completed. After this workflow has successfully
+   submitted permanent removal, completion requires a fresh exact row with
+   `deleted=true`, `state=DELETED`, a positive `recycle_delete_time`, and no
+   available operation, or later disappearance. A retained tombstone must not
+   be submitted again. `deleted` and `state` alone are insufficient evidence
+   because metadata-only deletion can produce the same values.
 
 ## Critical Rules
 
