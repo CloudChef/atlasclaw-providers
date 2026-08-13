@@ -175,7 +175,10 @@ def test_list_exposes_owning_scope_and_bound_permanent_action():
 
     assert (result.total, result.page, result.size) == (3, 2, 10)
     row = result.items[0]
-    assert row["owning_deployment"] == DEPLOYMENT
+    assert row["owning_deployment"] == {
+        **DEPLOYMENT,
+        "recycle_delete_time": None,
+    }
     assert row["affected_scope"]["resource_ids"] == ("vm-1", "vm-2")
     operation = row["available_operations"][0]
     assert operation["tool_name"] == "smartcmp_permanently_remove_recycled_resource"
@@ -311,14 +314,66 @@ def test_invalid_deleted_resource_payload_fails_closed(payload: Any):
 
 
 def test_terminal_recycle_row_has_no_permanent_action():
-    deployment = {**DEPLOYMENT, "state": "DELETED", "deleted": True}
-    api = RecycleApiStub(deployments=[deployment], actions={"dep-1": []})
+    deployment = {
+        **DEPLOYMENT,
+        "state": "DELETED",
+        "deleted": True,
+        "recycleDeleteTime": 1786556400000,
+    }
+    api = RecycleApiStub(deployments=[deployment])
 
     row = asyncio.run(_list(api, RecycledResourceQuery())).items[0]
 
     assert row["owning_deployment"]["state"] == "DELETED"
     assert row["owning_deployment"]["deleted"] is True
+    assert row["owning_deployment"]["recycle_delete_time"] == 1786556400000
     assert row["available_operations"] == []
+    assert not any(
+        request.url.path.endswith("/deployment-actions")
+        for request in api.requests
+    )
+
+
+def test_deleted_tombstone_does_not_block_live_recycled_deployment():
+    deployments = [
+        {**DEPLOYMENT, "state": "DELETED", "deleted": True},
+        {**DEPLOYMENT, "id": "dep-2", "name": "Application B"},
+    ]
+    api = RecycleApiStub(
+        deployments=deployments,
+        resources={"dep-1": RESOURCES, "dep-2": [{"id": "vm-3", "name": "vm-c"}]},
+        actions={"dep-2": [PURGE_ACTION]},
+    )
+
+    result = asyncio.run(_list(api, RecycledResourceQuery()))
+
+    rows = {row["resource_id"]: row for row in result.items}
+    assert rows["vm-1"]["available_operations"] == []
+    assert rows["vm-3"]["available_operations"][0]["operation_id"] == (
+        "permanently_delete_deployment"
+    )
+    action_paths = [
+        request.url.path
+        for request in api.requests
+        if request.url.path.endswith("/deployment-actions")
+    ]
+    assert action_paths == [
+        "/platform-api/deployments/dep-2/deployment-actions"
+    ]
+
+
+def test_deleted_tombstone_rejects_permanent_removal_before_action_or_write():
+    deployment = {**DEPLOYMENT, "state": "DELETED", "deleted": True}
+    api = RecycleApiStub(deployments=[deployment])
+
+    with pytest.raises(SmartCmpValidationError, match="deleted tombstone"):
+        asyncio.run(_remove(api, _removal_input()))
+
+    assert not any(
+        request.url.path.endswith("/deployment-actions")
+        for request in api.requests
+    )
+    assert api.writes == []
 
 
 def test_locator_follows_authoritative_total_pages():

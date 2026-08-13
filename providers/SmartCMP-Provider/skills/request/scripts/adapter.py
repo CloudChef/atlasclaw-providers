@@ -158,13 +158,29 @@ async def submit(
         request_ids = [
             item.request_id for item in result.items if item.request_id
         ]
-        summary = (
-            f"Submitted SmartCMP request: {', '.join(request_ids)}"
-            if request_ids and not result.overall_failed
-            else "SmartCMP request submission did not return a confirmed Request ID."
-        )
+        if result.overall_failed:
+            failure_stage = (
+                "initialization"
+                if any(
+                    item.outcome == "initialization_failed"
+                    for item in result.items
+                )
+                else "submission"
+            )
+            summary = (
+                f"SmartCMP request {failure_stage} failed: {', '.join(request_ids)}"
+                if request_ids
+                else f"SmartCMP request {failure_stage} failed."
+            )
+        elif request_ids:
+            summary = f"Submitted SmartCMP request: {', '.join(request_ids)}"
+        else:
+            summary = "SmartCMP request submission did not return a confirmed Request ID."
         projected = tool_result(result, summary=summary)
-        if request_ids and not result.overall_failed:
+        if result.overall_failed:
+            projected["success"] = False
+            projected["error"] = summary
+        elif request_ids:
             # The Skill success contract intentionally accepts only the
             # canonical user-facing Request ID, not internal record UUIDs.
             projected["requestId"] = request_ids[0]

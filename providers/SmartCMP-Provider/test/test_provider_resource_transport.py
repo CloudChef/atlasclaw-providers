@@ -1138,8 +1138,15 @@ def test_resource_bundle_rejects_implicit_context_before_http(
     assert request_count == 0
 
 
-def test_windows_compute_uses_shared_compute_cloud_schema() -> None:
-    """Windows machine nodes resolve the cloud platform's Compute schema."""
+@pytest.mark.parametrize(
+    ("available_ip_size", "expected_valid"),
+    [(1, True), (0, False)],
+)
+def test_windows_compute_rejects_an_exhausted_ip_pool(
+    available_ip_size: int,
+    expected_valid: bool,
+) -> None:
+    """Windows network selection requires capacity in an IP pool."""
 
     request_scope = make_request(
         instance_name="cmp-a",
@@ -1214,7 +1221,14 @@ def test_windows_compute_uses_shared_compute_cloud_schema() -> None:
         if request.url.path.endswith("/cloudprovider"):
             return httpx.Response(
                 200,
-                json=[{"id": "network-1", "name": "Network 1"}],
+                json=[{
+                    "id": "network-1",
+                    "name": "Network 1",
+                    "properties": {
+                        "ipAllocationMethod": "IP_POOL",
+                        "availableIpSize": available_ip_size,
+                    },
+                }],
                 request=request,
             )
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
@@ -1233,7 +1247,7 @@ def test_windows_compute_uses_shared_compute_cloud_schema() -> None:
                     catalog_id="catalog-windows",
                     node_template_name="WindowsCompute",
                     resource_bundle_id="resource-bundle-1",
-                    placement_fields=("networkId",),
+                    placement_values={"networkId": "network-1"},
                 ),
             )
 
@@ -1242,6 +1256,13 @@ def test_windows_compute_uses_shared_compute_cloud_schema() -> None:
     fields = {field["key"]: field for field in result.items[0]["requestFields"]}
     assert fields["networkId"]["target"] == "networkId"
     assert result.items[0]["placementOptions"]["networkId"][0]["id"] == "network-1"
+    assert result.items[0]["valid"] is expected_valid
+    if expected_valid:
+        assert result.items[0]["configurationErrors"] == []
+    else:
+        assert "no available IP addresses" in result.items[0][
+            "configurationErrors"
+        ][0]
 
 
 @pytest.mark.parametrize(
@@ -1434,6 +1455,63 @@ def test_request_submission_normalizes_payload_and_submits_exactly_once():
     assert submitted[0]["userLoginId"] == "admin"
     assert result.items[0].outcome == "success"
     assert result.items[0].request_id == "RES20260731009991"
+
+
+def test_request_submission_marks_verified_initialization_failure() -> None:
+    """A failed verification record must not remain an overall success."""
+    request_scope = make_request(
+        instance_name="cmp-a",
+        base_url="https://cmp.example",
+        user_id="user-a",
+        token="session-a",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/generic-request/submit"):
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "id": "20fef12e-5015-4df5-822b-e1e87c4f64fd",
+                        "workflowId": "RES20260731009995",
+                        "state": "INITIALING",
+                    }
+                ],
+                request=request,
+            )
+        return httpx.Response(
+            200,
+            json={
+                "workflowId": "RES20260731009995",
+                "state": "INITIALING_FAILED",
+                "errMsg": "blueprint initialization failed",
+            },
+            request=request,
+        )
+
+    async def invoke():
+        async with SmartCmpClient(
+            request_scope,
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            return await submit_request(
+                client,
+                RequestSubmissionInput(
+                    body={"catalogId": "catalog-linux", "name": "failed-vm"},
+                    actor=RequestActorIdentity(
+                        user_id="user-1",
+                        login_id="admin",
+                    ),
+                    verification_attempts=1,
+                    verification_interval_seconds=0,
+                ),
+            )
+
+    result = asyncio.run(invoke())
+
+    assert result.overall_failed is True
+    assert result.items[0].outcome == "initialization_failed"
+    assert result.items[0].request_id == "RES20260731009995"
 
 
 @pytest.mark.parametrize(

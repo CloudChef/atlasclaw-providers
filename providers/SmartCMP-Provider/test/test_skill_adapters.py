@@ -984,7 +984,18 @@ def test_request_adapter_parses_confirmed_json_once(monkeypatch) -> None:
     assert "nested-secret" not in result["_internal"]
 
 
-def test_request_adapter_does_not_confirm_failed_submission(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("outcome", "expected_failure_stage"),
+    [
+        ("failed", "submission failed"),
+        ("initialization_failed", "initialization failed"),
+    ],
+)
+def test_request_adapter_does_not_confirm_failed_submission(
+    monkeypatch,
+    outcome: str,
+    expected_failure_stage: str,
+) -> None:
     """Do not publish success evidence when Provider reports an overall failure."""
 
     adapter = _load(
@@ -997,7 +1008,7 @@ def test_request_adapter_does_not_confirm_failed_submission(monkeypatch) -> None
             normalized_body=operation_input.body,
             items=(
                 RequestSubmissionItem(
-                    outcome="failed",
+                    outcome=outcome,
                     request_id="RES20260731000003",
                     error="workflow initialization failed",
                 ),
@@ -1013,8 +1024,10 @@ def test_request_adapter_does_not_confirm_failed_submission(monkeypatch) -> None
         )
     )
 
+    assert result["success"] is False
     assert "requestId" not in result
-    assert "did not return a confirmed Request ID" in result["output"]
+    assert "RES20260731000003" in result["output"]
+    assert expected_failure_stage in result["error"]
 
 
 def test_request_adapter_does_not_confirm_unknown_submission(monkeypatch) -> None:
