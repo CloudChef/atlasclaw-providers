@@ -974,6 +974,7 @@ def test_approval_adapter_builds_one_typed_decision(monkeypatch) -> None:
     )
 
     assert result["success"] is True
+    assert result["output"] == "Approved: RES20260731000001"
     assert captured["input"].request_ids == ("RES20260731000001",)
     assert captured["input"].reason == "policy accepted"
 
@@ -1188,9 +1189,18 @@ def test_request_resource_bundle_contract_is_explicit_and_redacted(monkeypatch) 
                     "missingRequiredFields": [],
                     "missingSelectionFields": ["networkId"],
                     "configurationErrors": [],
-                    "valid": False,
                 },
-            )
+            ),
+            selection_field={
+                "key": "networkId",
+                "target": "networkId",
+                "type": "string",
+                "required": False,
+                "dependsOn": [],
+            },
+            selection_candidates=(
+                {"id": "network-361", "name": "192.168.24.0/22"},
+            ),
         )
         request = SimpleNamespace(context=SimpleNamespace(trace_id="trace-1"))
         return result, request
@@ -1246,8 +1256,6 @@ def test_request_resource_bundle_contract_is_explicit_and_redacted(monkeypatch) 
     assert result["items"][0]["requestFields"][5]["value"] == "authentication-header-value"
     assert result["items"][0]["requestFields"][6]["value"] == "ssh-key-value"
     output = json.loads(result["output"])
-    assert output["valid"] is False
-    assert output["missingSelectionFields"] == ["networkId"]
     assert output["pendingFields"] == [
         {
             "key": "networkId",
@@ -1255,8 +1263,14 @@ def test_request_resource_bundle_contract_is_explicit_and_redacted(monkeypatch) 
             "type": "string",
             "required": False,
             "dependsOn": [],
-            "options": [{"id": "network-361", "name": "192.168.24.0/22"}],
         }
+    ]
+    assert output["selectionField"]["key"] == "networkId"
+    assert output["selectionCandidates"] == [
+        {"id": "network-361", "name": "192.168.24.0/22"}
+    ]
+    assert result["selectionCandidates"] == [
+        {"id": "network-361", "name": "192.168.24.0/22"}
     ]
     assert "lookup-secret" not in result["output"]
     assert "availableIpSize" not in result["output"]

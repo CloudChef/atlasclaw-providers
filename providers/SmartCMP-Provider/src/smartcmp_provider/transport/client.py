@@ -221,7 +221,7 @@ class SmartCmpClient:
             ) from exc
         except httpx.RequestError as exc:
             raise SmartCmpUpstreamError(
-                f"SmartCMP request failed: {exc}",
+                self._request_error_message(exc),
                 trace_id=self.request.context.trace_id,
                 mutation_outcome=(
                     "unknown" if self._is_mutation_method(method) else None
@@ -255,6 +255,21 @@ class SmartCmpClient:
                 transport=self._transport,
             )
         return self._client
+
+    @staticmethod
+    def _request_error_message(exc: httpx.RequestError) -> str:
+        """Render a non-empty, credential-safe transport failure message."""
+
+        error_type = type(exc).__name__
+        detail = SmartCmpClient.sanitize_error_text(str(exc).strip())
+        summary = (
+            "Unable to connect to the configured SmartCMP service"
+            if isinstance(exc, httpx.ConnectError)
+            else "SmartCMP transport request failed"
+        )
+        if detail:
+            return f"{summary} ({error_type}): {detail}"
+        return f"{summary} ({error_type})."
 
     def _effective_timeout_seconds(self) -> float:
         """Combine instance timeout with the invocation's remaining deadline."""

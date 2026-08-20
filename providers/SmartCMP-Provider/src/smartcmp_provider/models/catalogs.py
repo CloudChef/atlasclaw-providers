@@ -132,6 +132,14 @@ class ImageQuery(BaseModel):
 class CatalogItemsResult(BaseModel):
     """Return normalized catalog workflow choices without weakening item typing."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
 
     items: tuple[dict[str, Any], ...] = ()
+    selection_field: dict[str, Any] | None = Field(
+        default=None,
+        alias="selectionField",
+    )
+    selection_candidates: tuple[dict[str, Any], ...] | None = Field(
+        default=None,
+        alias="selectionCandidates",
+    )

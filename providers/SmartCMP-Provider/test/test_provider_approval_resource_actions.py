@@ -156,6 +156,55 @@ def test_batch_approval_resolves_visible_ids_and_reports_partial_failure():
     )
 
 
+def test_batch_approval_maps_complete_cmp_response_by_request_order():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "content": [
+                        {
+                            "workflowId": "RES20260820000019",
+                            "currentActivity": {"id": "activity-internal-1"},
+                        }
+                    ]
+                },
+                request=request,
+            )
+        assert request.url.params["ids"] == "activity-internal-1"
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "approvalId": "parent-approval-1",
+                    "pass": True,
+                    "reason": None,
+                }
+            ],
+            request=request,
+        )
+
+    async def invoke():
+        async with SmartCmpClient(
+            make_request(),
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            return await execute_approval_decision(
+                client,
+                ApprovalDecisionInput(
+                    decision="approve",
+                    request_ids=("RES20260820000019",),
+                ),
+            )
+
+    result = asyncio.run(invoke())
+
+    assert result.overall_success is True
+    assert result.items[0].request_id == "RES20260820000019"
+    assert result.items[0].outcome == "succeeded"
+    assert result.items[0].status == "completed"
+
+
 def test_approval_detail_preserves_five_page_lookup_and_finds_page_two():
     requested_pages: list[int] = []
 

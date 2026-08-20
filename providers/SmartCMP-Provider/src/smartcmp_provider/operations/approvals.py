@@ -448,14 +448,38 @@ def _decision_items(
             strict=True,
         )
     }
+    record_activity_ids = [
+        _record_activity_id(record) if record is not None else ""
+        for record in pending_records
+    ]
     assigned: dict[str, dict[str, Any]] = {}
-    for record in pending_records:
-        if record is None:
-            continue
-        record_activity_id = _record_activity_id(record)
-        mapped_request_id = by_activity_id.get(record_activity_id.casefold())
-        if mapped_request_id and mapped_request_id not in assigned:
-            assigned[mapped_request_id] = record
+    if any(record_activity_ids):
+        for record, record_activity_id in zip(
+            pending_records,
+            record_activity_ids,
+            strict=True,
+        ):
+            if record is None or not record_activity_id:
+                continue
+            mapped_request_id = by_activity_id.get(record_activity_id.casefold())
+            if mapped_request_id and mapped_request_id not in assigned:
+                assigned[mapped_request_id] = record
+    elif len(pending_records) == len(request_ids) and all(
+        record is not None for record in pending_records
+    ):
+        # SmartCMP's batch endpoint appends exactly one response per input ID in
+        # request order. Its current response exposes the parent approvalId, not
+        # the submitted activity ID, so only a complete identifier-free response
+        # can be safely correlated by position.
+        assigned = {
+            request_id: record
+            for request_id, record in zip(
+                request_ids,
+                pending_records,
+                strict=True,
+            )
+            if record is not None
+        }
 
     results: list[ApprovalDecisionItem] = []
     for request_id in request_ids:
@@ -494,7 +518,7 @@ def _decision_items(
 
 
 def _record_activity_id(record: dict[str, Any]) -> str:
-    for field in ("activityId", "approvalActivityId", "id", "approvalId"):
+    for field in ("activityId", "approvalActivityId", "id"):
         value = str(record.get(field) or "").strip()
         if value:
             return value
@@ -509,7 +533,9 @@ def _record_failed(record: dict[str, Any], decision: str) -> bool:
     state = _record_state(record).casefold()
     code = record.get("code")
     return (
-        record.get("success") is False
+        record.get("pass") is False
+        or str(record.get("pass") or "").casefold() == "false"
+        or record.get("success") is False
         or str(record.get("success") or "").casefold() == "false"
         or state in _FAILED_STATES
         or (decision == "approve" and state in {"denied", "rejected"})
@@ -528,7 +554,9 @@ def _record_succeeded(record: dict[str, Any], decision: str) -> bool:
     success = record.get("success")
     code = record.get("code")
     explicit_success = (
-        success is True
+        record.get("pass") is True
+        or str(record.get("pass") or "").casefold() == "true"
+        or success is True
         or str(success or "").casefold() == "true"
         or state in _SAFE_SUCCESS_STATES
         or code in (0, "0", 200, "200")

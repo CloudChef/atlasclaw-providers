@@ -543,6 +543,32 @@ def test_transport_maps_invalid_json_and_business_failures(
     assert "never-log-this-token" not in str(exc_info.value)
 
 
+def test_transport_reports_empty_connection_error_with_actionable_context():
+    request_scope = make_request(
+        instance_name="cmp-a",
+        base_url="https://cmp.example",
+        user_id="user-a",
+        token="never-log-this-token",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("", request=request)
+
+    async def invoke():
+        async with SmartCmpClient(
+            request_scope,
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            await client.request_json("GET", "/nodes/search")
+
+    with pytest.raises(SmartCmpUpstreamError) as exc_info:
+        asyncio.run(invoke())
+
+    message = str(exc_info.value)
+    assert message == (
+        "Unable to connect to the configured SmartCMP service (ConnectError)."
+    )
+    assert "never-log-this-token" not in message
 
 
 @pytest.mark.parametrize(
@@ -1132,7 +1158,6 @@ def test_resource_bundle_resolves_declared_placement_fields() -> None:
         "missingRequiredFields",
         "missingSelectionFields",
         "configurationErrors",
-        "valid",
     }
     fields = {
         field["key"]: field
@@ -1149,10 +1174,10 @@ def test_resource_bundle_resolves_declared_placement_fields() -> None:
         "vpc_id",
         "group_description",
     }
-    assert complete.items[0]["valid"] is True
-    assert invalid_selection.items[0]["valid"] is False
+    assert pending.selection_field["key"] == "vpc_id"
+    assert pending.selection_candidates == ({"id": 0, "name": "VPC A"},)
+    assert complete.selection_candidates == ()
     assert "not selectable" in invalid_selection.items[0]["configurationErrors"][0]
-    assert empty_lookup.items[0]["valid"] is False
     assert "no selectable options" in empty_lookup.items[0]["configurationErrors"][0]
 
 
@@ -1440,6 +1465,10 @@ def test_windows_compute_rejects_an_exhausted_ip_pool(
         field["key"]: field for field in automatic.items[0]["requestFields"]
     }
     assert automatic_fields["networkId"]["options"][0]["id"] == "network-1"
+    assert automatic.selection_field["key"] == "networkId"
+    assert automatic.selection_candidates == (
+        {"id": "network-1", "name": "Network 1"},
+    )
 
     fields = {field["key"]: field for field in result.items[0]["requestFields"]}
     assert fields["networkId"]["target"] == "networkId"
@@ -1449,7 +1478,6 @@ def test_windows_compute_rejects_an_exhausted_ip_pool(
         if field["key"] == "networkId"
     )
     assert network_field["options"][0]["id"] == "network-1"
-    assert result.items[0]["valid"] is expected_valid
     if expected_valid:
         assert result.items[0]["configurationErrors"] == []
     else:

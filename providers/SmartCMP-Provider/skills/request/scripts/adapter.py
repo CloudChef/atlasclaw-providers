@@ -54,10 +54,10 @@ from smartcmp_provider.operations.requests import (  # noqa: E402
 )
 
 
-def _exact_resource_bundle_summary(items: tuple[dict[str, Any], ...]) -> str:
-    """Describe exact validation state without exposing selected values or secrets."""
+def _resource_bundle_field_summary(result: Any) -> str:
+    """Describe dynamic request fields without presenting a validation gate."""
 
-    item = items[0]
+    item = result.items[0]
     pending_keys = {
         str(key).strip()
         for key in (
@@ -79,11 +79,6 @@ def _exact_resource_bundle_summary(items: tuple[dict[str, Any], ...]) -> str:
                     "type": field.get("type"),
                     "required": field.get("required"),
                     "dependsOn": field.get("dependsOn") or [],
-                    "options": [
-                        {"id": option.get("id"), "name": option.get("name")}
-                        for option in (field.get("options") or [])
-                        if isinstance(option, dict)
-                    ],
                 }.items()
                 if value not in (None, "")
             }
@@ -93,13 +88,12 @@ def _exact_resource_bundle_summary(items: tuple[dict[str, Any], ...]) -> str:
             "id": item.get("id"),
             "name": item.get("name"),
         },
-        "valid": item.get("valid") is True,
-        "missingRequiredFields": list(item.get("missingRequiredFields") or []),
-        "missingSelectionFields": list(item.get("missingSelectionFields") or []),
+        "pendingFields": pending_fields,
+        "selectionField": dict(result.selection_field or {}),
+        "selectionCandidates": list(result.selection_candidates or ()),
         "configurationErrors": _redact_request_secrets(
             list(item.get("configurationErrors") or [])
         ),
-        "pendingFields": pending_fields,
     }
     return json.dumps(summary, ensure_ascii=False, separators=(",", ":"))
 
@@ -355,15 +349,16 @@ async def list_resource_bundles(
                             "configurationErrors": list(
                                 exact_item.get("configurationErrors") or []
                             ),
-                            "valid": exact_item.get("valid") is True,
                         }
                     ],
+                    "selectionField": dict(result.selection_field or {}),
+                    "selectionCandidates": list(result.selection_candidates or ()),
                 }
             )
         return tool_result(
             result,
             summary=(
-                _exact_resource_bundle_summary(result.items)
+                _resource_bundle_field_summary(result)
                 if normalized_resource_bundle_id
                 else f"Found {len(result.items)} resource pools."
             ),
@@ -404,7 +399,7 @@ async def list_flavors(
     """List compute flavors after normalizing omitted AtlasClaw fields."""
 
     try:
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             list_flavors_operation,
             FlavorQuery(
@@ -418,6 +413,7 @@ async def list_flavors(
         return tool_result(
             result,
             summary=f"Found {len(result.items)} compute flavors.",
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)

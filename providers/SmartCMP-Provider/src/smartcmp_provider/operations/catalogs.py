@@ -375,7 +375,53 @@ async def list_resource_bundles(
                 selected_values=query.placement_values,
             )
         )
-    return CatalogItemsResult(items=tuple(normalized))
+    selection_field, selection_candidates = _top_level_selection(normalized[0])
+    return CatalogItemsResult(
+        items=tuple(normalized),
+        selection_field=selection_field,
+        selection_candidates=selection_candidates,
+    )
+
+
+def _top_level_selection(
+    resolved_bundle: dict[str, Any],
+) -> tuple[dict[str, Any], tuple[dict[str, Any], ...]]:
+    """Project the next dynamic field and its options outside the pool item."""
+
+    pending_keys = {
+        str(key or "").strip()
+        for key in list(resolved_bundle.get("missingSelectionFields") or [])
+        if str(key or "").strip()
+    }
+    for field in list(resolved_bundle.get("requestFields") or []):
+        if not isinstance(field, dict):
+            continue
+        field_key = str(field.get("key") or "").strip()
+        options = tuple(
+            {
+                "id": option.get("id"),
+                "name": option.get("name"),
+            }
+            for option in list(field.get("options") or [])
+            if isinstance(option, dict)
+            and option.get("id") not in (None, "")
+            and str(option.get("name") or "").strip()
+        )
+        if field_key not in pending_keys or not options:
+            continue
+        selection_field = {
+            key: value
+            for key, value in {
+                "key": field_key,
+                "target": field.get("target"),
+                "type": field.get("type"),
+                "required": field.get("required") is True,
+                "dependsOn": list(field.get("dependsOn") or []),
+            }.items()
+            if value not in (None, "")
+        }
+        return selection_field, options
+    return {}, ()
 
 
 async def _load_request_catalog(
@@ -614,11 +660,6 @@ async def _resolve_resource_bundle_request_fields(
     normalized["missingRequiredFields"] = missing_required_fields
     normalized["missingSelectionFields"] = missing_selection_fields
     normalized["configurationErrors"] = configuration_errors
-    normalized["valid"] = not (
-        missing_required_fields
-        or missing_selection_fields
-        or configuration_errors
-    )
     return normalized
 
 

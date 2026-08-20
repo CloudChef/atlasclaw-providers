@@ -251,7 +251,7 @@ tool_resource_bundles_parameters: |
         "additionalProperties": {
           "type": "string"
         },
-        "description": "Selected business field values only. For an option-backed lookup field, use the exact selected options[].id; options[].name is display-only. If current option IDs have not been loaded, request the field in placement_fields and omit it from placement_values, then resolve the user selection against exactly one returned option before exact validation. Never guess or pass the display name. Encode boolean and number values as strings and array values as JSON array strings. Never include catalogId or node; retain every selected field value while resolving later fields."
+        "description": "Selected business field values only. For an option-backed lookup field, use the exact selected options[].id; options[].name is display-only. If current option IDs have not been loaded, request the field in placement_fields and omit it from placement_values, then resolve the user selection against exactly one returned option before using that value. Never guess or pass the display name. Encode boolean and number values as strings and array values as JSON array strings. Never include catalogId or node; retain every selected field value while resolving later fields."
       }
     },
     "required": ["business_group_id", "component_type", "node_type", "catalog_id", "node_template_name"]
@@ -567,12 +567,12 @@ Status semantics:
    selected resource-pool item has `cloudEntryTypeId` equal to
    `yacmp:cloudentry:type:vsphere`; omit that field instead of asking for it.
 7. Reuse resolved workflow lookup evidence. For every spec with an active
-   `resourceBundleId`, first require a successful latest exact resource-pool
-   revalidation whose returned item matches that ID, has `valid: true`, and has
-   empty `missingRequiredFields`, `missingSelectionFields`, and
-   `configurationErrors`. Only then show a schema-exact JSON preview with
-   credential secrets masked, ask for confirmation, and stop. A failed or
-   incomplete revalidation blocks both preview and confirmation.
+   `resourceBundleId`, resolve its dynamic request fields and collect each
+   active required or `ask: true` value that has no default. Use the exact
+   returned option ID for option-backed fields. Once all declared fields have
+   values, show a schema-exact JSON preview with credential secrets masked, ask
+   for confirmation, and stop. Do not run a final resource-pool revalidation
+   solely to authorize the preview.
 8. After the user confirms, call `smartcmp_submit_request` with the corresponding
    unmasked request body. The displayed preview is presentation-only; restore
    each original secret value and never submit a preview mask.
@@ -856,24 +856,27 @@ scope.
   first collect the already-known active non-lookup fields required by Tool
   sequencing, then call the selected pool once with no `placement_fields` to
   discover its active fields and resolve the first dependency-ready missing
-  lookup before collecting resolver-discovered values. Present that field's
-  returned `options`; use the selected `options[].id` in `placement_values`,
-  then re-resolve the selected pool for the next field or final validation.
+  lookup before collecting resolver-discovered values. Treat the top-level
+  `selectionField` and `selectionCandidates` as the current dynamic input, and
+  use the selected candidate `id` in `placement_values`. If exactly one
+  candidate is returned, allow the runtime's generic single-option behavior to
+  continue without asking the user. Re-resolve only when another unresolved
+  field depends on the selected value; do not re-resolve after the last dynamic
+  selection.
 - Resolve fields in `dependsOn` order. Query only a field whose dependencies
   already have values, present its returned `options`, retain the selection in
-  `placement_values`, and call the tool again. Re-resolve after every selection
-  because conditions and dependencies may change the active fields.
+  `placement_values`, and call the tool again only when another unresolved field
+  depends on that selection. After the last dynamic field, continue to the
+  preview without another resource-pool resolver call.
 - Follow each returned field's `target` when constructing the request. Do not
   infer field names, dependencies, or request locations from a cloud platform
   or from another catalog.
 - Put `params.<key>` values under `resourceSpecs[].params.<key>`.
 - Collect every active field marked required or `ask: true`, except the
-  platform-resolved vSphere `flavorId` defined above. Before showing the
-  preview, resolve the selected pool once more with all selected values. Continue
-  only when the exact returned item matches the selected `resourceBundleId`, has
-  `valid: true`, and has empty `missingRequiredFields`,
-  `missingSelectionFields`, and `configurationErrors`. Otherwise stop before
-  preview and resolve the reported selection or configuration problem.
+  platform-resolved vSphere `flavorId` defined above. After the final dynamic
+  value is selected, proceed directly to the request preview when all declared
+  active fields have a real value or non-empty default. Do not call the pool
+  resolver again before the preview.
 - `logicTemplateId` is the independent logical OS-template field. When it is
   active without a default, query logical templates with the selected
   `resourceBundleId` plus catalog/node/OS filters and serialize the selected
@@ -1008,8 +1011,8 @@ and keep display names user-facing.
 - For template fields, follow the generated branch exactly: logical template,
   then physical template or cloud image. Keep their IDs internal; never ask a
   user to type a template UUID or substitute one field's ID for another.
-- The vSphere flavor omission and all option-ID / exact-validation rules remain
-  the authoritative rules in Tool sequencing and Generated Markdown. Empty
+- The vSphere flavor omission and all option-ID rules remain authoritative in
+  Tool sequencing and Generated Markdown. Empty
   results, missing platform identity, or a missing declared template branch
   remain fail-closed.
 
@@ -1109,10 +1112,9 @@ after collecting `name` and description:
 
 Before submit:
 
-1. For each active `resourceBundleId`, verify that the latest exact
-   `smartcmp_list_resource_bundles` result matches the selected ID, has
-   `valid: true`, and has no missing or configuration fields. If this check
-   fails, stop without showing a preview or asking for confirmation.
+1. Verify that every active required or `ask: true` field declared by generated
+   instructions or resolved dynamic field metadata has a real value or
+   non-empty default. Do not perform a final resource-pool revalidation.
 2. Show a short summary in the user's language.
 3. Show `JSON 预览` / `JSON Preview` with a fenced JSON block. This block is a
    presentation-only copy, not the `json_body` passed to the submit tool.
@@ -1127,8 +1129,8 @@ After confirmation:
   corresponding to the confirmed preview. Never submit `***`, `******`, or any
   other preview mask as a secret value.
 - If an original secret is unavailable after confirmation, fail closed: do not
-  call submit. Collect the secret again, run exact revalidation again, display a
-  new masked preview, and ask for fresh confirmation.
+  call submit. Collect the secret again, display a new masked preview, and ask
+  for fresh confirmation.
 - User says no → ask what to change.
 - Any field added or changed after a preview or failed submission changes the
   request payload and invalidates every earlier confirmation. Show the updated
