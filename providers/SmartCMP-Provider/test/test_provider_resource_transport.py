@@ -278,6 +278,70 @@ def test_concurrent_users_and_instances_keep_headers_and_urls_isolated():
     }
 
 
+def test_list_resources_projects_compact_rows_before_attaching_operations():
+    request_scope = make_request(
+        instance_name="cmp-a",
+        base_url="https://cmp.example",
+        user_id="user-a",
+        token="session-a",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "content": [
+                    {
+                        "id": "res-1",
+                        "name": "vm-a",
+                        "status": "started",
+                        "resourceType": "resource.iaas.machine",
+                        "componentType": "machine",
+                        "osType": "linux",
+                        "osDescription": "Linux",
+                        "isAgentInstalled": True,
+                        "monitorEnabled": True,
+                        "externalId": "vm-1",
+                        "nodeInstanceId": "node-1",
+                        "cloudEntry": {"large": "unused"},
+                        "properties": {"large": "unused"},
+                        "addresses": [{"ip": "192.0.2.1"}],
+                    }
+                ],
+                "totalElements": 1,
+            },
+            request=request,
+        )
+
+    async def invoke():
+        async with SmartCmpClient(
+            request_scope,
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            return await list_resources(client, ResourceListQuery())
+
+    result = asyncio.run(invoke())
+
+    assert result.total == 1
+    assert set(result.items[0]) == {
+        "id",
+        "name",
+        "resourceType",
+        "componentType",
+        "status",
+        "osType",
+        "osDescription",
+        "isAgentInstalled",
+        "monitorEnabled",
+        "externalId",
+        "nodeInstanceId",
+        "available_operations",
+    }
+    assert result.items[0]["id"] == "res-1"
+    assert result.items[0]["name"] == "vm-a"
+    assert result.items[0]["status"] == "started"
+
+
 def test_resource_operations_preserve_paths_resolution_and_filtering():
     request_scope = make_request(
         instance_name="cmp-a",
@@ -551,7 +615,7 @@ def test_transport_uses_smaller_deadline_and_rejects_expired_deadline():
     assert len(remaining_timeout) == 1
 
 
-def test_catalog_operation_normalizes_markdown_and_blueprint_fallbacks():
+def test_catalog_list_returns_compact_summaries():
     request_scope = make_request(
         instance_name="cmp-a",
         base_url="https://cmp.example",
@@ -566,6 +630,8 @@ catalog:
 resource_specs:
 - node: Compute
   type: cloudchef.nodes.Compute
+  runtime_fields:
+    resolver: resource_bundle_placement
   params:
     computeProfileName:
       required: true
@@ -576,6 +642,18 @@ Collect the VM shape before submission.
 """.strip()
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/catalogs/catalog-markdown"):
+            return httpx.Response(
+                200,
+                json={
+                    "id": "catalog-markdown",
+                    "name": "Linux from Markdown",
+                    "serviceCategory": "CLOUD_COMPONENT_SERVICE",
+                    "status": "PUBLISHED",
+                    "instructions": markdown,
+                },
+                request=request,
+            )
         return httpx.Response(
             200,
             json={
@@ -610,22 +688,31 @@ Collect the VM shape before submission.
             request_scope,
             transport=httpx.MockTransport(handler),
         ) as client:
-            return await list_catalogs(client, CatalogListQuery())
+            listed = await list_catalogs(client, CatalogListQuery())
+            exact = await list_catalogs(
+                client,
+                CatalogListQuery(catalog_id="catalog-markdown"),
+            )
+            return listed, exact
 
-    result = asyncio.run(invoke())
+    result, exact = asyncio.run(invoke())
 
     assert result.total == 2
-    assert result.catalogs[0]["componentType"] == (
-        "resource.iaas.machine.instance.abstract"
-    )
-    assert result.catalogs[0]["instructions"]["resourceSpecs"][0]["node"] == (
-        "Compute"
-    )
-    assert result.catalogs[0]["instructions"]["requestInstructions"] == (
-        "Collect the VM shape before submission."
-    )
-    assert result.catalogs[1]["node"] == "LegacyCompute"
-    assert result.catalogs[1]["type"] == "cloudchef.nodes.Compute"
+    assert set(result.catalogs[0]) == {
+        "index",
+        "id",
+        "name",
+        "sourceKey",
+        "serviceCategory",
+        "status",
+        "available_operations",
+    }
+    assert result.catalogs[0]["name"] == "Linux from Markdown"
+    assert [
+        operation["operation_id"]
+        for operation in result.catalogs[0]["available_operations"]
+    ] == ["view_detail", "request"]
+    assert exact.catalogs == (result.catalogs[0],)
 
 
 def test_catalog_detail_includes_normalized_request_metadata() -> None:
@@ -645,6 +732,8 @@ catalog:
 resource_specs:
 - node: Compute
   type: cloudchef.nodes.Compute
+  runtime_fields:
+    resolver: resource_bundle_placement
 
 # Preapproval Instructions
 
@@ -676,12 +765,16 @@ Require an owner review.
 
     result = asyncio.run(invoke())
 
+    assert "catalog" not in result.model_dump(mode="json")
     assert result.metadata["componentType"] == (
         "resource.iaas.machine.instance.abstract"
     )
     assert result.metadata["node"] == "Compute"
     assert result.metadata["type"] == "cloudchef.nodes.Compute"
     assert result.metadata["instructions"]["resourceSpecs"][0]["node"] == "Compute"
+    assert result.metadata["instructions"]["resourceSpecs"][0][
+        "runtime_fields"
+    ] == {"resolver": "resource_bundle_placement"}
     assert result.metadata["preApprovalInstructions"] == "Require an owner review."
 
 
@@ -751,6 +844,56 @@ def test_image_query_uses_cmp_cloud_family_resource_type(
     assert len(submitted_payloads) == 1
     assert submitted_payloads[0]["cloudResourceType"] == expected_resource_type
     assert result.items[0]["templateId"] == "request-template-id"
+
+
+def test_resource_bundle_list_returns_request_identity_only() -> None:
+    """Exclude upstream resource-pool internals from Provider and MCP results."""
+
+    request_scope = make_request(
+        instance_name="cmp-a",
+        base_url="https://cmp.example",
+        user_id="user-a",
+        token="session-a",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/resource-bundles")
+        return httpx.Response(
+            200,
+            json=[{
+                "id": "resource-bundle-1",
+                "name": "vSphere pool",
+                "cloudEntryTypeId": "yacmp:cloudentry:type:vsphere",
+                "networks": [{"id": "network-1", "raw": "provider-only"}],
+                "storageTypes": [{"id": "storage-1"}],
+                "stats": {"cpu": 42},
+            }],
+            request=request,
+        )
+
+    async def invoke():
+        async with SmartCmpClient(
+            request_scope,
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            return await list_resource_bundles(
+                client,
+                ResourceBundleQuery(
+                    business_group_id="business-group-1",
+                    component_type="cloudchef.nodes.Compute",
+                    node_type="cloudchef.nodes.Compute",
+                    catalog_id="catalog-1",
+                    node_template_name="Compute",
+                ),
+            )
+
+    result = asyncio.run(invoke())
+
+    assert result.items == ({
+        "id": "resource-bundle-1",
+        "name": "vSphere pool",
+        "cloudEntryTypeId": "yacmp:cloudentry:type:vsphere",
+    },)
 
 
 def test_resource_bundle_resolves_declared_placement_fields() -> None:
@@ -892,7 +1035,7 @@ def test_resource_bundle_resolves_declared_placement_fields() -> None:
                 200,
                 json=(
                     []
-                    if lookup_calls == 4
+                    if lookup_calls == 5
                     else [{"id": 0, "name": "VPC A"}]
                 ),
                 request=request,
@@ -904,6 +1047,17 @@ def test_resource_bundle_resolves_declared_placement_fields() -> None:
             request_scope,
             transport=httpx.MockTransport(handler),
         ) as client:
+            auto_pending = await list_resource_bundles(
+                client,
+                ResourceBundleQuery(
+                    business_group_id="business-group-1",
+                    component_type="catalog-resource-type",
+                    node_type="cloudchef.nodes.SecurityGroup",
+                    catalog_id="catalog-1",
+                    node_template_name="SecurityGroup",
+                    resource_bundle_id="resource-bundle-1",
+                ),
+            )
             pending = await list_resource_bundles(
                 client,
                 ResourceBundleQuery(
@@ -959,17 +1113,34 @@ def test_resource_bundle_resolves_declared_placement_fields() -> None:
                     placement_values={"group_description": "No VPC available"},
                 ),
             )
-            return pending, complete, invalid_selection, empty_lookup
+            return auto_pending, pending, complete, invalid_selection, empty_lookup
 
-    pending, complete, invalid_selection, empty_lookup = asyncio.run(invoke())
+    auto_pending, pending, complete, invalid_selection, empty_lookup = asyncio.run(invoke())
 
+    auto_fields = {
+        field["key"]: field
+        for field in auto_pending.items[0]["requestFields"]
+    }
+    assert auto_fields["vpc_id"]["options"][0]["id"] == 0
+    assert auto_fields["vpc_id"]["options"][0]["name"] == "VPC A"
+
+    assert set(pending.items[0]) == {
+        "id",
+        "name",
+        "cloudEntryTypeId",
+        "requestFields",
+        "missingRequiredFields",
+        "missingSelectionFields",
+        "configurationErrors",
+        "valid",
+    }
     fields = {
         field["key"]: field
         for field in pending.items[0]["requestFields"]
     }
     assert fields["account_id"]["value"] == "account-1"
     assert fields["vpc_id"]["dependsOn"] == ["account_id"]
-    assert pending.items[0]["placementOptions"]["vpc_id"][0]["id"] == 0
+    assert fields["vpc_id"]["options"][0]["id"] == 0
     assert set(pending.items[0]["missingRequiredFields"]) == {
         "vpc_id",
         "group_description",
@@ -1238,7 +1409,18 @@ def test_windows_compute_rejects_an_exhausted_ip_pool(
             request_scope,
             transport=httpx.MockTransport(handler),
         ) as client:
-            return await list_resource_bundles(
+            automatic = await list_resource_bundles(
+                client,
+                ResourceBundleQuery(
+                    business_group_id="business-group-1",
+                    component_type="resource.iaas.machine.windows_instance.abstract",
+                    node_type="cloudchef.nodes.WindowsCompute",
+                    catalog_id="catalog-windows",
+                    node_template_name="WindowsCompute",
+                    resource_bundle_id="resource-bundle-1",
+                ),
+            )
+            selected = await list_resource_bundles(
                 client,
                 ResourceBundleQuery(
                     business_group_id="business-group-1",
@@ -1250,12 +1432,23 @@ def test_windows_compute_rejects_an_exhausted_ip_pool(
                     placement_values={"networkId": "network-1"},
                 ),
             )
+            return automatic, selected
 
-    result = asyncio.run(invoke())
+    automatic, result = asyncio.run(invoke())
+
+    automatic_fields = {
+        field["key"]: field for field in automatic.items[0]["requestFields"]
+    }
+    assert automatic_fields["networkId"]["options"][0]["id"] == "network-1"
 
     fields = {field["key"]: field for field in result.items[0]["requestFields"]}
     assert fields["networkId"]["target"] == "networkId"
-    assert result.items[0]["placementOptions"]["networkId"][0]["id"] == "network-1"
+    network_field = next(
+        field
+        for field in result.items[0]["requestFields"]
+        if field["key"] == "networkId"
+    )
+    assert network_field["options"][0]["id"] == "network-1"
     assert result.items[0]["valid"] is expected_valid
     if expected_valid:
         assert result.items[0]["configurationErrors"] == []

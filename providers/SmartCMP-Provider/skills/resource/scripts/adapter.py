@@ -106,6 +106,7 @@ async def list_all_resource(
         return tool_result(
             result,
             summary=f"Found {result.total or len(result.items)} resources.",
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -142,6 +143,7 @@ async def resource_detail(
                 f"Resource {result.name or result.resource_id}: "
                 f"{result.status or 'status unavailable'}."
             ),
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -163,14 +165,14 @@ async def list_recycled_resources(
     """
 
     try:
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             list_recycled_resources_operation,
             RecycledResourceQuery(
-                resource_id=resource_id,
-                resource_name=resource_name,
-                deployment_id=deployment_id,
-                deployment_name=deployment_name,
+                resource_id=resource_id or "",
+                resource_name=resource_name or "",
+                deployment_id=deployment_id or "",
+                deployment_name=deployment_name or "",
                 page=page,
                 size=size,
             ),
@@ -178,6 +180,7 @@ async def list_recycled_resources(
         return tool_result(
             result,
             summary=f"Found {len(result.items)} recycled resource rows.",
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -202,20 +205,20 @@ async def permanently_remove_recycled_resource(
     """
 
     try:
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             permanently_remove_recycled_resource_operation,
             PermanentResourceRemovalInput(
                 expected_deployment_id=expected_deployment_id,
                 expected_resource_ids=tuple(expected_resource_ids),
-                resource_id=resource_id,
-                resource_name=resource_name,
-                deployment_id=deployment_id,
-                deployment_name=deployment_name,
+                resource_id=resource_id or "",
+                resource_name=resource_name or "",
+                deployment_id=deployment_id or "",
+                deployment_name=deployment_name or "",
                 confirmed=confirmed,
             ),
         )
-        return tool_result(result, summary=result.message)
+        return tool_result(result, summary=result.message, request=request)
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
 
@@ -372,6 +375,7 @@ async def list_resource_operations(
         return tool_result(
             projected,
             summary=f"Found {len(result.operations)} available operations.",
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -399,12 +403,12 @@ async def operate_resource(
                 for resource_ref in split_values(resource_ids)
             )
         )
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             execute_resource_action,
             ResourceActionInput(targets=targets, action=action),
         )
-        return tool_result(result, summary=result.message)
+        return tool_result(result, summary=result.message, request=request)
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
 

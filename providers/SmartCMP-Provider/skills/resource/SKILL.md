@@ -169,7 +169,7 @@ tool_detail_groups:
   - resource
 tool_detail_capability_class: "provider:smartcmp"
 tool_detail_priority: 108
-tool_detail_result_mode: "tool_only_ok"
+tool_detail_result_mode: "llm"
 tool_detail_cli_positional:
   - resource_id
 tool_detail_parameters: |
@@ -582,7 +582,7 @@ health score.
 
 An operation intent means the user wants to change an existing resource state, for example `stop 1 vm-a`, `restart vm-a`, `execute create_snapshot on this virtual machine`, `stop the second VM`, or `take a snapshot`.
 
-When operation intent is present, a resource lookup is only a target-resolution step. Do not stop at the `smartcmp_list_all_resource` visible list output, and do not answer only with `Found N ...`. Use the returned metadata to continue to operation resolution, confirmation, or a clarification question.
+When operation intent is present, a resource lookup is only a target-resolution step. Do not stop at the `smartcmp_list_all_resource` or `smartcmp_resource_detail` output, and do not answer only with `Found N ...` or the resource status summary. Use the returned metadata to continue to operation resolution, confirmation, or a clarification question.
 
 1. Resolve the target resource.
    - If the user references a recent table `#` item, such as `1`, `第 1 台`, or `the first one`, use the matching item from the latest `smartcmp_list_all_resource` metadata.

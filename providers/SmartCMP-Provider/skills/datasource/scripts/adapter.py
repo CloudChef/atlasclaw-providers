@@ -151,9 +151,20 @@ async def list_images(
                 cloud_entry_type=cloud_entry_type,
             ),
         )
-        return tool_result(
-            result,
-            summary=f"Found {len(result.items)} images.",
-        )
+        if not result.items:
+            return tool_result(result, summary="No cloud images are available.")
+
+        image_lines = []
+        for index, item in enumerate(result.items, start=1):
+            name = str(item.get("name") or "").strip()
+            if not name:
+                raise ValueError(
+                    "Cloud image lookup returned an option without a display name."
+                )
+            image_lines.append(f"{index}. {name}")
+
+        summary = "Available cloud images:\n" + "\n".join(image_lines)
+        summary += "\nReply with the cloud image number to select it."
+        return tool_result(result, summary=summary)
     except (ValueError, RuntimeError) as error:
         return tool_error(error)

@@ -70,6 +70,8 @@ related:
 
 # === Tool Registration ===
 tool_list_services_name: "smartcmp_list_services"
+tool_list_services_read_only: true
+tool_list_services_auto_select_single_option: true
 tool_list_services_description: "List available service catalog choices from SmartCMP. Call this tool ONLY ONCE at the beginning of a new request workflow. It returns compact catalog identity metadata, not request-field instructions. After receiving the list, check whether the user's original message clearly matches a specific catalog. If so, auto-select it; otherwise show the numbered list. Displayed numbers are conversation choices only. Resolve the selected number to the catalog metadata UUID, then call smartcmp_get_request_catalog before inspecting fields or calling any catalog-dependent lookup. Keep returned _internal metadata for workflow use only; do not show those fields to the user."
 tool_list_services_entrypoint: "scripts/adapter.py:list_services"
 tool_list_services_group: "cmp"
@@ -86,7 +88,8 @@ tool_list_services_parameters: |
     }
   }
 tool_catalog_detail_name: "smartcmp_get_request_catalog"
-tool_catalog_detail_description: "Load the normalized request-field instructions for exactly one catalog selected from smartcmp_list_services. catalog_id MUST be the selected catalog metadata UUID, never a displayed number or sourceKey. Call once immediately after catalog selection and before smartcmp_list_available_bgs or request-field assembly. Keep returned _internal metadata for workflow use only."
+tool_catalog_detail_read_only: true
+tool_catalog_detail_description: "Load the normalized request-field instructions for exactly one catalog selected from smartcmp_list_services. catalog_id MUST be the selected catalog metadata UUID, never a displayed number or sourceKey. Call once immediately after catalog selection; it may share the same tool-call batch with smartcmp_list_available_bgs because that lookup depends only on the selected catalog UUID. Keep returned _internal metadata for workflow use only."
 tool_catalog_detail_entrypoint: "scripts/adapter.py:get_request_catalog"
 tool_catalog_detail_group: "cmp"
 tool_catalog_detail_capability_class: "provider:smartcmp"
@@ -136,6 +139,7 @@ tool_submit_success_contract:
     - "Request ID"
   note: "Only user-facing SmartCMP Request IDs count as successful submit identifiers. Normalize source aliases to a single user-facing Request ID and never expose UUID-shaped internal identifiers as the submitted Request ID."
 tool_status_name: "smartcmp_get_request_status"
+tool_status_read_only: true
 tool_status_description: "Query a submitted SmartCMP request status by user-facing Request ID, e.g. REQ20260501000095, RES20260501000095, TIC20260316000001, or CHG20260413000011. Use only for submitted request status or approval-result questions. For recent-submission follow-ups without an explicit ID, reuse the most recent Request ID from this conversation; if none exists, ask for it. Do NOT pass internal UUIDs, approve, or reject requests."
 tool_status_entrypoint: "scripts/adapter.py:status"
 tool_status_groups:
@@ -164,6 +168,8 @@ tool_status_parameters: |
     "required": ["request_id"]
   }
 tool_facets_name: "smartcmp_list_facets"
+tool_facets_read_only: true
+tool_facets_auto_select_single_option: true
 tool_facets_description: "List available resource pool tag facets from SmartCMP. REQUIRES businessGroupId — call this AFTER business group is selected and ONLY when request Markdown declares active resourceBundleTags without a default. After this tool returns, do not call datasource tools to interpret facets. Match or ask for a facet option, then build resourceBundleTags with facet key and option key (NOT display names). Never show raw facet metadata."
 tool_facets_entrypoint: "scripts/adapter.py:list_facets"
 tool_facets_group: "cmp"
@@ -188,7 +194,9 @@ tool_facets_parameters: |
     "required": ["business_group_id"]
   }
 tool_resource_bundles_name: "smartcmp_list_resource_bundles"
-tool_resource_bundles_description: "List request-flow resource pools and resolve the active request fields for an exact selected or defaulted pool. Use when generated Markdown declares an active resourceBundleId or runtime_fields.resolver. Always pass catalog_id and node_template_name as explicit context; placement_values contains business field selections only. With resource_bundle_id, request options through placement_fields and follow the returned requestFields, targets, dependencies, missingRequiredFields, missingSelectionFields, and configurationErrors. Requires selected business_group_id, component_type from generated Markdown catalog/component metadata, and node_type from resourceSpecs[].type. Fixed API filters: strategy=RB_POLICY_STATIC, enabled=true, readOnly=false. If resourceBundleId has ask:true, present the returned names and wait for the user's selection even when only one result exists. Ask the user to identify the resource-pool field and selected number when replying; never suggest that a bare number is sufficient."
+tool_resource_bundles_read_only: true
+tool_resource_bundles_auto_select_single_option: true
+tool_resource_bundles_description: "List request-flow resource pools and resolve the active request fields for an exact selected or defaulted pool. Use when generated Markdown declares an active resourceBundleId or runtime_fields.resolver. Always pass catalog_id and node_template_name as explicit context; placement_values contains business field selections only. With resource_bundle_id, request options through placement_fields and follow the returned requestFields, targets, dependencies, missingRequiredFields, missingSelectionFields, and configurationErrors. Requires selected business_group_id, component_type from generated Markdown catalog/component metadata, and node_type from resourceSpecs[].type. Fixed API filters: strategy=RB_POLICY_STATIC, enabled=true, readOnly=false. If resourceBundleId has ask:true and multiple results exist, present the returned names and wait for the user's selection. Ask the user to identify the resource-pool field and selected number when replying; never suggest that a bare number is sufficient."
 tool_resource_bundles_entrypoint: "scripts/adapter.py:list_resource_bundles"
 tool_resource_bundles_group: "cmp"
 tool_resource_bundles_capability_class: "provider:smartcmp"
@@ -243,12 +251,14 @@ tool_resource_bundles_parameters: |
         "additionalProperties": {
           "type": "string"
         },
-        "description": "Selected business field values only. Encode boolean and number values as strings and array values as JSON array strings. Never include catalogId or node; retain every selected field value while resolving later fields."
+        "description": "Selected business field values only. For an option-backed lookup field, use the exact selected options[].id; options[].name is display-only. If current option IDs have not been loaded, request the field in placement_fields and omit it from placement_values, then resolve the user selection against exactly one returned option before exact validation. Never guess or pass the display name. Encode boolean and number values as strings and array values as JSON array strings. Never include catalogId or node; retain every selected field value while resolving later fields."
       }
     },
     "required": ["business_group_id", "component_type", "node_type", "catalog_id", "node_template_name"]
   }
 tool_bgs_name: "smartcmp_list_available_bgs"
+tool_bgs_read_only: true
+tool_bgs_auto_select_single_option: true
 tool_bgs_description: "List available business groups for a specific service catalog. Call this AFTER selecting a catalog to get the list of business groups the user can choose from. catalog_id MUST be the selected catalog metadata UUID, never the displayed list number. Use the returned id or name (depending on the catalog parameter key) for the business group field in the request body."
 tool_bgs_entrypoint: "scripts/adapter.py:list_available_bgs"
 tool_bgs_group: "cmp"
@@ -268,6 +278,8 @@ tool_bgs_parameters: |
     "required": ["catalog_id"]
   }
 tool_flavors_name: "smartcmp_list_flavors"
+tool_flavors_read_only: true
+tool_flavors_auto_select_single_option: true
 tool_flavors_description: "Resolve the request flavor fields declared by generated Markdown. Without compute_profile_id, list requestable MACHINE compute profiles and use the selected id as computeProfileId. When flavorId is also active, call again with the selected compute_profile_id and resource_bundle_id unless the exact selected resource-pool item has cloudEntryTypeId equal to yacmp:cloudentry:type:vsphere. For that exact vSphere platform and only after computeProfileId is resolved, SmartCMP resolves flavorId from the compute profile: skip the cloud-flavor query and omit flavorId from preview and submit JSON. Never send an empty flavorId or copy computeProfileId into flavorId. A missing platform marker, a different platform, or an unresolved computeProfileId remains fail-closed. Pass catalog_id and node_template_name when known for the compute-profile query. Omit resource_bundle_id only for an intentional global compute-profile query; it is required for a cloud-flavor query. For any ask:true field that requires an explicit selection, show the current filtered names and ask the user to identify the pending field and selected number instead of replying with a bare number or typed specification."
 tool_flavors_entrypoint: "scripts/adapter.py:list_flavors"
 tool_flavors_group: "cmp"
@@ -309,7 +321,9 @@ tool_flavors_parameters: |
     }
   }
 tool_logical_templates_name: "smartcmp_list_logical_templates"
-tool_logical_templates_description: "List logical OS templates for a SmartCMP request. Call only after resource-pool and all explicit flavor-field selections are complete when generated Markdown declares logicTemplateId. For an exact selected yacmp:cloudentry:type:vsphere resource pool, resolved computeProfileId completes flavor selection and flavorId remains omitted for platform resolution. Pass resource_bundle_id and the required catalog OS family as os_type; also pass catalog_id and node_template_name when known. Use the selected id as logicTemplateId. The request-projected tool always presents the names as an explicit selection boundary, even when one result exists or generated ask is false."
+tool_logical_templates_read_only: true
+tool_logical_templates_auto_select_single_option: true
+tool_logical_templates_description: "List logical OS templates for a SmartCMP request. Call only after resource-pool and all explicit flavor-field selections are complete when generated Markdown declares logicTemplateId. For an exact selected yacmp:cloudentry:type:vsphere resource pool, resolved computeProfileId completes flavor selection and flavorId remains omitted for platform resolution. Pass resource_bundle_id and the required catalog OS family as os_type; also pass catalog_id and node_template_name when known. Use the selected id as logicTemplateId. The request-projected tool presents multiple returned names as an explicit selection boundary; a sole candidate is resolved by the generic runtime contract."
 tool_logical_templates_entrypoint: "../datasource/scripts/adapter.py:list_logical_templates"
 tool_logical_templates_groups:
   - cmp
@@ -356,7 +370,9 @@ tool_logical_templates_parameters: |
     "required": ["resource_bundle_id", "os_type"]
   }
 tool_physical_templates_name: "smartcmp_list_physical_templates"
-tool_physical_templates_description: "List physical templates available to the selected SmartCMP resource pool and logical template. Use only when generated Markdown declares physicalTemplateId. Each result retains its logicTemplateId; use the selected physicalTemplateId together with logicTemplateId and omit templateId. If physicalTemplateId has ask:true, present names and ask the user to identify the physical-template field and selected number even when one result exists."
+tool_physical_templates_read_only: true
+tool_physical_templates_auto_select_single_option: true
+tool_physical_templates_description: "List physical templates available to the selected SmartCMP resource pool and logical template. Use only when generated Markdown declares physicalTemplateId. Each result retains its logicTemplateId; use the selected physicalTemplateId together with logicTemplateId and omit templateId. If physicalTemplateId has ask:true and multiple results exist, present names and ask the user to identify the physical-template field and selected number."
 tool_physical_templates_entrypoint: "scripts/adapter.py:list_physical_templates"
 tool_physical_templates_groups:
   - cmp
@@ -387,7 +403,9 @@ tool_physical_templates_parameters: |
     "required": ["resource_bundle_id", "logic_template_id"]
   }
 tool_images_name: "smartcmp_list_images"
-tool_images_description: "List cloud images for a SmartCMP request. Call after resource-pool and logical-template selection only when generated Markdown declares templateId. Use the selected image id as templateId, never as physicalTemplateId. If templateId has ask:true, present image names and ask the user to identify the image field and selected number even when one result exists."
+tool_images_read_only: true
+tool_images_auto_select_single_option: true
+tool_images_description: "List cloud images for a SmartCMP request. Call after resource-pool and logical-template selection only when generated Markdown declares templateId. Use the selected image id as templateId, never as physicalTemplateId. If templateId has ask:true and multiple results exist, present image names and ask the user to identify the image field and selected number."
 tool_images_entrypoint: "../datasource/scripts/adapter.py:list_images"
 tool_images_groups:
   - cmp
@@ -562,6 +580,11 @@ Status semantics:
 Steps 1 through 3 are mandatory for every new request. Never ask the user to type a
 business group before calling `smartcmp_list_available_bgs`.
 
+When the service has a clear automatic match, steps 1 through 3 may continue in
+the same turn. Stop after any step that requires a user selection;
+`smartcmp_get_request_catalog` is an internal schema lookup, not a user-facing
+question.
+
 ### Catalog identity contract
 
 - Displayed service list numbers are conversation choices only. Resolve them
@@ -573,9 +596,9 @@ business group before calling `smartcmp_list_available_bgs`.
   reply with a number unless those numbers are visible in the response.
 - `catalogId` must be the selected catalog metadata UUID, never the displayed
   list number and never `sourceKey`.
-- After catalog selection, the next tool call must be
-  `smartcmp_get_request_catalog` with that UUID. After the selected catalog
-  detail returns, call `smartcmp_list_available_bgs` with the same UUID.
+- After catalog selection, call `smartcmp_get_request_catalog` and
+  `smartcmp_list_available_bgs` with the same UUID in one tool-call batch. The
+  business-group lookup does not depend on the catalog-detail response.
 - There is no catalog questionnaire/default-property/preview tool in this
   skill. Do not invent one.
 
@@ -599,35 +622,51 @@ business group before calling `smartcmp_list_available_bgs`.
   call any logical-template,
   physical-template, or image lookup first.
 - For each active generated field with `ask: true`, call only that field's
-  lookup, present only its current choices, ask the user to select one, and
-  stop. Do not ask for later lookup fields, request name, or credentials in the
-  same reply. A numbered or named answer paired with the pending field meaning
-  requires the next live lookup.
-- Phrase every selection reply with the pending field meaning so AtlasClaw
-  routes the follow-up back to this live workflow. Ask the user to identify the
-  resource pool, flavor, logical template, physical template, or image field
-  together with the selected number and intent to continue. Do not tell the
-  user that a bare number alone is sufficient.
+  lookup. When the opted-in read-only tool returns one visible candidate, the
+  generic runtime selects it and continues. When it returns multiple choices,
+  present only those choices, ask the user to select one, and stop. Do not ask
+  for later lookup fields or user-entered fields in the same reply.
+- Every lookup-selection prompt must also state exactly one immediate workflow
+  step that will follow the user's selection, without asking for that next step
+  in the same reply. If another generated lookup remains, state that the next
+  live lookup will run. If generated lookups are complete and an already-known
+  active non-lookup field is missing, state that this field will be collected
+  next. If no such field is missing, state that placement resolution or exact
+  validation will run next. This immediate-next-step statement is mandatory
+  and must match the current generated instructions and any applicable latest
+  exact `requestFields`.
+- After recording a lookup selection, continue the generated lookup sequence
+  above while any active lookup field remains unresolved. Once that sequence is
+  complete, but before starting `resource_bundle_placement` discovery or exact
+  validation, collect the already-known active non-lookup fields in their
+  declared order. A field belongs to this sequence when it is marked required
+  or `ask: true`, has satisfied dependencies, and has neither a real user value
+  nor a non-empty default. A promise to provide a value later is not a value.
+  Ask for exactly the first missing field and stop. After the user supplies it,
+  re-evaluate the same already-known active non-lookup fields. If another field
+  still meets these conditions, ask for that field next and do not state or
+  imply that placement resolution or validation will run yet. Only when the
+  current field is the last such missing field must the prompt state that
+  placement resolution or validation follows after it is supplied. Apply this
+  only to fields already proven active by generated instructions or the latest
+  exact `requestFields`. Use an exact field only when its condition and
+  dependency inputs have not changed since that result; never activate a
+  conditional field by guessing.
+- Phrase every multiple-choice reply with the pending field meaning and visible
+  numbered options. A bare visible number or the exact visible option text is a
+  valid generic continuation; do not require the user to repeat field names.
 - Stop after a lookup whenever the user must choose among multiple unresolved
   options. Ask at most one concise question and wait for the answer.
-- When all required choices already have one unambiguous match from the user's
-  wording, or a single returned option for a field that is not marked
-  `ask: true`, noninteractive request lookups may
-  chain in dependency order in the same turn. This includes
-  `smartcmp_list_resource_bundles`, `smartcmp_list_flavors`,
-  `smartcmp_list_physical_templates`, and `smartcmp_list_images`. A field marked
-  `ask: true` must show its choices and wait even when the lookup returns one
-  option. The request-projected `smartcmp_list_logical_templates` is a
-  deliberate stricter boundary: it always ends the turn with a displayed list
-  so logical-template IDs cannot be silently confused with flavor or image IDs.
-- During mandatory catalog discovery, when the initial list has one
-  clear automatic match, `smartcmp_list_services` may be followed by
-  `smartcmp_get_request_catalog` and then `smartcmp_list_available_bgs` in the
-  same user turn. When the user must choose a catalog, stop after the list and
-  continue with detail plus business-group lookup after their selection.
-- `smartcmp_get_request_catalog` is a schema-loading step, not a user-facing
-  lookup. It may be followed by `smartcmp_list_available_bgs` in the same turn
-  so catalog selection does not create an empty conversational round trip.
+- A sole visible candidate may auto-continue only when its read-only tool is
+  explicitly marked `auto_select_single_option`. Multiple candidates always
+  remain a user selection boundary. Tools without that metadata never gain
+  automatic-selection behavior.
+- During mandatory catalog discovery, when the initial list has one clear
+  automatic match, emit `smartcmp_get_request_catalog` and
+  `smartcmp_list_available_bgs` in the same tool-call batch with the selected
+  catalog UUID. The business-group query does not depend on the catalog-detail
+  response. When the user must choose a catalog, stop after the list and issue
+  that batch only after their selection.
 - After a lookup result that needs user input, summarize the selectable result
   in natural language and ask at most one next question. When no user choice is
   needed, preserve the compact lookup evidence and continue the resolver chain.
@@ -814,8 +853,12 @@ scope.
   `requestFields` is the authoritative active field set for that pool and the
   current selections.
 - When a spec declares `runtime_fields.resolver: resource_bundle_placement`,
-  call the selected pool once with no `placement_fields` to discover its active
-  fields before collecting values.
+  first collect the already-known active non-lookup fields required by Tool
+  sequencing, then call the selected pool once with no `placement_fields` to
+  discover its active fields and resolve the first dependency-ready missing
+  lookup before collecting resolver-discovered values. Present that field's
+  returned `options`; use the selected `options[].id` in `placement_values`,
+  then re-resolve the selected pool for the next field or final validation.
 - Resolve fields in `dependsOn` order. Query only a field whose dependencies
   already have values, present its returned `options`, retain the selection in
   `placement_values`, and call the tool again. Re-resolve after every selection
@@ -943,85 +986,32 @@ Omit `genericRequest.processForm` when no form fields are declared or active.
 
 ## Business-Group Resolution
 
-- Use `smartcmp_list_available_bgs` as the authoritative source.
-- If the user already specified a tenant / 租户 / 部门 / BU / 项目 and it
-  uniquely matches an available business group, use that business group.
-- If multiple groups remain, ask one concise numbered question with group names
-  only. Do not display business group UUIDs.
-- Use the selected business group's `id` as top-level `businessGroupId`.
-- If a request name is still missing when asking for business group selection,
-  ask for both in the same sentence, for example: `请回复业务组编号和资源名称，例如：2 slbtest01`.
-
-## Service Selection
-
-- Call `smartcmp_list_services` once at the start of a new request.
-- Match user wording against the returned catalog name and service category.
-- If the result contains zero catalogs, report that no matching published
-  catalog exists and stop the request workflow.
-- If multiple catalogs could match, ask a numbered catalog-selection question.
-- When the user selects by number, resolve the number to the selected catalog
-  metadata UUID, then call `smartcmp_get_request_catalog` with that UUID before
-  any catalog-dependent lookup or request-field assembly.
+- `smartcmp_list_available_bgs` is authoritative. If a tenant / 租户 / 部门 /
+  BU / 项目 already uniquely matches one returned group, use it; otherwise ask
+  one concise numbered question with display names only.
+- Put the selected group's `id` at top-level `businessGroupId`. If a request
+  name is also missing, ask for the group selection and name together.
 
 ## Runtime Lookups
 
-Use extra lookup tools only when generated Markdown requires or explicitly asks
-for a value that cannot be taken from the user or a default.
+Generated Markdown determines which lookup fields are active; Tool sequencing
+determines their order. Call only the lookup for the current active field with
+no usable default, use its selected returned ID only for that declared field,
+and keep display names user-facing.
 
-- `smartcmp_list_facets`: use only when generated Markdown declares an active
-  `resourceBundleTags` field without a default. Pass `node_type` from
-  `resourceSpecs[].type`. Build tag values as `["<facet.key>:<option.key>"]`
-  from the API response.
-- `smartcmp_list_resource_bundles`: use when generated Markdown declares an
-  active `resourceBundleId` without a default, or when the selected/defaulted
-  resource pool must supply request-time fields. Pass the selected business
-  group id, `component_type`, `node_type`, explicit `catalog_id`, explicit
-  `node_template_name`, requested `placement_fields`, the exact
-  `resource_bundle_id`, and `placement_values` containing only business field
-  selections. The tool applies fixed
-  `strategy=RB_POLICY_STATIC`, `enabled=true`, and `readOnly=false` filters.
-- `smartcmp_list_flavors`: without `compute_profile_id`, resolve an active
-  required `computeProfileId` from SmartCMP compute-profile data, or support the
-  no-Markdown Compute fallback. When generated Markdown also declares an active
-  `flavorId`, call the same tool again with the selected `compute_profile_id`
-  and `resource_bundle_id`, then use the selected returned `id` as `flavorId`,
-  unless the exact selected resource-pool item has `cloudEntryTypeId` equal to
-  `yacmp:cloudentry:type:vsphere`. In that exact case, after
-  `computeProfileId` is selected, skip the second lookup and omit `flavorId`
-  from preview and submit JSON for deterministic platform resolution. Do not
-  send an empty value or substitute `computeProfileId`. Empty cloud-flavor
-  results never authorize omission, and missing or different platform identity
-  remains fail-closed.
-  During normal provisioning, pass the selected resource pool, catalog, and
-  `resourceSpecs[].node`; omit the pool only for an intentional global
-  compute-profile query. For each explicitly selectable field with `ask: true`,
-  show the filtered choices and wait even when only one is returned.
-- `smartcmp_list_logical_templates`: use after an explicit
-  `resourceBundleId` is selected when generated Markdown declares an active
-  `logicTemplateId` without a default. Pass the resource pool ID, catalog ID,
-  resourceSpecs node, and catalog OS type when known. Omit the resource pool
-  only for an intentional global directory query. Use the selected `id` as
-  `logicTemplateId`.
-- `smartcmp_list_physical_templates`: use only after `logicTemplateId` is
-  resolved and generated Markdown declares an active `physicalTemplateId`
-  without a default. Pass both selected IDs. Each returned choice retains the
-  same `logicTemplateId`; use its `physicalTemplateId` in the physical branch.
-  If no physical template exists and `templateId` is active, continue with the
-  image lookup. Otherwise stop and report that the selected logical template
-  and resource pool have no requestable physical template.
-- `smartcmp_list_images`: use only after `logicTemplateId` is resolved and
-  generated Markdown declares an active `templateId` without a default. Pass
-  the selected resource pool ID and logical-template ID. Use
-  `cloudEntryTypeId` from the selected resource-pool metadata as
-  `cloud_entry_type`. If that metadata is absent, stop and report the invalid
-  resource-pool data. Use the selected image `id` as `templateId`.
-- Do not call request lookup tools for fields that already have active,
-  usable defaults.
-
-Never ask the user to type `logicTemplateId`, `templateId`,
-`physicalTemplateId`, or any template UUID. Present logical-template,
-physical-template, and image display names while keeping their IDs as internal
-lookup evidence. Serialize the exact branch declared by generated Markdown.
+- For `resourceBundleTags`, use `smartcmp_list_facets` with the spec node type
+  and serialize selected values as `"<facet.key>:<option.key>"`.
+- For resource-pool placement, pass the selected business group, component
+  type, spec node, catalog UUID, node template name, exact pool ID when known,
+  requested fields, and only business selections in `placement_values`. The
+  returned `requestFields` is authoritative for the current selections.
+- For template fields, follow the generated branch exactly: logical template,
+  then physical template or cloud image. Keep their IDs internal; never ask a
+  user to type a template UUID or substitute one field's ID for another.
+- The vSphere flavor omission and all option-ID / exact-validation rules remain
+  the authoritative rules in Tool sequencing and Generated Markdown. Empty
+  results, missing platform identity, or a missing declared template branch
+  remain fail-closed.
 
 ### Facet lookup result handling
 

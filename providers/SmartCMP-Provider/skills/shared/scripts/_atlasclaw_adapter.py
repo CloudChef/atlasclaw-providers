@@ -27,7 +27,11 @@ from smartcmp_provider.auth.models import ResolvedSmartCmpRequest  # noqa: E402
 from smartcmp_provider.auth.resolver import (  # noqa: E402
     resolve_atlasclaw_instance_request,
 )
-from smartcmp_provider.errors import SmartCmpError  # noqa: E402
+from smartcmp_provider.errors import (  # noqa: E402
+    SmartCmpAuthenticationError,
+    SmartCmpError,
+    SmartCmpPermissionError,
+)
 from smartcmp_provider.transport.client import SmartCmpClient  # noqa: E402
 
 
@@ -171,12 +175,15 @@ def tool_result(
     *,
     summary: str,
     internal: Mapping[str, Any] | None = None,
+    request: ResolvedSmartCmpRequest | None = None,
 ) -> dict[str, Any]:
     """Convert one typed Provider result into the AtlasClaw Tool result contract.
 
     The complete structured payload is retained both as ordinary result fields
     and compact ``_internal`` workflow metadata. The visible output intentionally
-    stays presentation-only and does not reimplement SmartCMP domain rules.
+    stays presentation-only and does not reimplement SmartCMP domain rules. When
+    supplied, ``request`` binds the internal metadata to the selected Provider
+    instance and request trace without changing the public Provider result.
     """
 
     payload = _strip_mcp_available_operations(_json_value(value))
@@ -186,6 +193,11 @@ def tool_result(
         if internal is not None
         else structured
     )
+    if request is not None:
+        internal_payload = {
+            **internal_payload,
+            **workflow_identity(request),
+        }
     return {
         "success": True,
         "output": summary,
@@ -196,6 +208,23 @@ def tool_result(
         ),
         **structured,
     }
+
+
+def workflow_identity(request: ResolvedSmartCmpRequest) -> dict[str, str]:
+    """Return trace-bound AtlasClaw continuation identity for one Provider request.
+
+    The identity is runtime-only metadata. It lets Core bind a later user reply
+    to the same Provider workflow without exposing credentials or changing the
+    Provider/MCP result schema.
+    """
+
+    instance_name = str(
+        getattr(getattr(request.context, "instance", None), "name", "") or ""
+    ).strip()
+    identity = {"internal_request_trace_id": request.context.trace_id}
+    if instance_name:
+        identity["provider_instance_ref"] = f"smartcmp.{instance_name}"
+    return identity
 
 
 def _strip_mcp_available_operations(value: Any) -> Any:
@@ -215,11 +244,18 @@ def _strip_mcp_available_operations(value: Any) -> Any:
 def tool_error(error: Exception) -> dict[str, Any]:
     """Convert an expected adapter, validation, or Provider failure for AtlasClaw."""
 
-    return {
+    result: dict[str, Any] = {
         "success": False,
         "error": str(error),
         "output": str(error),
     }
+    if isinstance(error, SmartCmpAuthenticationError):
+        result["error_kind"] = "authentication"
+    elif isinstance(error, SmartCmpPermissionError):
+        result["error_kind"] = "authorization"
+    if isinstance(error, SmartCmpError) and error.http_status is not None:
+        result["http_status"] = error.http_status
+    return result
 
 
 def split_values(

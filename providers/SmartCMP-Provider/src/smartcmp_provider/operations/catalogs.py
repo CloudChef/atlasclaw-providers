@@ -81,6 +81,46 @@ _COMPUTE_DIRECT_FIELD_TYPES = {
 }
 _NETWORK_METADATA_KEYS = ("VpcId", "NetworkId", "vpcId", "networkId")
 _ZONE_METADATA_KEYS = ("Zone", "zoneId", "availabilityZone")
+_RESOURCE_BUNDLE_RESULT_KEYS = ("id", "name", "cloudEntryTypeId")
+
+
+def _normalize_catalog_summary(
+    catalog: dict[str, Any],
+    *,
+    index: int,
+    exact_catalog: bool,
+) -> dict[str, Any]:
+    """Return catalog identity and supported operations without request details."""
+
+    summary: dict[str, Any] = {
+        "index": index,
+        "id": catalog.get("id", ""),
+        "name": catalog.get("nameZh") or catalog.get("name", ""),
+        "sourceKey": catalog.get("sourceKey", ""),
+        "serviceCategory": catalog.get("serviceCategory", ""),
+    }
+    if catalog.get("type"):
+        summary["catalogType"] = catalog["type"]
+    if exact_catalog:
+        status = str(catalog.get("status") or catalog.get("state") or "").strip()
+        if status:
+            summary["status"] = status
+    else:
+        summary["status"] = "PUBLISHED"
+    summary["available_operations"] = serialize_available_operations(
+        available_catalog_operations(summary)
+    )
+    return summary
+
+
+def _project_resource_bundle(resource_bundle: dict[str, Any]) -> dict[str, Any]:
+    """Return only resource-pool identity fields needed by request consumers."""
+
+    return {
+        key: resource_bundle[key]
+        for key in _RESOURCE_BUNDLE_RESULT_KEYS
+        if key in resource_bundle
+    }
 
 
 async def list_catalogs(
@@ -119,9 +159,7 @@ async def list_catalogs(
                 f"{returned_catalog_id or '<missing>'}.",
                 trace_id=client.request.context.trace_id,
             )
-        catalogs = (
-            normalize_catalog(payload, index=1, exact_catalog=True),
-        )
+        catalogs = (_normalize_catalog_summary(payload, index=1, exact_catalog=True),)
         return CatalogListResult(catalogs=catalogs, total=1)
 
     params: dict[str, Any] = {
@@ -154,7 +192,7 @@ async def list_catalogs(
         )
     total = _coerce_total(payload.get("totalElements"), len(rows))
     catalogs = tuple(
-        normalize_catalog(item, index=index, exact_catalog=False)
+        _normalize_catalog_summary(item, index=index, exact_catalog=False)
         for index, item in enumerate(rows, start=1)
     )
     return CatalogListResult(catalogs=catalogs, total=total)
@@ -171,7 +209,7 @@ async def get_catalog_detail(
         query: Stable SmartCMP catalog ID.
 
     Returns:
-        Raw catalog data and normalized user-facing detail facts.
+        Normalized user-facing request and pre-approval facts.
 
     Raises:
         SmartCmpValidationError: If catalog ID is empty.
@@ -202,7 +240,7 @@ async def get_catalog_detail(
         )
     normalized_metadata = normalize_catalog(payload, index=1, exact_catalog=True)
     normalized_metadata.update(build_catalog_detail_metadata(payload, catalog_id))
-    return CatalogDetailResult(catalog=payload, metadata=normalized_metadata)
+    return CatalogDetailResult(metadata=normalized_metadata)
 
 
 async def list_available_business_groups(
@@ -302,15 +340,17 @@ async def list_resource_bundles(
             for item in rows
             if str(item.get("id") or "").strip() == resource_bundle_id
         ]
-        if not rows:
+        if len(rows) != 1:
             raise SmartCmpValidationError(
-                f"Resource pool {resource_bundle_id} is not available for the "
-                "selected request context.",
+                f"Resource pool {resource_bundle_id} must resolve to exactly one "
+                "available result for the selected request context.",
                 trace_id=client.request.context.trace_id,
             )
 
     if not resource_bundle_id:
-        return CatalogItemsResult(items=tuple(dict(item) for item in rows))
+        return CatalogItemsResult(
+            items=tuple(_project_resource_bundle(item) for item in rows)
+        )
 
     catalog = await _load_request_catalog(client, catalog_id)
     catalog_node_type = _catalog_node_type(catalog.get("blueprint"), node_name)
@@ -442,11 +482,10 @@ async def _resolve_resource_bundle_request_fields(
     hidden_fields = _configured_field_names(data.get("un_visibility_property"))
     immutable_fields = _configured_field_names(data.get("un_modification_property"))
     resolved_fields: list[dict[str, Any]] = []
-    placement_options: dict[str, list[dict[str, Any]]] = {}
-    excluded_fields: list[str] = []
     missing_required_fields: list[str] = []
     missing_selection_fields: list[str] = []
     configuration_errors: list[str] = []
+    auto_lookup_pending = not requested_fields
 
     for target, source_fields, source_data in (
         ("params", fields, data),
@@ -471,7 +510,6 @@ async def _resolve_resource_bundle_request_fields(
                 selected_values=effective_values,
                 request_keys=request_keys,
             ):
-                excluded_fields.append(field_name)
                 continue
             source_field_name = str(field_schema.get("_sourceField") or field_name)
             field_values = _selected_values_for_schema(
@@ -505,12 +543,17 @@ async def _resolve_resource_bundle_request_fields(
                     for dependency in field["dependsOn"]
                 ]
             options_resolved = bool(field.get("options"))
-            should_query_options = field["lookup"] and (
-                field_name in requested_fields or not _is_missing(field.get("value"))
-            )
-            dependencies_resolved = _lookup_dependencies_resolved(
+            (
+                should_query_options,
+                auto_query_options,
+                dependencies_resolved,
+                explicitly_requested,
+            ) = _lookup_resolution_plan(
                 field,
-                field_values,
+                field_name=field_name,
+                requested_fields=requested_fields,
+                selected_values=field_values,
+                auto_lookup_pending=auto_lookup_pending,
             )
             if should_query_options and dependencies_resolved:
                 options = await _query_request_field_options(
@@ -523,11 +566,10 @@ async def _resolve_resource_bundle_request_fields(
                     selected_values=field_values,
                 )
                 field["options"] = options
-                placement_options[field_name] = options
                 options_resolved = True
-            elif field.get("options"):
-                placement_options[field_name] = field["options"]
-            if should_query_options and not dependencies_resolved:
+                if auto_query_options:
+                    auto_lookup_pending = False
+            if explicitly_requested and not dependencies_resolved:
                 configuration_errors.append(
                     f"Lookup field '{field_name}' cannot be validated until "
                     "its dependencies are selected."
@@ -561,16 +603,14 @@ async def _resolve_resource_bundle_request_fields(
             requested_fields=requested_fields,
             selected_values=effective_values,
             resolved_fields=resolved_fields,
-            placement_options=placement_options,
             missing_required_fields=missing_required_fields,
             missing_selection_fields=missing_selection_fields,
             configuration_errors=configuration_errors,
+            auto_lookup_pending=auto_lookup_pending,
         )
 
-    normalized = dict(resource_bundle)
+    normalized = _project_resource_bundle(resource_bundle)
     normalized["requestFields"] = resolved_fields
-    normalized["placementOptions"] = placement_options
-    normalized["excludedFields"] = excluded_fields
     normalized["missingRequiredFields"] = missing_required_fields
     normalized["missingSelectionFields"] = missing_selection_fields
     normalized["configurationErrors"] = configuration_errors
@@ -593,10 +633,10 @@ async def _append_compute_related_resource_fields(
     requested_fields: tuple[str, ...],
     selected_values: dict[str, Any],
     resolved_fields: list[dict[str, Any]],
-    placement_options: dict[str, list[dict[str, Any]]],
     missing_required_fields: list[str],
     missing_selection_fields: list[str],
     configuration_errors: list[str],
+    auto_lookup_pending: bool,
 ) -> None:
     existing_keys = {str(field.get("key") or "") for field in resolved_fields}
     has_network_node = False
@@ -675,12 +715,17 @@ async def _append_compute_related_resource_fields(
                 {"type": "array"},
             )
         options_resolved = bool(field.get("options"))
-        should_query_options = field["lookup"] and (
-            direct_key in requested_fields or not _is_missing(field.get("value"))
-        )
-        dependencies_resolved = _lookup_dependencies_resolved(
+        (
+            should_query_options,
+            auto_query_options,
+            dependencies_resolved,
+            explicitly_requested,
+        ) = _lookup_resolution_plan(
             field,
-            related_values,
+            field_name=direct_key,
+            requested_fields=requested_fields,
+            selected_values=related_values,
+            auto_lookup_pending=auto_lookup_pending,
         )
         if should_query_options and dependencies_resolved:
             options = await _query_request_field_options(
@@ -693,11 +738,10 @@ async def _append_compute_related_resource_fields(
                 selected_values=related_values,
             )
             field["options"] = options
-            placement_options[direct_key] = options
             options_resolved = True
-        elif field.get("options"):
-            placement_options[direct_key] = field["options"]
-        if should_query_options and not dependencies_resolved:
+            if auto_query_options:
+                auto_lookup_pending = False
+        if explicitly_requested and not dependencies_resolved:
             configuration_errors.append(
                 f"Lookup field '{direct_key}' cannot be validated until "
                 "its dependencies are selected."
@@ -726,9 +770,9 @@ async def _append_compute_related_resource_fields(
             requested_fields=requested_fields,
             selected_values=selected_values,
             resolved_fields=resolved_fields,
-            placement_options=placement_options,
             missing_selection_fields=missing_selection_fields,
             configuration_errors=configuration_errors,
+            auto_lookup_pending=auto_lookup_pending,
         )
 
 
@@ -738,9 +782,9 @@ def _append_compute_subnet_field(
     requested_fields: tuple[str, ...],
     selected_values: dict[str, Any],
     resolved_fields: list[dict[str, Any]],
-    placement_options: dict[str, list[dict[str, Any]]],
     missing_selection_fields: list[str],
     configuration_errors: list[str],
+    auto_lookup_pending: bool,
 ) -> None:
     raw_subnets = resource_bundle.get("subnets")
     if not isinstance(raw_subnets, list):
@@ -755,10 +799,31 @@ def _append_compute_subnet_field(
         dependencies.append("available_zone_id")
     value = str(selected_values.get("subnetId") or "").strip()
     options: list[dict[str, Any]] = []
-    should_resolve_options = "subnetId" in requested_fields or bool(value)
-    dependencies_resolved = all(
-        not _is_missing(selected_values.get(dependency))
-        for dependency in dependencies
+    field = {
+        "key": "subnetId",
+        "target": "subnetId",
+        "type": "string",
+        "required": False,
+        "visible": True,
+        "editable": True,
+        "ask": _is_missing(value),
+        "lookup": True,
+        "dependsOn": dependencies,
+        "value": value,
+        "options": options,
+        "validation": {},
+    }
+    (
+        should_resolve_options,
+        _auto_query_options,
+        dependencies_resolved,
+        explicitly_requested,
+    ) = _lookup_resolution_plan(
+        field,
+        field_name="subnetId",
+        requested_fields=requested_fields,
+        selected_values=selected_values,
+        auto_lookup_pending=auto_lookup_pending,
     )
     if should_resolve_options and dependencies_resolved:
         options = [
@@ -776,22 +841,8 @@ def _append_compute_subnet_field(
             )
             if (option := _normalize_option(item)) is not None
         ]
-        placement_options["subnetId"] = options
-    field = {
-        "key": "subnetId",
-        "target": "subnetId",
-        "type": "string",
-        "required": False,
-        "visible": True,
-        "editable": True,
-        "ask": _is_missing(value),
-        "lookup": True,
-        "dependsOn": dependencies,
-        "value": value,
-        "options": options,
-        "validation": {},
-    }
-    if should_resolve_options and not dependencies_resolved:
+    field["options"] = options
+    if explicitly_requested and not dependencies_resolved:
         configuration_errors.append(
             "Lookup field 'subnetId' cannot be validated until its dependencies are selected."
         )
@@ -1216,6 +1267,34 @@ def _lookup_dependencies_resolved(
     return all(
         not _is_missing(selected_values.get(str(dependency)))
         for dependency in field.get("dependsOn", [])
+    )
+
+
+def _lookup_resolution_plan(
+    field: dict[str, Any],
+    *,
+    field_name: str,
+    requested_fields: tuple[str, ...],
+    selected_values: dict[str, Any],
+    auto_lookup_pending: bool,
+) -> tuple[bool, bool, bool, bool]:
+    """Plan one lookup without treating unresolved automatic candidates as errors."""
+
+    dependencies_resolved = _lookup_dependencies_resolved(field, selected_values)
+    explicitly_requested = (
+        field_name in requested_fields or not _is_missing(field.get("value"))
+    )
+    auto_query = (
+        auto_lookup_pending
+        and field.get("ask") is True
+        and _is_missing(field.get("value"))
+        and dependencies_resolved
+    )
+    return (
+        field.get("lookup") is True and (explicitly_requested or auto_query),
+        auto_query,
+        dependencies_resolved,
+        explicitly_requested,
     )
 
 
@@ -2080,6 +2159,8 @@ def _normalize_resource_specs(raw_specs: object) -> list[dict[str, Any]]:
         "resourceBundleId",
         "resourceBundleParams",
         "resourceBundleTags",
+        "runtime_fields",
+        "runtimeFields",
         "params",
         "fields",
     }
@@ -2123,6 +2204,13 @@ def _normalize_resource_specs(raw_specs: object) -> list[dict[str, Any]]:
                 location="resourceBundleTags",
                 node=node,
             )
+        runtime_fields = raw_spec.get("runtime_fields")
+        if not isinstance(runtime_fields, dict):
+            runtime_fields = raw_spec.get("runtimeFields")
+        if isinstance(runtime_fields, dict):
+            resolver = str(runtime_fields.get("resolver") or "").strip()
+            if resolver:
+                normalized_spec["runtime_fields"] = {"resolver": resolver}
         params = raw_spec.get("params")
         if isinstance(params, dict):
             normalized_params = {

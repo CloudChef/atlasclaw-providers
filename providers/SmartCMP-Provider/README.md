@@ -137,7 +137,7 @@ for the complete Cookie and message contract.
 - **Approval Management** - View pending approval tasks, approve requests, or reject requests
 - **Alarm and Resource Health** - List and analyze alerts, collect component-specific resource monitoring evidence, and run explicit alert status operations
 - **Directory Queries** - List business-group scopes such as tenant/租户/部门/BU/项目, resource pools, resources, or cloud hosts from the same UI directory endpoints used by CMP
-- **Resource Analysis and Operations** - Analyze one resource across alerts, monitoring health, Security posture and associated violations, and cost optimization, or run current-user executable day2 operations, including the staged tear-down, metadata-deletion, and recycle-bin permanent-removal lifecycle
+- **Resource Analysis and Operations** - Analyze one resource across alerts, monitoring health, Security posture and associated violations, and cost optimization, or run current-user executable day2 operations, including tear-down, separate metadata-only deletion, and confirmed recycle-bin permanent removal
 - **Data Queries** - Query service catalogs, applications, templates, images, and other reference data
 - **Intelligent Agents** - Automated pre-approval and request decomposition capabilities
 - **Cost Optimization** - Review optimization recommendations or directly analyze a resource's optimization potential, execute SmartCMP-native fixes for existing findings, and track remediation progress
@@ -295,21 +295,19 @@ The operation list comes from `GET /nodes/{category}/{id}/resource-actions`
 with the current user's SmartCMP credentials. It does not use resource-type
 definition endpoints as executable-operation fallback.
 
-Resource removal has three distinct stages:
+SmartCMP exposes `delete_metadata_in_resource` as a separate metadata-only
+operation. It deletes CMP node management information and must never be used as
+an intermediate step between tear down and recycle-bin permanent removal.
 
-1. `tear_down_in_resource` moves an active resource to its stopped or
-   torn-down state.
-2. `delete_metadata_in_resource` deletes the node metadata. The node becomes
-   `status=deleted`, and its owning deployment enters the CMP recycle bin.
-3. `permanently_delete_deployment` permanently removes that recycled
-   deployment. Because this is a deployment-level action, it can affect every
-   resource in the same deployment.
-
-The resulting progression is **active → stopped/torn down → node metadata
-deleted and deployment recycled → deployment permanently removed**. Users may
-identify a target with `resource_id`, `resource_name`, `deployment_id`, or
-`deployment_name`. Names must resolve to exactly one visible object; missing or
-ambiguous matches are rejected before an operation is submitted.
+Permanent removal follows **`tear_down_in_resource` → a fresh exact
+recycle-bin read → `permanently_delete_deployment`**. After tear down, wait for
+the exact recycle-bin deployment and review its complete resource scope rather
+than inferring progress from node status. Because permanent removal is a
+deployment-level action, it can affect every resource in that deployment.
+Users may identify a target with `resource_id`, `resource_name`,
+`deployment_id`, or `deployment_name`. Names must resolve to exactly one visible
+object; missing or ambiguous matches are rejected before an operation is
+submitted.
 
 Automatic exact-locator resolution currently scans at most 2,000 recycled
 deployments and fails closed beyond that bound. In an unfiltered list response,
@@ -321,12 +319,12 @@ that all resources in it are in scope, and require explicit confirmation of
 that irreversible impact. The confirmed deployment ID and complete resource-ID
 set are bound to the write; if either changes during re-resolution, the
 operation stops for a fresh display and confirmation. Submission does not by
-itself prove completion. The
-deployment must reach `deleted=true` and `state=DELETED`, and its recycled
-operation list must be empty. SmartCMP may retain the deleted deployment in the
-recycle-bin list for a configured period; disappearance after retention is also
-a completed outcome. Node `status=deleted` alone proves only metadata deletion,
-not permanent removal.
+itself prove completion. After a successfully submitted permanent-removal
+operation, completion requires either disappearance from a fresh exact
+recycle-bin lookup or a retained deployment with `deleted=true`,
+`state=DELETED`, a positive `recycle_delete_time`, and no available recycled
+operation. Node `status=deleted`, deployment `deleted`, or deployment `state`
+alone proves only an intermediate or metadata state, not permanent removal.
 
 Resource operation output is intentionally concise. Successful operation results
 show only the action, resource ID(s), submitted flag, message, and verification

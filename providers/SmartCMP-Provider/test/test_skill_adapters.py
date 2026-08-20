@@ -185,6 +185,14 @@ def test_approval_analysis_returns_to_llm_for_visible_guidance() -> None:
     assert metadata["tool_analyze_result_mode"] == "llm"
 
 
+def test_resource_detail_returns_to_llm_for_operation_continuation() -> None:
+    """Allow operation workflows to continue after resolving resource detail."""
+
+    metadata = _frontmatter(SKILLS_ROOT / "resource" / "SKILL.md")
+
+    assert metadata["tool_detail_result_mode"] == "llm"
+
+
 def test_atlasclaw_auth_context_distinguishes_cookie_user_and_webhook_robot() -> None:
     """Preserve AtlasClaw Cookie and webhook provider-token authentication."""
 
@@ -250,28 +258,48 @@ def test_resource_recycle_adapters_bind_public_locators_to_dedicated_operations(
         "test_resource_recycle_adapter_binding",
     )
     calls: list[tuple[Any, Any]] = []
+    provider_request = SimpleNamespace(
+        context=SimpleNamespace(
+            trace_id="trace-resource",
+            instance=SimpleNamespace(name="cmp"),
+        )
+    )
 
-    async def fake_execute(_ctx, operation, operation_input):
+    async def fake_execute_with_request(_ctx, operation, operation_input):
         calls.append((operation, operation_input))
         if operation is adapter.list_recycled_resources_operation:
-            return SimpleNamespace(items=())
-        return SimpleNamespace(message="Permanent removal request submitted.")
+            result = SimpleNamespace(items=())
+        else:
+            result = SimpleNamespace(message="Permanent removal request submitted.")
+        return result, provider_request
 
-    monkeypatch.setattr(adapter, "execute", fake_execute)
+    monkeypatch.setattr(adapter, "execute_with_request", fake_execute_with_request)
     monkeypatch.setattr(
         adapter,
         "tool_result",
-        lambda _result, *, summary: {"success": True, "output": summary},
+        lambda _result, *, summary, request: {
+            "success": request is provider_request,
+            "output": summary,
+        },
     )
 
     listed = asyncio.run(
-        adapter.list_recycled_resources(object(), resource_name="vm-a")
+        adapter.list_recycled_resources(
+            object(),
+            resource_id=None,
+            resource_name="vm-a",
+            deployment_id=None,
+            deployment_name=None,
+        )
     )
     removed = asyncio.run(
         adapter.permanently_remove_recycled_resource(
             object(),
             expected_deployment_id="deployment-1",
             expected_resource_ids=["resource-1"],
+            resource_id=None,
+            resource_name=None,
+            deployment_id=None,
             deployment_name="application-a",
             confirmed=True,
         )
@@ -461,6 +489,12 @@ def test_atlasclaw_result_omits_mcp_specific_operation_arguments() -> None:
         SKILLS_ROOT / "shared" / "scripts" / "_atlasclaw_adapter.py",
         "test_atlasclaw_adapter_operation_boundary",
     )
+    request = SimpleNamespace(
+        context=SimpleNamespace(
+            trace_id="trace-resource",
+            instance=SimpleNamespace(name="cmp"),
+        )
+    )
     result = runtime.tool_result(
         {
             "request_id": "RES20260731000001",
@@ -489,11 +523,15 @@ def test_atlasclaw_result_omits_mcp_specific_operation_arguments() -> None:
                 }
             ],
         },
+        request=request,
     )
 
     assert "available_operations" not in result
     assert "available_operations" not in result["nested"]
     assert "available_operations" not in result["_internal"]
+    internal = json.loads(result["_internal"])
+    assert internal["internal_request_trace_id"] == "trace-resource"
+    assert internal["provider_instance_ref"] == "smartcmp.cmp"
 
 
 def test_atlasclaw_split_values_accepts_omitted_optional_value() -> None:
@@ -956,6 +994,13 @@ def test_request_adapter_parses_confirmed_json_once(monkeypatch) -> None:
             normalized_body={
                 **operation_input.body,
                 "credentialPassword": "vm-secret",
+                "APITOKEN": "uppercase-api-token-secret",
+                "APISECRET": "uppercase-api-secret",
+                "SESSIONTOKEN": "uppercase-session-token-secret",
+                "privateKeyPem": "private-key-pem-secret",
+                "bearer": "standalone-bearer-secret",
+                "tokenBudget": 4096,
+                "resourceKey": "resource-key-value",
                 "nested": {"password": "nested-secret"},
             },
             items=(
@@ -979,9 +1024,21 @@ def test_request_adapter_parses_confirmed_json_once(monkeypatch) -> None:
     assert "RES20260731000002" in result["output"]
     assert result["requestId"] == "RES20260731000002"
     assert result["normalized_body"]["credentialPassword"] == "***"
+    assert result["normalized_body"]["APITOKEN"] == "***"
+    assert result["normalized_body"]["APISECRET"] == "***"
+    assert result["normalized_body"]["SESSIONTOKEN"] == "***"
+    assert result["normalized_body"]["privateKeyPem"] == "***"
+    assert result["normalized_body"]["bearer"] == "***"
+    assert result["normalized_body"]["tokenBudget"] == 4096
+    assert result["normalized_body"]["resourceKey"] == "resource-key-value"
     assert result["normalized_body"]["nested"]["password"] == "***"
     assert "vm-secret" not in result["_internal"]
     assert "nested-secret" not in result["_internal"]
+    assert "uppercase-api-token-secret" not in result["_internal"]
+    assert "uppercase-api-secret" not in result["_internal"]
+    assert "uppercase-session-token-secret" not in result["_internal"]
+    assert "private-key-pem-secret" not in result["_internal"]
+    assert "standalone-bearer-secret" not in result["_internal"]
 
 
 @pytest.mark.parametrize(
@@ -1055,7 +1112,7 @@ def test_request_adapter_does_not_confirm_unknown_submission(monkeypatch) -> Non
 
 
 def test_request_resource_bundle_contract_is_explicit_and_redacted(monkeypatch) -> None:
-    """Pass exact catalog context explicitly and keep lookup secrets out of results."""
+    """Keep lookup secrets out of summaries while retaining structured data."""
 
     adapter = _load(
         SKILLS_ROOT / "request" / "scripts" / "adapter.py",
@@ -1071,17 +1128,67 @@ def test_request_resource_bundle_contract_is_explicit_and_redacted(monkeypatch) 
                 {
                     "id": "bundle-1",
                     "name": "vSphere",
-                    "blueprint": {"raw": "must-not-enter-internal"},
                     "requestFields": [
                         {
                             "key": "credentialPassword",
                             "value": "lookup-secret",
-                        }
+                        },
+                        {
+                            "key": "apiToken",
+                            "value": "api-token-secret",
+                        },
+                        {
+                            "key": "clientAuthentication",
+                            "name": "clientSecret",
+                            "value": "client-secret-value",
+                        },
+                        {
+                            "key": "sshMaterial",
+                            "target": "params.privateKey",
+                            "value": "private-key-value",
+                        },
+                        {
+                            "key": "backupPassphrase",
+                            "value": "backup-passphrase-value",
+                        },
+                        {
+                            "key": "clientAuthentication",
+                            "name": "authenticationHeader",
+                            "value": "authentication-header-value",
+                        },
+                        {
+                            "key": "sshMaterial",
+                            "target": "params.sshKey",
+                            "value": "ssh-key-value",
+                        },
+                        {
+                            "key": "tokenBudget",
+                            "value": 2048,
+                        },
+                        {
+                            "key": "usageMetrics",
+                            "name": "tokenCount",
+                            "value": 37,
+                        },
+                        {
+                            "key": "networkId",
+                            "target": "networkId",
+                            "type": "string",
+                            "required": False,
+                            "ask": True,
+                            "options": [
+                                {
+                                    "id": "network-361",
+                                    "name": "192.168.24.0/22",
+                                    "properties": {"availableIpSize": 1},
+                                }
+                            ],
+                        },
                     ],
                     "missingRequiredFields": [],
-                    "missingSelectionFields": [],
+                    "missingSelectionFields": ["networkId"],
                     "configurationErrors": [],
-                    "valid": True,
+                    "valid": False,
                 },
             )
         )
@@ -1102,7 +1209,27 @@ def test_request_resource_bundle_contract_is_explicit_and_redacted(monkeypatch) 
             catalog_id="catalog-1",
             node_template_name="Compute",
             resource_bundle_id="bundle-1",
-            placement_values={"credentialPassword": "lookup-secret"},
+            placement_values={
+                "credentialPassword": "lookup-secret",
+                "access_key": "access-key-value",
+                "refreshToken": "refresh-token-value",
+                "bearerToken": "bearer-token-value",
+                "accessToken": "access-token-value",
+                "apiKey": "api-key-value",
+                "Authorization": "authorization-value",
+                "AUTHORIZATION_HEADER": "authorization-header-value",
+                "Cookie": "cookie-value",
+                "credential": "direct-credential-value",
+                "API_KEY": "uppercase-api-key-value",
+                "passwd": "passwd-value",
+                "secret": "direct-secret-value",
+                "secretKey": "secret-key-value",
+                "SSH_KEY": "uppercase-ssh-key-value",
+                "token": "direct-token-value",
+                "tokenBudget": "4096",
+                "tokenCount": "81",
+                "resourceKey": "resource-key-value",
+            },
         )
     )
 
@@ -1112,11 +1239,83 @@ def test_request_resource_bundle_contract_is_explicit_and_redacted(monkeypatch) 
     assert "catalogId" not in operation_input.placement_values
     assert "node" not in operation_input.placement_values
     assert result["items"][0]["requestFields"][0]["value"] == "lookup-secret"
+    assert result["items"][0]["requestFields"][1]["value"] == "api-token-secret"
+    assert result["items"][0]["requestFields"][2]["value"] == "client-secret-value"
+    assert result["items"][0]["requestFields"][3]["value"] == "private-key-value"
+    assert result["items"][0]["requestFields"][4]["value"] == "backup-passphrase-value"
+    assert result["items"][0]["requestFields"][5]["value"] == "authentication-header-value"
+    assert result["items"][0]["requestFields"][6]["value"] == "ssh-key-value"
+    output = json.loads(result["output"])
+    assert output["valid"] is False
+    assert output["missingSelectionFields"] == ["networkId"]
+    assert output["pendingFields"] == [
+        {
+            "key": "networkId",
+            "target": "networkId",
+            "type": "string",
+            "required": False,
+            "dependsOn": [],
+            "options": [{"id": "network-361", "name": "192.168.24.0/22"}],
+        }
+    ]
+    assert "lookup-secret" not in result["output"]
+    assert "availableIpSize" not in result["output"]
     internal = json.loads(result["_internal"])
     assert internal["placementValues"]["credentialPassword"] == "***"
+    assert internal["placementValues"]["access_key"] == "***"
+    assert internal["placementValues"]["refreshToken"] == "***"
+    assert internal["placementValues"]["bearerToken"] == "***"
+    assert internal["placementValues"]["accessToken"] == "***"
+    assert internal["placementValues"]["apiKey"] == "***"
+    assert internal["placementValues"]["Authorization"] == "***"
+    assert internal["placementValues"]["AUTHORIZATION_HEADER"] == "***"
+    assert internal["placementValues"]["Cookie"] == "***"
+    assert internal["placementValues"]["credential"] == "***"
+    assert internal["placementValues"]["API_KEY"] == "***"
+    assert internal["placementValues"]["passwd"] == "***"
+    assert internal["placementValues"]["secret"] == "***"
+    assert internal["placementValues"]["secretKey"] == "***"
+    assert internal["placementValues"]["SSH_KEY"] == "***"
+    assert internal["placementValues"]["token"] == "***"
+    assert internal["placementValues"]["tokenBudget"] == "4096"
+    assert internal["placementValues"]["tokenCount"] == "81"
+    assert internal["placementValues"]["resourceKey"] == "resource-key-value"
     assert internal["items"][0]["requestFields"][0]["value"] == "***"
-    assert "lookup-secret" not in result["_internal"]
-    assert "must-not-enter-internal" not in result["_internal"]
+    assert internal["items"][0]["requestFields"][1]["value"] == "***"
+    assert internal["items"][0]["requestFields"][2]["value"] == "***"
+    assert internal["items"][0]["requestFields"][2]["name"] == "clientSecret"
+    assert internal["items"][0]["requestFields"][3]["value"] == "***"
+    assert internal["items"][0]["requestFields"][3]["target"] == "params.privateKey"
+    assert internal["items"][0]["requestFields"][4]["value"] == "***"
+    assert internal["items"][0]["requestFields"][5]["value"] == "***"
+    assert internal["items"][0]["requestFields"][6]["value"] == "***"
+    assert internal["items"][0]["requestFields"][7]["value"] == 2048
+    assert internal["items"][0]["requestFields"][8]["value"] == 37
+    for secret in (
+        "lookup-secret",
+        "api-token-secret",
+        "client-secret-value",
+        "private-key-value",
+        "access-key-value",
+        "refresh-token-value",
+        "bearer-token-value",
+        "access-token-value",
+        "api-key-value",
+        "authorization-value",
+        "authorization-header-value",
+        "cookie-value",
+        "direct-credential-value",
+        "uppercase-api-key-value",
+        "passwd-value",
+        "direct-secret-value",
+        "secret-key-value",
+        "uppercase-ssh-key-value",
+        "direct-token-value",
+        "backup-passphrase-value",
+        "authentication-header-value",
+        "ssh-key-value",
+    ):
+        assert secret not in result["_internal"]
 
 
 def test_request_resource_bundle_schema_requires_explicit_catalog_context() -> None:
@@ -1126,13 +1325,15 @@ def test_request_resource_bundle_schema_requires_explicit_catalog_context() -> N
     schema = json.loads(metadata["tool_resource_bundles_parameters"])
 
     assert {"catalog_id", "node_template_name"} <= set(schema["required"])
-    assert "Never include catalogId or node" in (
-        schema["properties"]["placement_values"]["description"]
-    )
+    description = schema["properties"]["placement_values"]["description"]
+    assert "exact selected options[].id" in description
+    assert "options[].name is display-only" in description
+    assert "omit it from placement_values" in description
+    assert "Never include catalogId or node" in description
 
 
-def test_request_catalog_internal_omits_raw_catalog(monkeypatch) -> None:
-    """Keep normalized request metadata without copying the raw catalog internally."""
+def test_request_catalog_uses_normalized_provider_result(monkeypatch) -> None:
+    """Expose normalized request metadata without a raw catalog payload."""
 
     adapter = _load(
         SKILLS_ROOT / "request" / "scripts" / "adapter.py",
@@ -1141,7 +1342,6 @@ def test_request_catalog_internal_omits_raw_catalog(monkeypatch) -> None:
 
     async def fake_execute_with_request(_ctx, _operation, _operation_input):
         result = CatalogDetailResult(
-            catalog={"id": "catalog-1", "blueprint": "raw-catalog-marker"},
             metadata={
                 "id": "catalog-1",
                 "name": "Linux VM",
@@ -1168,7 +1368,10 @@ def test_request_catalog_internal_omits_raw_catalog(monkeypatch) -> None:
     assert internal["metadata"]["instructions"]["resourceSpecs"][0]["node"] == (
         "Compute"
     )
-    assert "raw-catalog-marker" not in result["_internal"]
+    assert "catalog" not in result
+    assert [
+        action["action_id"] for action in result["metadata"]["object_actions"]
+    ] == ["open_detail"]
 
 
 def test_form_adapter_normalizes_omitted_optional_strings(monkeypatch) -> None:
@@ -1300,10 +1503,10 @@ def test_execute_resolves_password_credentials_without_blocking_event_loop(
     ]
 
 
-def test_request_catalog_chat_result_restores_atlasclaw_object_actions(
+def test_request_catalog_list_does_not_expand_object_actions(
     monkeypatch,
 ) -> None:
-    """Keep UI actions in the AtlasClaw adapter and outside SmartCMP Provider."""
+    """Keep catalog discovery compact until one catalog detail is selected."""
 
     adapter = _load(
         SKILLS_ROOT / "request" / "scripts" / "adapter.py",
@@ -1311,22 +1514,19 @@ def test_request_catalog_chat_result_restores_atlasclaw_object_actions(
     )
 
     async def fake_execute_with_request(_ctx, _operation, _operation_input):
-        result = CatalogListResult(
-            catalogs=(
-                {
-                    "id": "catalog-1",
-                    "name": "LinuxOS",
-                    "status": "PUBLISHED",
-                },
+        return (
+            CatalogListResult(
+                catalogs=(
+                    {
+                        "id": "catalog-1",
+                        "name": "LinuxOS",
+                        "status": "PUBLISHED",
+                    },
+                ),
+                total=1,
             ),
-            total=1,
+            SimpleNamespace(context=SimpleNamespace(trace_id="trace-catalog-list")),
         )
-        request = SimpleNamespace(
-            context=SimpleNamespace(
-                instance=SimpleNamespace(ui_base_url="https://cmp.example.com")
-            )
-        )
-        return result, request
 
     monkeypatch.setattr(
         adapter,
@@ -1335,14 +1535,8 @@ def test_request_catalog_chat_result_restores_atlasclaw_object_actions(
     )
     result = asyncio.run(adapter.list_services(object(), keyword=None))
 
-    actions = result["catalogs"][0]["object_actions"]
-    assert [action["action_id"] for action in actions] == [
-        "open_detail",
-        "request",
-    ]
-    assert actions[0]["href"] == (
-        "https://cmp.example.com/#/main/catalog-ui/request/catalog-1"
-    )
+    assert "object_type" not in result["catalogs"][0]
+    assert "object_actions" not in result["catalogs"][0]
 
 
 def test_datasource_adapter_normalizes_optional_logical_template_fields(

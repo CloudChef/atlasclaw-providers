@@ -95,7 +95,7 @@ async def list_alerts(
                     days=days,
                     size=size,
                     level=level,
-                    alarm_type=alarm_type,
+                    alarm_type=alarm_type or "",
                     alarm_categories=split_values(alarm_category),
                 ),
             )

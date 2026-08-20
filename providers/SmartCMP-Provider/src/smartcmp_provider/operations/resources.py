@@ -158,7 +158,10 @@ async def list_resources(
     )
     return ResourceListResult(
         items=tuple(
-            _attach_resource_available_operations(item, category=category)
+            _attach_resource_available_operations(
+                normalize_resource_summary(item),
+                category=category,
+            )
             for item in extract_items(payload)
         ),
         total=extract_total_count(payload),

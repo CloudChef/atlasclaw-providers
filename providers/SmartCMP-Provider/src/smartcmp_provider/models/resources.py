@@ -24,7 +24,7 @@ class ResourceListQuery(BaseModel):
 
 
 class ResourceListResult(BaseModel):
-    """Return raw resource rows while keeping pagination metadata typed."""
+    """Return compact resource summaries with typed pagination metadata."""
 
     model_config = ConfigDict(frozen=True)
 

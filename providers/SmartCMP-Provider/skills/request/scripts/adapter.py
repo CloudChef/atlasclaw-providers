@@ -18,6 +18,7 @@ from _atlasclaw_adapter import (  # noqa: E402
     execute_with_request,
     tool_error,
     tool_result,
+    workflow_identity,
 )
 from _request_object_actions import (  # noqa: E402
     attach_catalog_object_metadata,
@@ -36,6 +37,7 @@ from smartcmp_provider.models.catalogs import (  # noqa: E402
 from smartcmp_provider.models.requests import (  # noqa: E402
     RequestStatusQuery,
     RequestSubmissionInput,
+    redact_request_secrets as _redact_request_secrets,
 )
 from smartcmp_provider.operations.catalogs import (  # noqa: E402
     get_catalog_detail as get_catalog_detail_operation,
@@ -52,27 +54,84 @@ from smartcmp_provider.operations.requests import (  # noqa: E402
 )
 
 
-def _redact_request_secrets(value: Any) -> Any:
-    """Clone request lookup data while masking credential and password fields."""
+def _exact_resource_bundle_summary(items: tuple[dict[str, Any], ...]) -> str:
+    """Describe exact validation state without exposing selected values or secrets."""
 
-    if isinstance(value, dict):
-        redacted: dict[str, Any] = {}
-        field_key = str(value.get("key") or "").replace("_", "").replace("-", "").casefold()
-        secret_field = field_key in {"credentialpassword", "password"}
-        for key, item in value.items():
-            normalized_key = str(key).replace("_", "").replace("-", "").casefold()
-            redacted[key] = (
-                "***"
-                if normalized_key in {"credentialpassword", "password"}
-                or (secret_field and normalized_key == "value")
-                else _redact_request_secrets(item)
-            )
-        return redacted
-    if isinstance(value, list):
-        return [_redact_request_secrets(item) for item in value]
-    if isinstance(value, tuple):
-        return tuple(_redact_request_secrets(item) for item in value)
-    return value
+    item = items[0]
+    pending_keys = {
+        str(key).strip()
+        for key in (
+            list(item.get("missingRequiredFields") or [])
+            + list(item.get("missingSelectionFields") or [])
+        )
+        if str(key).strip()
+    }
+    pending_fields = []
+    for field in item.get("requestFields") or []:
+        if not isinstance(field, dict) or str(field.get("key") or "").strip() not in pending_keys:
+            continue
+        pending_fields.append(
+            {
+                key: value
+                for key, value in {
+                    "key": field.get("key"),
+                    "target": field.get("target"),
+                    "type": field.get("type"),
+                    "required": field.get("required"),
+                    "dependsOn": field.get("dependsOn") or [],
+                    "options": [
+                        {"id": option.get("id"), "name": option.get("name")}
+                        for option in (field.get("options") or [])
+                        if isinstance(option, dict)
+                    ],
+                }.items()
+                if value not in (None, "")
+            }
+        )
+    summary = {
+        "resourceBundle": {
+            "id": item.get("id"),
+            "name": item.get("name"),
+        },
+        "valid": item.get("valid") is True,
+        "missingRequiredFields": list(item.get("missingRequiredFields") or []),
+        "missingSelectionFields": list(item.get("missingSelectionFields") or []),
+        "configurationErrors": _redact_request_secrets(
+            list(item.get("configurationErrors") or [])
+        ),
+        "pendingFields": pending_fields,
+    }
+    return json.dumps(summary, ensure_ascii=False, separators=(",", ":"))
+
+
+def _compact_request_fields(item: dict[str, Any]) -> list[dict[str, Any]]:
+    """Project request fields into bounded workflow continuation metadata."""
+
+    fields: list[dict[str, Any]] = []
+    for field in item.get("requestFields") or []:
+        if not isinstance(field, dict):
+            continue
+        projected = {
+            key: value
+            for key, value in {
+                "key": field.get("key"),
+                "name": field.get("name"),
+                "target": field.get("target"),
+                "type": field.get("type"),
+                "required": field.get("required"),
+                "ask": field.get("ask"),
+                "dependsOn": field.get("dependsOn") or [],
+                "value": field.get("value"),
+                "options": [
+                    {"id": option.get("id"), "name": option.get("name")}
+                    for option in (field.get("options") or [])
+                    if isinstance(option, dict)
+                ],
+            }.items()
+            if value not in (None, "")
+        }
+        fields.append(projected)
+    return fields
 
 
 async def list_services(
@@ -87,20 +146,20 @@ async def list_services(
             list_catalogs,
             CatalogListQuery(keyword=keyword or ""),
         )
-        result = result.model_copy(
-            update={
-                "catalogs": tuple(
-                    attach_catalog_object_metadata(
-                        catalog,
-                        ui_base_url=request.context.instance.ui_base_url,
-                    )
-                    for catalog in result.catalogs
-                )
-            }
-        )
         return tool_result(
             result,
             summary=f"Found {result.total} request catalogs.",
+            internal={
+                **workflow_identity(request),
+                "catalogs": [
+                    {
+                        key: item.get(key)
+                        for key in ("index", "id", "name", "status")
+                        if item.get(key) not in (None, "")
+                    }
+                    for item in result.catalogs
+                ],
+            },
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -131,7 +190,7 @@ async def get_request_catalog(
             summary="Loaded the selected SmartCMP request catalog.",
             internal=_redact_request_secrets(
                 {
-                    "internal_request_trace_id": request.context.trace_id,
+                    **workflow_identity(request),
                     "metadata": result.metadata,
                 }
             ),
@@ -255,6 +314,7 @@ async def list_resource_bundles(
     """List resource pools and Provider-resolved catalog placement choices."""
 
     try:
+        normalized_resource_bundle_id = (resource_bundle_id or "").strip()
         result, request = await execute_with_request(
             ctx,
             list_resource_bundles_operation,
@@ -265,45 +325,48 @@ async def list_resource_bundles(
                 catalog_id=catalog_id,
                 node_template_name=node_template_name,
                 cloud_entry_type_id=cloud_entry_type_id or "",
-                resource_bundle_id=resource_bundle_id or "",
+                resource_bundle_id=normalized_resource_bundle_id,
                 placement_fields=tuple(placement_fields or ()),
                 placement_values=placement_values or {},
             ),
         )
         internal = None
-        if resource_bundle_id:
-            structured_result = result.model_dump(mode="json")
-            compact_items = [
-                {
-                    key: item[key]
-                    for key in (
-                        "id",
-                        "name",
-                        "cloudEntryTypeId",
-                        "requestFields",
-                        "missingRequiredFields",
-                        "missingSelectionFields",
-                        "configurationErrors",
-                        "valid",
-                    )
-                    if key in item
-                }
-                for item in structured_result["items"]
-            ]
+        if normalized_resource_bundle_id:
+            exact_item = result.items[0]
             internal = _redact_request_secrets(
                 {
-                    "internal_request_trace_id": request.context.trace_id,
+                    **workflow_identity(request),
                     "catalogId": catalog_id,
                     "node": node_template_name,
                     "businessGroupId": business_group_id,
-                    "resourceBundleId": resource_bundle_id,
+                    "resourceBundleId": normalized_resource_bundle_id,
                     "placementValues": placement_values or {},
-                    "items": compact_items,
+                    "items": [
+                        {
+                            "id": exact_item.get("id"),
+                            "name": exact_item.get("name"),
+                            "requestFields": _compact_request_fields(exact_item),
+                            "missingRequiredFields": list(
+                                exact_item.get("missingRequiredFields") or []
+                            ),
+                            "missingSelectionFields": list(
+                                exact_item.get("missingSelectionFields") or []
+                            ),
+                            "configurationErrors": list(
+                                exact_item.get("configurationErrors") or []
+                            ),
+                            "valid": exact_item.get("valid") is True,
+                        }
+                    ],
                 }
             )
         return tool_result(
             result,
-            summary=f"Found {len(result.items)} resource pools.",
+            summary=(
+                _exact_resource_bundle_summary(result.items)
+                if normalized_resource_bundle_id
+                else f"Found {len(result.items)} resource pools."
+            ),
             internal=internal,
         )
     except (ValueError, RuntimeError) as error:

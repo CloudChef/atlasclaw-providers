@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -75,7 +76,7 @@ class RequestSubmissionResult(BaseModel):
     def redact_normalized_body(cls, value: Any) -> dict[str, Any]:
         """Prevent submitted passwords from crossing any Adapter boundary."""
 
-        redacted = _redact_submission_secrets(value)
+        redacted = redact_request_secrets(value)
         return redacted if isinstance(redacted, dict) else {}
 
 
@@ -96,20 +97,114 @@ class RequestStatusResult(BaseModel):
     metadata: dict[str, Any]
 
 
-def _redact_submission_secrets(value: Any) -> Any:
-    """Recursively clone request data while masking credential passwords."""
+_REQUEST_IDENTIFIER_WORD_PATTERN = re.compile(
+    r"[A-Z]+(?=[A-Z][a-z]|$)|[A-Z]?[a-z]+|[0-9]+"
+)
+_SENSITIVE_REQUEST_WORDS = frozenset(
+    {
+        "authentication",
+        "authorization",
+        "auth",
+        "bearer",
+        "cookie",
+        "credential",
+        "passphrase",
+        "passwd",
+        "password",
+        "secret",
+    }
+)
+_SENSITIVE_TOKEN_PREFIXES = frozenset(
+    {"access", "api", "auth", "bearer", "id", "oauth", "refresh", "session"}
+)
+_SENSITIVE_KEY_PREFIXES = frozenset(
+    {"access", "api", "client", "private", "secret", "session", "ssh"}
+)
+_SENSITIVE_COMPACT_PREFIXES = frozenset(
+    {
+        "access",
+        "api",
+        "auth",
+        "bearer",
+        "client",
+        "credential",
+        "id",
+        "oauth",
+        "private",
+        "refresh",
+        "session",
+        "ssh",
+    }
+)
+
+
+def _request_identifier_words(value: Any) -> tuple[str, ...]:
+    """Split one field path into separator- and camel-case-aware words."""
+
+    words: list[str] = []
+    for part in re.split(r"[.\[\]/_\-\s]+", str(value or "")):
+        words.extend(
+            match.casefold()
+            for match in _REQUEST_IDENTIFIER_WORD_PATTERN.findall(part)
+        )
+    return tuple(words)
+
+
+def is_sensitive_request_field(value: Any) -> bool:
+    """Return whether a generic request field name denotes secret material."""
+
+    words = _request_identifier_words(value)
+    if not words:
+        return False
+    if any(word in _SENSITIVE_REQUEST_WORDS for word in words):
+        return True
+    for previous, word in zip(words, words[1:]):
+        if word == "token" and previous in _SENSITIVE_TOKEN_PREFIXES:
+            return True
+        if word == "key" and previous in _SENSITIVE_KEY_PREFIXES:
+            return True
+    compact = re.sub(r"[^A-Za-z0-9]+", "", str(value or "")).casefold()
+    if len(words) == 1:
+        token_compounds = {
+            f"{prefix}token" for prefix in _SENSITIVE_TOKEN_PREFIXES
+        }
+        key_compounds = {f"{prefix}key" for prefix in _SENSITIVE_KEY_PREFIXES}
+        secret_compounds = {
+            f"{prefix}secret" for prefix in _SENSITIVE_COMPACT_PREFIXES
+        }
+        if any(
+            compound in compact
+            for compound in token_compounds | key_compounds | secret_compounds
+        ):
+            return True
+    if words == ("token",):
+        return True
+    if len(words) >= 2 and words[-1] == "token":
+        return words[-2] in _SENSITIVE_TOKEN_PREFIXES
+    if len(words) >= 2 and words[-1] == "key":
+        return words[-2] in _SENSITIVE_KEY_PREFIXES
+    return False
+
+
+def redact_request_secrets(value: Any) -> Any:
+    """Recursively clone request data while masking generic secret fields."""
 
     if isinstance(value, dict):
         redacted: dict[str, Any] = {}
+        secret_field = any(
+            is_sensitive_request_field(value.get(field_name))
+            for field_name in ("key", "name", "target")
+        )
         for key, item in value.items():
-            normalized_key = str(key).replace("_", "").replace("-", "").casefold()
-            if normalized_key in {"credentialpassword", "password"}:
+            if is_sensitive_request_field(key) or (
+                secret_field and str(key).casefold() == "value"
+            ):
                 redacted[key] = "***"
             else:
-                redacted[key] = _redact_submission_secrets(item)
+                redacted[key] = redact_request_secrets(item)
         return redacted
     if isinstance(value, list):
-        return [_redact_submission_secrets(item) for item in value]
+        return [redact_request_secrets(item) for item in value]
     if isinstance(value, tuple):
-        return tuple(_redact_submission_secrets(item) for item in value)
+        return tuple(redact_request_secrets(item) for item in value)
     return value

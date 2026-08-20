@@ -363,12 +363,14 @@ The operation list comes from `GET /nodes/{category}/{id}/resource-actions`
 with the current user's SmartCMP credentials. It does not use resource-type
 definition endpoints as executable-operation fallback.
 
-Removal follows three separate SmartCMP operations:
+`delete_metadata_in_resource` is a separate metadata-only operation. It removes
+CMP node management information and must never be used as an intermediate step
+in recycle-bin permanent removal.
 
-1. `tear_down_in_resource`: active → stopped or torn down;
-2. `delete_metadata_in_resource`: node metadata deleted, node
-   `status=deleted`, and owning deployment placed in the recycle bin;
-3. `permanently_delete_deployment`: recycled deployment permanently removed.
+Permanent removal follows `tear_down_in_resource` → a fresh exact recycle-bin
+read → `permanently_delete_deployment`. After tear down, wait for the exact
+recycle-bin deployment and its complete resource scope instead of inferring
+progress from node status.
 
 The user may locate the target with `resource_id`, `resource_name`,
 `deployment_id`, or `deployment_name`. A name must resolve to exactly one
@@ -385,11 +387,11 @@ Permanent removal is irreversible and applies to the entire deployment. Before
 submission, show the resolved deployment, warn that every resource in it is in
 scope, and require explicit confirmation of that impact. Bind the confirmed
 deployment ID and complete resource-ID set to the write, and fail before POST
-if the freshly resolved scope differs. After submission,
-verify the deployment reaches `deleted=true` and `state=DELETED` and exposes no
-recycled actions. It may remain listed until SmartCMP's retention period
-expires, after which disappearance is also a valid completed outcome. Node
-`status=deleted` is expected after metadata deletion and cannot establish that
+if the freshly resolved scope differs. After a successfully submitted permanent
+removal, completion requires either disappearance from a fresh exact lookup or
+a retained deployment with `deleted=true`, `state=DELETED`, a positive
+`recycle_delete_time`, and no available recycled operation. Node `status=deleted`,
+deployment `deleted`, or deployment `state` alone cannot establish that
 permanent removal completed.
 
 #### datasource

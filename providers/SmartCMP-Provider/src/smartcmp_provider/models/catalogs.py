@@ -38,11 +38,10 @@ class CatalogDetailQuery(BaseModel):
 
 
 class CatalogDetailResult(BaseModel):
-    """Return the raw catalog and normalized detail metadata."""
+    """Return normalized request metadata for one selected catalog."""
 
     model_config = ConfigDict(frozen=True)
 
-    catalog: dict[str, Any]
     metadata: dict[str, Any]
 
 

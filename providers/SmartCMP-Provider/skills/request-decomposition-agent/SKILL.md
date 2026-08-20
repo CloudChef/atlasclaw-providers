@@ -120,6 +120,7 @@ AtlasClaw runtime:
 | Skill | Purpose |
 |-------|---------|
 | `smartcmp_list_services` | List available service catalogs |
+| `smartcmp_get_request_catalog` | Load the selected catalog's request fields |
 | `smartcmp_submit_request` | Submit assembled requests when the mode allows it |
 
 ## Workflow
@@ -138,7 +139,8 @@ AtlasClaw runtime:
 4. Match to CMP catalog
    - Use smartcmp_list_services to find suitable entries
 5. Fetch target schema
-   - Use catalog metadata to determine required fields
+   - Use the selected catalog UUID with smartcmp_get_request_catalog
+   - Use the returned detail metadata to determine required fields
 6. Build request payloads
    - Resolved parameters
    - Assumptions made
