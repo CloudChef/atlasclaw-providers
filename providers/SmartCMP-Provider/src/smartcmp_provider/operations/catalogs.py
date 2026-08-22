@@ -289,6 +289,8 @@ async def list_facets(
 async def list_resource_bundles(
     client: SmartCmpClient,
     query: ResourceBundleQuery,
+    *,
+    resolve_request_fields: bool = True,
 ) -> CatalogItemsResult:
     """List resource pools with adapter-neutral request placement options.
 
@@ -296,6 +298,12 @@ async def list_resource_bundles(
     This operation projects them onto catalog request-field names and applies
     declared dependencies so AtlasClaw and MCP do not duplicate SmartCMP domain
     rules in their protocol adapters.
+
+    Args:
+        client: Request-scoped SmartCMP client.
+        query: Catalog context, selected pool, tags, and placement values.
+        resolve_request_fields: Resolve dynamic placement fields for interactive
+            collection. Submission revalidation disables this work.
 
     Raises:
         SmartCmpValidationError: If a requested resource pool or declared
@@ -311,29 +319,105 @@ async def list_resource_bundles(
         )
     catalog_id = _required(query.catalog_id, "Catalog ID", client)
     node_name = _required(query.node_template_name, "Node template name", client)
+    catalog, declared_spec = await _load_catalog_resource_spec(
+        client,
+        catalog_id,
+        node_name,
+    )
+    normalized_catalog = normalize_catalog(catalog, index=1, exact_catalog=True)
+    instructions = normalized_catalog.get("instructions")
+    declared_component_type = str(
+        (
+            instructions.get("componentType")
+            if isinstance(instructions, dict)
+            else ""
+        )
+        or normalized_catalog.get("sourceKey")
+        or ""
+    ).strip()
+    declared_node_type = str(declared_spec.get("type") or "").strip()
+    if not declared_component_type or not declared_node_type:
+        raise SmartCmpValidationError(
+            "Generated request instructions do not declare the resource-pool "
+            "component and node types.",
+            trace_id=client.request.context.trace_id,
+        )
+    if (
+        _required(query.component_type, "Component type", client)
+        != declared_component_type
+    ):
+        raise SmartCmpValidationError(
+            "The supplied component type does not match the selected catalog.",
+            trace_id=client.request.context.trace_id,
+        )
+    if _required(query.node_type, "Node type", client) != declared_node_type:
+        raise SmartCmpValidationError(
+            "The supplied node type does not match generated request instructions.",
+            trace_id=client.request.context.trace_id,
+        )
+    selector_values = {
+        "resourceBundleId": query.resource_bundle_id,
+        "resourceBundleTags": query.resource_bundle_tags,
+    }
+    selection_mode = resource_bundle_selection_mode(declared_spec, selector_values)
+    if query.resource_bundle_tags is not None and selection_mode not in {
+        "tags_only",
+        "tags_and_pool",
+    }:
+        raise SmartCmpValidationError(
+            "Generated request instructions do not declare active resourceBundleTags "
+            "for this node.",
+            trace_id=client.request.context.trace_id,
+        )
+    if query.resource_bundle_id.strip() and selection_mode == "none":
+        raise SmartCmpValidationError(
+            "Generated request instructions do not declare an active resource-pool "
+            "selector for this node.",
+            trace_id=client.request.context.trace_id,
+        )
+    params: dict[str, Any] = {
+        "businessGroupId": _required(
+            query.business_group_id,
+            "Business group ID",
+            client,
+        ),
+        "cloudEntryTypeId": query.cloud_entry_type_id or "",
+        "componentType": declared_component_type,
+        "enabled": "true",
+        "nodeType": declared_node_type,
+        "readOnly": "false",
+        "strategy": "RB_POLICY_STATIC",
+    }
+    if query.resource_bundle_tags is not None:
+        params["facets"] = query.resource_bundle_tags
     payload = await client.request_json(
         "GET",
         "/resource-bundles",
-        params={
-            "businessGroupId": _required(
-                query.business_group_id,
-                "Business group ID",
-                client,
-            ),
-            "cloudEntryTypeId": query.cloud_entry_type_id or "",
-            "componentType": _required(
-                query.component_type,
-                "Component type",
-                client,
-            ),
-            "enabled": "true",
-            "nodeType": _required(query.node_type, "Node type", client),
-            "readOnly": "false",
-            "strategy": "RB_POLICY_STATIC",
-        },
+        params=params,
     )
     rows = _extract_object_list(payload)
+    if query.resource_bundle_tags is not None and not rows:
+        raise SmartCmpValidationError(
+            "No resource pools match the selected resource tags.",
+            trace_id=client.request.context.trace_id,
+        )
     resource_bundle_id = query.resource_bundle_id.strip()
+    if not resource_bundle_id:
+        if (
+            selection_mode in {"tags_only", "tags_and_pool"}
+            and query.resource_bundle_tags is None
+        ):
+            raise SmartCmpValidationError(
+                "Selected resource tags are required before listing resource pools.",
+                trace_id=client.request.context.trace_id,
+            )
+        if selection_mode in {"tags_only", "internal"}:
+            if not rows:
+                raise SmartCmpValidationError(
+                    "No resource pools are available for internal request resolution.",
+                    trace_id=client.request.context.trace_id,
+                )
+            rows = rows[:1]
     if resource_bundle_id:
         rows = [
             item
@@ -347,14 +431,13 @@ async def list_resource_bundles(
                 trace_id=client.request.context.trace_id,
             )
 
-    if not resource_bundle_id:
+    if not resource_bundle_id or not resolve_request_fields:
         return CatalogItemsResult(
             items=tuple(_project_resource_bundle(item) for item in rows)
         )
 
-    catalog = await _load_request_catalog(client, catalog_id)
     catalog_node_type = _catalog_node_type(catalog.get("blueprint"), node_name)
-    if catalog_node_type != query.node_type.strip():
+    if catalog_node_type != declared_node_type:
         raise SmartCmpValidationError(
             "The selected catalog node type does not match the resource-pool "
             "request context.",
@@ -438,6 +521,103 @@ async def _load_request_catalog(
             trace_id=client.request.context.trace_id,
         )
     return payload
+
+
+async def _load_catalog_resource_spec(
+    client: SmartCmpClient,
+    catalog_id: str,
+    node_name: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Load one catalog and generated resource spec as the request authority."""
+
+    catalog = await _load_request_catalog(client, catalog_id)
+    instructions = normalize_catalog(
+        catalog,
+        index=1,
+        exact_catalog=True,
+    ).get("instructions")
+    if not isinstance(instructions, dict):
+        raise SmartCmpValidationError(
+            "Catalog has no valid generated request instructions.",
+            trace_id=client.request.context.trace_id,
+        )
+    resource_specs = instructions.get("resourceSpecs")
+    if not isinstance(resource_specs, list):
+        raise SmartCmpValidationError(
+            "Catalog generated request instructions have no resource specs.",
+            trace_id=client.request.context.trace_id,
+        )
+    matching_spec = next(
+        (
+            spec
+            for spec in resource_specs
+            if isinstance(spec, dict)
+            and str(spec.get("node") or "").strip() == node_name
+        ),
+        None,
+    )
+    if not isinstance(matching_spec, dict):
+        raise SmartCmpValidationError(
+            f"Catalog generated request instructions do not declare node '{node_name}'.",
+            trace_id=client.request.context.trace_id,
+        )
+    return catalog, matching_spec
+
+
+def resource_bundle_selection_mode(
+    resource_spec: dict[str, Any],
+    selector_values: dict[str, Any] | None = None,
+) -> str:
+    """Classify selectors that are active for one generated resource spec."""
+
+    values = selector_values or {}
+    has_tags = _selector_is_active(
+        resource_spec.get("resourceBundleTags"),
+        values.get("resourceBundleTags"),
+        supplied="resourceBundleTags" in values,
+    )
+    has_pool = _selector_is_active(
+        resource_spec.get("resourceBundleId"),
+        values.get("resourceBundleId"),
+        supplied="resourceBundleId" in values,
+    )
+    if has_tags and has_pool:
+        return "tags_and_pool"
+    if has_tags:
+        return "tags_only"
+    if has_pool:
+        return "pool"
+    runtime_fields = resource_spec.get("runtime_fields")
+    if (
+        isinstance(runtime_fields, dict)
+        and runtime_fields.get("resolver") == "resource_bundle_placement"
+    ):
+        return "internal"
+    return "none"
+
+
+def _selector_is_active(
+    declaration: Any,
+    submitted_value: Any,
+    *,
+    supplied: bool,
+) -> bool:
+    """Resolve one normalized selector without guessing conditional expressions."""
+
+    if not isinstance(declaration, dict):
+        return False
+    if declaration.get("when") is False:
+        return False
+    if supplied and submitted_value not in (None, "", (), [], {}):
+        return True
+    when = declaration.get("when")
+    if when not in (None, "", True):
+        return False
+    return bool(
+        declaration.get("required") is True
+        or declaration.get("ask") is True
+        or declaration.get("defaultValue") not in (None, "", (), [], {})
+    )
 
 
 async def _resolve_component_id(

@@ -185,6 +185,17 @@ def test_approval_analysis_returns_to_llm_for_visible_guidance() -> None:
     assert metadata["tool_analyze_result_mode"] == "llm"
 
 
+def test_approval_decisions_return_provider_result_without_llm_rewrite() -> None:
+    """Keep decision outcomes and missing-input prompts explicit for the user."""
+
+    metadata = _frontmatter(SKILLS_ROOT / "approval" / "SKILL.md")
+
+    assert metadata["tool_approve_result_mode"] == "tool_only_ok"
+    assert metadata["tool_reject_result_mode"] == "tool_only_ok"
+    reject_parameters = json.loads(metadata["tool_reject_parameters"])
+    assert reject_parameters["required"] == ["ids"]
+
+
 def test_resource_detail_returns_to_llm_for_operation_continuation() -> None:
     """Allow operation workflows to continue after resolving resource detail."""
 
@@ -941,7 +952,7 @@ def test_atlasclaw_auth_context_rejects_unsupported_mode(
 
 
 def test_approval_adapter_builds_one_typed_decision(monkeypatch) -> None:
-    """Verify the consolidated approval handler delegates one confirmed write."""
+    """Keep confirmed approval writes bound to their Provider workflow trace."""
 
     adapter = _load(
         SKILLS_ROOT / "approval" / "scripts" / "adapter.py",
@@ -949,34 +960,115 @@ def test_approval_adapter_builds_one_typed_decision(monkeypatch) -> None:
     )
     captured: dict[str, Any] = {}
 
-    async def fake_execute(_ctx, operation, operation_input):
+    async def fake_execute_with_request(_ctx, operation, operation_input):
         captured["operation"] = operation
         captured["input"] = operation_input
-        return ApprovalDecisionResult(
-            decision="approve",
-            reason="policy accepted",
-            items=(
-                ApprovalDecisionItem(
-                    request_id="RES20260731000001",
-                    outcome="succeeded",
+        return (
+            ApprovalDecisionResult(
+                decision="approve",
+                reason="policy accepted",
+                items=(
+                    ApprovalDecisionItem(
+                        request_id="RES20260731000001",
+                        outcome="succeeded",
+                    ),
+                    ApprovalDecisionItem(
+                        request_id="RES20260731000002",
+                        outcome="failed",
+                        message="policy denied",
+                    ),
+                    ApprovalDecisionItem(
+                        request_id="RES20260731000003",
+                        outcome="unknown",
+                        status="unknown",
+                    ),
                 ),
+                overall_success=False,
             ),
-            overall_success=True,
+            SimpleNamespace(
+                context=SimpleNamespace(
+                    trace_id="trace-approval",
+                    instance=SimpleNamespace(name="cmp"),
+                )
+            ),
         )
 
-    monkeypatch.setattr(adapter, "execute", fake_execute)
+    monkeypatch.setattr(adapter, "execute_with_request", fake_execute_with_request)
     result = asyncio.run(
         adapter.approve(
             object(),
-            "RES20260731000001",
+            [
+                "RES20260731000001",
+                "RES20260731000002",
+                "RES20260731000003",
+            ],
             reason="policy accepted",
         )
     )
 
     assert result["success"] is True
-    assert result["output"] == "Approved: RES20260731000001"
-    assert captured["input"].request_ids == ("RES20260731000001",)
+    assert result["output"] == (
+        "Approved: RES20260731000001. "
+        "Failed: RES20260731000002 (policy denied). "
+        "Unknown: RES20260731000003 (unknown)"
+    )
+    internal = json.loads(result["_internal"])
+    assert internal["internal_request_trace_id"] == "trace-approval"
+    assert internal["provider_instance_ref"] == "smartcmp.cmp"
+    assert captured["input"].request_ids == (
+        "RES20260731000001",
+        "RES20260731000002",
+        "RES20260731000003",
+    )
     assert captured["input"].reason == "policy accepted"
+
+
+def test_approval_adapter_reject_requires_reason(monkeypatch) -> None:
+    """Return a trace-bound input request before any SmartCMP write is attempted."""
+
+    adapter = _load(
+        SKILLS_ROOT / "approval" / "scripts" / "adapter.py",
+        "test_approval_adapter_reject_reason",
+    )
+
+    async def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("SmartCMP must not be called without a rejection reason")
+
+    monkeypatch.setattr(adapter, "execute_with_request", fail_if_called)
+
+    async def fake_resolve_selected_provider_request(_ctx):
+        return SimpleNamespace(
+            context=SimpleNamespace(
+                trace_id="trace-reject-input",
+                instance=SimpleNamespace(name="cmp"),
+            )
+        )
+
+    monkeypatch.setattr(
+        adapter,
+        "resolve_selected_provider_request",
+        fake_resolve_selected_provider_request,
+    )
+
+    result = asyncio.run(
+        adapter.reject(
+            object(),
+            "RES20260731000001",
+            reason="   ",
+        )
+    )
+
+    assert result["success"] is True
+    assert result["required_input"] == "reason"
+    assert result["executed"] is False
+    assert result["request_ids"] == ["RES20260731000001"]
+    assert result["output"] == (
+        "Please provide a rejection reason for RES20260731000001. "
+        "No rejection was executed."
+    )
+    internal = json.loads(result["_internal"])
+    assert internal["internal_request_trace_id"] == "trace-reject-input"
+    assert internal["provider_instance_ref"] == "smartcmp.cmp"
 
 
 def test_request_adapter_parses_confirmed_json_once(monkeypatch) -> None:
@@ -1017,11 +1109,15 @@ def test_request_adapter_parses_confirmed_json_once(monkeypatch) -> None:
         adapter.submit(
             object(),
             '{"catalogId":"catalog-1","name":"vm-request"}',
+            resource_bundle_selections={"Compute": "resource-bundle-1"},
         )
     )
 
     assert result["success"] is True
     assert captured["input"].body["catalogId"] == "catalog-1"
+    assert captured["input"].resource_bundle_selections == {
+        "Compute": "resource-bundle-1"
+    }
     assert "RES20260731000002" in result["output"]
     assert result["requestId"] == "RES20260731000002"
     assert result["normalized_body"]["credentialPassword"] == "***"
@@ -1219,6 +1315,7 @@ def test_request_resource_bundle_contract_is_explicit_and_redacted(monkeypatch) 
             catalog_id="catalog-1",
             node_template_name="Compute",
             resource_bundle_id="bundle-1",
+            resource_bundle_tags=[" FACET_ENV:dev "],
             placement_values={
                 "credentialPassword": "lookup-secret",
                 "access_key": "access-key-value",
@@ -1246,6 +1343,7 @@ def test_request_resource_bundle_contract_is_explicit_and_redacted(monkeypatch) 
     operation_input = captured["input"]
     assert operation_input.catalog_id == "catalog-1"
     assert operation_input.node_template_name == "Compute"
+    assert operation_input.resource_bundle_tags == ("FACET_ENV:dev",)
     assert "catalogId" not in operation_input.placement_values
     assert "node" not in operation_input.placement_values
     assert result["items"][0]["requestFields"][0]["value"] == "lookup-secret"
@@ -1339,6 +1437,9 @@ def test_request_resource_bundle_schema_requires_explicit_catalog_context() -> N
     schema = json.loads(metadata["tool_resource_bundles_parameters"])
 
     assert {"catalog_id", "node_template_name"} <= set(schema["required"])
+    assert schema["properties"]["resource_bundle_tags"]["items"] == {
+        "type": "string"
+    }
     description = schema["properties"]["placement_values"]["description"]
     assert "exact selected options[].id" in description
     assert "options[].name is display-only" in description

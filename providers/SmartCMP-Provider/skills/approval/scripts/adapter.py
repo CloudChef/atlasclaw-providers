@@ -13,8 +13,8 @@ if str(_SHARED_SCRIPTS) not in sys.path:
 
 from _atlasclaw_adapter import (  # noqa: E402
     RunContext,
-    execute,
     execute_with_request,
+    resolve_selected_provider_request,
     split_values,
     tool_error,
     tool_result,
@@ -74,6 +74,7 @@ async def list_pending(
         return tool_result(
             payload,
             summary=_format_pending_output(items, total=result.total),
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -102,6 +103,7 @@ async def get_request_detail(
         return tool_result(
             projected,
             summary=_format_detail_output(result.model_dump(mode="json")),
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -191,6 +193,7 @@ async def analyze_request(
         return tool_result(
             projected,
             summary=f"Collected read-only evidence for {result.request_id}.",
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -211,7 +214,7 @@ async def reject(
     ids: str | list[str],
     reason: str | None = None,
 ) -> dict[str, Any]:
-    """Reject user-confirmed SmartCMP Request IDs exactly once."""
+    """Reject SmartCMP requests, or request the missing rejection reason safely."""
 
     return await _decide(ctx, decision="reject", ids=ids, reason=reason)
 
@@ -227,26 +230,51 @@ async def _decide(
 
     try:
         request_ids = split_values(ids)
-        result = await execute(
+        if not request_ids:
+            raise ValueError("At least one SmartCMP Request ID is required.")
+        normalized_reason = str(reason or "").strip()
+        if decision == "reject" and not normalized_reason:
+            request = await resolve_selected_provider_request(ctx)
+            return tool_result(
+                {
+                    "decision": decision,
+                    "request_ids": list(request_ids),
+                    "required_input": "reason",
+                    "executed": False,
+                },
+                summary=(
+                    "Please provide a rejection reason for "
+                    f"{', '.join(request_ids)}. No rejection was executed."
+                ),
+                request=request,
+            )
+        result, request = await execute_with_request(
             ctx,
             execute_approval_decision,
             ApprovalDecisionInput(
                 decision=decision,
                 request_ids=request_ids,
-                reason=reason or "",
+                reason=normalized_reason,
             ),
         )
-        completed = [
-            item.request_id
-            for item in result.items
-            if item.outcome == "succeeded"
-        ]
         verb = "Approved" if decision == "approve" else "Rejected"
-        summary = (
-            f"{verb}: {', '.join(completed)}"
-            if completed
-            else f"No requests were {verb.casefold()}."
-        )
-        return tool_result(result, summary=summary)
+        summary_parts: list[str] = []
+        for outcome, label in (
+            ("succeeded", verb),
+            ("failed", "Failed"),
+            ("unknown", "Unknown"),
+        ):
+            rows = []
+            for item in result.items:
+                if item.outcome != outcome:
+                    continue
+                detail = str(item.message or item.status or "").strip()
+                rows.append(
+                    f"{item.request_id} ({detail})" if detail else item.request_id
+                )
+            if rows:
+                summary_parts.append(f"{label}: {', '.join(rows)}")
+        summary = ". ".join(summary_parts) or "SmartCMP returned no item-level results."
+        return tool_result(result, summary=summary, request=request)
     except (ValueError, RuntimeError) as error:
         return tool_error(error)

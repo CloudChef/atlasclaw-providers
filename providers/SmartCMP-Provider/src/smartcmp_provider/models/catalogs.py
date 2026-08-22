@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 type PlacementFieldName = str
 
@@ -65,10 +65,11 @@ class FacetQuery(BaseModel):
 class ResourceBundleQuery(BaseModel):
     """Select resource pools and resolve their request-time placement choices.
 
-    ``placement_fields`` contains only fields declared by the selected catalog.
-    ``catalog_id`` and ``node_template_name`` identify that catalog context,
-    while ``placement_values`` carries only choices already made in the field
-    dependency chain.
+    ``resource_bundle_tags`` contains selected SmartCMP facet key/option pairs
+    used to filter pools. ``placement_fields`` contains only fields declared by
+    the selected catalog. ``catalog_id`` and ``node_template_name`` identify
+    that catalog context, while ``placement_values`` carries only choices
+    already made in the field dependency chain.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -80,8 +81,26 @@ class ResourceBundleQuery(BaseModel):
     node_template_name: str
     cloud_entry_type_id: str = ""
     resource_bundle_id: str = ""
+    resource_bundle_tags: tuple[str, ...] | None = None
     placement_fields: tuple[PlacementFieldName, ...] = ()
     placement_values: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("resource_bundle_tags")
+    @classmethod
+    def normalize_resource_bundle_tags(
+        cls,
+        value: tuple[str, ...] | None,
+    ) -> tuple[str, ...] | None:
+        """Normalize supplied facet filters and reject an explicit empty selection."""
+
+        if value is None:
+            return None
+        normalized = tuple(tag.strip() for tag in value)
+        if not normalized or any(not tag for tag in normalized):
+            raise ValueError(
+                "resource_bundle_tags must contain only non-empty tags"
+            )
+        return normalized
 
 
 class FlavorQuery(BaseModel):

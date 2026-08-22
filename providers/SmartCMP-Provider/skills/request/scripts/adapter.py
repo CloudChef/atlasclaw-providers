@@ -196,8 +196,9 @@ async def get_request_catalog(
 async def submit(
     ctx: RunContext[Any],
     json_body: str,
+    resource_bundle_selections: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Submit one user-confirmed SmartCMP request body exactly once."""
+    """Submit a confirmed request using its previously resolved pool IDs."""
 
     try:
         body = json.loads(json_body)
@@ -206,7 +207,10 @@ async def submit(
         result = await execute(
             ctx,
             submit_request_operation,
-            RequestSubmissionInput(body=body),
+            RequestSubmissionInput(
+                body=body,
+                resource_bundle_selections=resource_bundle_selections or {},
+            ),
         )
         request_ids = [
             item.request_id for item in result.items if item.request_id
@@ -302,13 +306,19 @@ async def list_resource_bundles(
     node_template_name: str,
     cloud_entry_type_id: str | None = None,
     resource_bundle_id: str | None = None,
+    resource_bundle_tags: list[str] | None = None,
     placement_fields: list[str] | None = None,
     placement_values: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """List resource pools and Provider-resolved catalog placement choices."""
+    """List tag-filtered resource pools and Provider-resolved placement choices."""
 
     try:
         normalized_resource_bundle_id = (resource_bundle_id or "").strip()
+        normalized_resource_bundle_tags = (
+            None
+            if resource_bundle_tags is None
+            else tuple(resource_bundle_tags)
+        )
         result, request = await execute_with_request(
             ctx,
             list_resource_bundles_operation,
@@ -320,19 +330,27 @@ async def list_resource_bundles(
                 node_template_name=node_template_name,
                 cloud_entry_type_id=cloud_entry_type_id or "",
                 resource_bundle_id=normalized_resource_bundle_id,
+                resource_bundle_tags=normalized_resource_bundle_tags,
                 placement_fields=tuple(placement_fields or ()),
                 placement_values=placement_values or {},
             ),
         )
-        internal = None
+        internal: dict[str, Any] = {
+            "catalogId": catalog_id,
+            "node": node_template_name,
+            "businessGroupId": business_group_id,
+            "items": [
+                {
+                    "id": item.get("id"),
+                    "name": item.get("name"),
+                }
+                for item in result.items
+            ],
+        }
         if normalized_resource_bundle_id:
             exact_item = result.items[0]
-            internal = _redact_request_secrets(
+            internal.update(
                 {
-                    **workflow_identity(request),
-                    "catalogId": catalog_id,
-                    "node": node_template_name,
-                    "businessGroupId": business_group_id,
                     "resourceBundleId": normalized_resource_bundle_id,
                     "placementValues": placement_values or {},
                     "items": [
@@ -362,7 +380,8 @@ async def list_resource_bundles(
                 if normalized_resource_bundle_id
                 else f"Found {len(result.items)} resource pools."
             ),
-            internal=internal,
+            internal=_redact_request_secrets(internal),
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)

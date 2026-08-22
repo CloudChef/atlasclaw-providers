@@ -15,6 +15,10 @@ from smartcmp_provider.errors import (
     SmartCmpUpstreamError,
     SmartCmpValidationError,
 )
+from smartcmp_provider.models.catalogs import (
+    CatalogDetailQuery,
+    ResourceBundleQuery,
+)
 from smartcmp_provider.models.requests import (
     RequestActorIdentity,
     RequestStatusQuery,
@@ -22,6 +26,11 @@ from smartcmp_provider.models.requests import (
     RequestSubmissionInput,
     RequestSubmissionItem,
     RequestSubmissionResult,
+)
+from smartcmp_provider.operations.catalogs import (
+    get_catalog_detail,
+    list_resource_bundles,
+    resource_bundle_selection_mode,
 )
 from smartcmp_provider.transport.client import SmartCmpClient
 from smartcmp_provider.transport.mutations import write_result_is_unknown
@@ -83,6 +92,11 @@ async def submit_request(
     """
 
     normalized_body = normalize_request_contract(request_input.body)
+    normalized_body = await _resolve_resource_bundles(
+        client,
+        normalized_body,
+        request_input.resource_bundle_selections,
+    )
     normalized_body = await _enrich_request_body(
         client,
         normalized_body,
@@ -134,6 +148,244 @@ async def submit_request(
         items=tuple(outcomes),
         overall_failed=overall_failed,
     )
+
+
+async def _resolve_resource_bundles(
+    client: SmartCmpClient,
+    body: dict[str, Any],
+    resource_bundle_selections: dict[str, str],
+) -> dict[str, Any]:
+    """Validate and bind generated resource-pool selectors before submission."""
+
+    resource_specs = body.get("resourceSpecs")
+    if not isinstance(resource_specs, list) or not resource_specs:
+        return body
+
+    catalog_id = _normalize_value(body.get("catalogId"))
+    business_group_id = _normalize_value(body.get("businessGroupId"))
+    if not catalog_id:
+        has_resource_bundle_selection = any(
+            "resourceBundleId" in spec or "resourceBundleTags" in spec
+            for spec in resource_specs
+            if isinstance(spec, dict)
+        ) or bool(resource_bundle_selections)
+        if not has_resource_bundle_selection:
+            return body
+        raise SmartCmpValidationError(
+            "Resource-pool resolution requires catalogId.",
+            trace_id=client.request.context.trace_id,
+        )
+    catalog = await get_catalog_detail(
+        client,
+        CatalogDetailQuery(catalog_id=catalog_id),
+    )
+    instructions = catalog.metadata.get("instructions")
+    declared_specs = (
+        instructions.get("resourceSpecs")
+        if isinstance(instructions, dict)
+        else None
+    )
+    if not isinstance(declared_specs, list):
+        return body
+    declared_by_node = {
+        str(spec.get("node") or "").strip(): spec
+        for spec in declared_specs
+        if isinstance(spec, dict) and str(spec.get("node") or "").strip()
+    }
+    component_type = _normalize_value(
+        catalog.metadata.get("componentType") or catalog.metadata.get("sourceKey")
+    )
+    if any(
+        not _normalize_value(node) or not _normalize_value(resource_bundle_id)
+        for node, resource_bundle_id in resource_bundle_selections.items()
+    ):
+        raise SmartCmpValidationError(
+            "Resolved resource-pool selections require non-empty node names and IDs.",
+            trace_id=client.request.context.trace_id,
+        )
+    normalized_selections = {
+        _normalize_value(node): _normalize_value(resource_bundle_id)
+        for node, resource_bundle_id in resource_bundle_selections.items()
+    }
+    if len(normalized_selections) != len(resource_bundle_selections):
+        raise SmartCmpValidationError(
+            "Resolved resource-pool selections contain duplicate normalized nodes.",
+            trace_id=client.request.context.trace_id,
+        )
+    undeclared_selection_nodes = set(normalized_selections) - set(declared_by_node)
+    if undeclared_selection_nodes:
+        raise SmartCmpValidationError(
+            "Resolved resource-pool selections contain undeclared nodes: "
+            f"{', '.join(sorted(undeclared_selection_nodes))}.",
+            trace_id=client.request.context.trace_id,
+        )
+
+    resolved_specs: list[Any] = []
+    consumed_selection_nodes: set[str] = set()
+    changed = False
+    for raw_spec in resource_specs:
+        if not isinstance(raw_spec, dict):
+            resolved_specs.append(raw_spec)
+            continue
+        node_name = _normalize_value(raw_spec.get("node"))
+        declared_spec = declared_by_node.get(node_name)
+        if not isinstance(declared_spec, dict):
+            raise SmartCmpValidationError(
+                f"Generated request instructions do not declare node '{node_name}'.",
+                trace_id=client.request.context.trace_id,
+            )
+        resolved_spec = dict(raw_spec)
+        declared_tags = declared_spec.get("resourceBundleTags")
+        declared_pool = declared_spec.get("resourceBundleId")
+        if "resourceBundleTags" in raw_spec and not isinstance(declared_tags, dict):
+            raise SmartCmpValidationError(
+                "Generated request instructions do not declare resourceBundleTags "
+                f"for node '{node_name}'.",
+                trace_id=client.request.context.trace_id,
+            )
+        if "resourceBundleId" in raw_spec and not isinstance(declared_pool, dict):
+            raise SmartCmpValidationError(
+                "Generated request instructions do not declare resourceBundleId "
+                f"for node '{node_name}'.",
+                trace_id=client.request.context.trace_id,
+            )
+
+        selection_mode = resource_bundle_selection_mode(declared_spec, raw_spec)
+        if "resourceBundleTags" in raw_spec and selection_mode not in {
+            "tags_only",
+            "tags_and_pool",
+        }:
+            raise SmartCmpValidationError(
+                f"resourceBundleTags is not active for node '{node_name}'.",
+                trace_id=client.request.context.trace_id,
+            )
+        if "resourceBundleId" in raw_spec and selection_mode not in {
+            "pool",
+            "tags_and_pool",
+        }:
+            raise SmartCmpValidationError(
+                f"resourceBundleId is not active for node '{node_name}'.",
+                trace_id=client.request.context.trace_id,
+            )
+        if (
+            selection_mode in {"tags_only", "tags_and_pool"}
+            and "resourceBundleTags" not in resolved_spec
+            and isinstance(declared_tags, dict)
+            and declared_tags.get("defaultValue") not in (None, "", (), [], {})
+        ):
+            resolved_spec["resourceBundleTags"] = declared_tags["defaultValue"]
+        if (
+            selection_mode in {"pool", "tags_and_pool"}
+            and "resourceBundleId" not in resolved_spec
+            and isinstance(declared_pool, dict)
+            and declared_pool.get("defaultValue") not in (None, "", (), [], {})
+        ):
+            resolved_spec["resourceBundleId"] = declared_pool["defaultValue"]
+
+        authoritative_node_type = _normalize_value(declared_spec.get("type"))
+        if selection_mode == "none":
+            if authoritative_node_type and raw_spec.get("type") != authoritative_node_type:
+                resolved_spec["type"] = authoritative_node_type
+                changed = True
+            resolved_specs.append(resolved_spec)
+            continue
+
+        tags = resolved_spec.get("resourceBundleTags")
+        if selection_mode in {"tags_only", "tags_and_pool"} and not tags:
+            raise SmartCmpValidationError(
+                "Active resource-pool tag selection requires resourceBundleTags.",
+                trace_id=client.request.context.trace_id,
+            )
+        if tags is not None and (
+            not isinstance(tags, list)
+            or any(not isinstance(tag, str) or not tag.strip() for tag in tags)
+        ):
+            raise SmartCmpValidationError(
+                "resourceBundleTags must contain non-empty facet key/option strings.",
+                trace_id=client.request.context.trace_id,
+            )
+        if not component_type or not authoritative_node_type:
+            raise SmartCmpValidationError(
+                "Resource-pool resolution requires generated "
+                "component and node types.",
+                trace_id=client.request.context.trace_id,
+            )
+        if not business_group_id:
+            raise SmartCmpValidationError(
+                "Resource-pool resolution requires businessGroupId.",
+                trace_id=client.request.context.trace_id,
+            )
+        selected_resource_bundle_id = (
+            _normalize_value(resolved_spec.get("resourceBundleId"))
+            if selection_mode in {"pool", "tags_and_pool"}
+            else normalized_selections.get(node_name, "")
+        )
+        if selection_mode in {"tags_only", "internal"}:
+            consumed_selection_nodes.add(node_name)
+        if not selected_resource_bundle_id:
+            raise SmartCmpValidationError(
+                f"Resolved resource-pool ID is required for node '{node_name}'.",
+                trace_id=client.request.context.trace_id,
+            )
+        result = await list_resource_bundles(
+            client,
+            ResourceBundleQuery(
+                business_group_id=business_group_id,
+                component_type=component_type,
+                node_type=authoritative_node_type,
+                catalog_id=catalog_id,
+                node_template_name=node_name,
+                resource_bundle_id=(
+                    selected_resource_bundle_id
+                    if selection_mode in {"pool", "tags_and_pool"}
+                    else ""
+                ),
+                resource_bundle_tags=(
+                    tuple(tag.strip() for tag in tags)
+                    if tags is not None
+                    else None
+                ),
+            ),
+            resolve_request_fields=False,
+        )
+        if len(result.items) != 1:
+            raise SmartCmpValidationError(
+                "Selected resource pool did not resolve exactly once during submission.",
+                trace_id=client.request.context.trace_id,
+            )
+        resolved_resource_bundle_id = _normalize_value(result.items[0].get("id"))
+        if not resolved_resource_bundle_id:
+            raise SmartCmpValidationError(
+                "Resolved resource pool has no ID.",
+                trace_id=client.request.context.trace_id,
+            )
+        if (
+            selection_mode in {"tags_only", "internal"}
+            and resolved_resource_bundle_id != selected_resource_bundle_id
+        ):
+            raise SmartCmpValidationError(
+                "The previewed resource-pool selection changed before submission.",
+                trace_id=client.request.context.trace_id,
+            )
+        resolved_spec.pop("resourceBundleTags", None)
+        resolved_spec["resourceBundleId"] = resolved_resource_bundle_id
+        resolved_spec["type"] = authoritative_node_type
+        resolved_specs.append(resolved_spec)
+        changed = True
+
+    unused_selection_nodes = set(normalized_selections) - consumed_selection_nodes
+    if unused_selection_nodes:
+        raise SmartCmpValidationError(
+            "Resolved resource-pool selections are not used by tag-only or internal "
+            f"selectors: {', '.join(sorted(unused_selection_nodes))}.",
+            trace_id=client.request.context.trace_id,
+        )
+
+    if not changed:
+        return body
+    resolved = dict(body)
+    resolved["resourceSpecs"] = resolved_specs
+    return resolved
 
 
 def normalize_request_contract(body: dict[str, Any]) -> dict[str, Any]:

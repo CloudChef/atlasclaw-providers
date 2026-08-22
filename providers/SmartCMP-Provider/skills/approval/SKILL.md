@@ -220,6 +220,7 @@ tool_approve_groups:
   - approval
 tool_approve_capability_class: "provider:smartcmp"
 tool_approve_priority: 120
+tool_approve_result_mode: "tool_only_ok"
 tool_approve_cli_positional:
   - ids
 tool_approve_cli_split:
@@ -240,7 +241,7 @@ tool_approve_parameters: |
     "required": ["ids"]
   }
 tool_reject_name: "smartcmp_reject"
-tool_reject_description: "Reject requests in SmartCMP. `ids` must be SmartCMP user-facing Request ID(s), e.g. RES20260505000010, TIC20260502000003, or CHG20260413000011. For user selections like 'reject 1' or '拒绝 1', resolve the row index to the latest smartcmp_list_pending `_internal.items[].request_id` before calling. Never pass row numbers, UUID-shaped internal IDs, or placeholder/dummy values; SmartCMP Provider resolves Request IDs internally."
+tool_reject_description: "Reject requests in SmartCMP. `ids` must be SmartCMP user-facing Request ID(s), e.g. RES20260505000010, TIC20260502000003, or CHG20260413000011. If `reason` is omitted, the tool returns an input-required result bound to the same request trace and does not execute a rejection; call it again only after the user supplies a non-empty reason. For user selections like 'reject 1' or '拒绝 1', resolve the row index to the latest smartcmp_list_pending `_internal.items[].request_id` before calling. Never pass row numbers, UUID-shaped internal IDs, or placeholder/dummy values; SmartCMP Provider resolves Request IDs internally."
 tool_reject_entrypoint: "scripts/adapter.py:reject"
 tool_reject_aliases:
   - "reject request"
@@ -270,6 +271,7 @@ tool_reject_groups:
   - approval
 tool_reject_capability_class: "provider:smartcmp"
 tool_reject_priority: 130
+tool_reject_result_mode: "tool_only_ok"
 tool_reject_cli_positional:
   - ids
 tool_reject_cli_split:
@@ -284,7 +286,7 @@ tool_reject_parameters: |
       },
       "reason": {
         "type": "string",
-        "description": "Optional rejection reason"
+        "description": "Rejection reason supplied by the user. When omitted, no rejection is executed and the tool requests this input."
       }
     },
     "required": ["ids"]
@@ -337,8 +339,8 @@ Examples:
 - `agree RES20260505000010` MUST call `smartcmp_approve`.
 - `pass TIC20260502000003` MUST call `smartcmp_approve`.
 - `批准 CHG20260413000011` MUST call `smartcmp_approve`.
-- `reject CHG20260413000011` MUST call `smartcmp_reject`.
-- `deny RES20260505000010` MUST call `smartcmp_reject`.
+- `reject CHG20260413000011` MUST call `smartcmp_reject` without a reason so the Provider returns a trace-bound input request without executing a rejection.
+- `deny RES20260505000010 because it exceeds quota` MUST call `smartcmp_reject`.
 - `analyze approval request RES20260505000010` MUST call `smartcmp_analyze_approval_request`.
 - `只读分析审批请求 RES20260505000010` MUST call `smartcmp_analyze_approval_request`.
 - `查看 CHG20260413000011 的详情` MUST call `smartcmp_get_request_detail`.
@@ -423,8 +425,10 @@ Call `smartcmp_approve` with one or more `request_ids` and an optional
 
 ### Step 3: Reject Requests
 
-Call `smartcmp_reject` with one or more `request_ids` and an optional
-rejection `reason`.
+Call `smartcmp_reject` with one or more `request_ids`. A non-empty rejection
+`reason` is required before SmartCMP is changed. If the user has not supplied
+one, omit `reason`; the tool returns a trace-bound input request and performs no
+rejection. Call the tool again with the reason after the user provides it.
 
 ## Output Parsing
 
@@ -446,7 +450,7 @@ rejection `reason`.
 
 ```
 [OK]    smartcmp_approve(request_id) <- RES20260505000010
-[OK]    smartcmp_reject(request_id)  <- TIC20260502000003 or CHG20260413000011
+[OK]    smartcmp_reject(request_id, reason) <- TIC20260502000003 or CHG20260413000011
 
 [FAIL]  smartcmp_approve(<uuid>) <- internal SmartCMP UUID, not accepted
 [FAIL]  smartcmp_approve(1)      <- display row number; resolve it to request_id first
@@ -457,6 +461,10 @@ rejection `reason`.
 
 > **ONLY use `request_id` field for approve/reject tool input**. SmartCMP Agent
 > SmartCMP Provider converts it to the approval action ID internally.
+
+> **A rejection reason is required before execution**. When it is missing, call
+> `smartcmp_reject` without `reason`; treat its `required_input` response as a
+> clarification, not a failure. No SmartCMP write occurs on that call.
 
 > **NEVER create temp files** — no `.py`, `.txt`, `.json`. Your context IS your memory.
 

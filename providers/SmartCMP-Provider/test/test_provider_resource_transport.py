@@ -8,6 +8,7 @@ import sys
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -873,7 +874,7 @@ def test_image_query_uses_cmp_cloud_family_resource_type(
 
 
 def test_resource_bundle_list_returns_request_identity_only() -> None:
-    """Exclude upstream resource-pool internals from Provider and MCP results."""
+    """Filter by exact facets, fail closed, and omit upstream pool internals."""
 
     request_scope = make_request(
         instance_name="cmp-a",
@@ -882,18 +883,81 @@ def test_resource_bundle_list_returns_request_identity_only() -> None:
         token="session-a",
     )
 
+    tag_only_markdown = """
+# Request Parameter Instructions
+
+catalog:
+  component_type: resource.iaas.machine.instance.abstract
+resource_specs:
+- node: Compute
+  type: cloudchef.nodes.Compute
+  resourceBundleTags:
+    required: true
+    ask: true
+  resourceBundleId:
+    required: true
+    when: params.placementMode == 'dedicated'
+""".strip()
+    runtime_only_markdown = """
+# Request Parameter Instructions
+
+catalog:
+  component_type: resource.iaas.machine.instance.abstract
+resource_specs:
+- node: Compute
+  type: cloudchef.nodes.Compute
+  runtime_fields:
+    resolver: resource_bundle_placement
+""".strip()
+
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/catalogs/catalog-1"):
+            return httpx.Response(
+                200,
+                json={"id": "catalog-1", "instructions": tag_only_markdown},
+                request=request,
+            )
+        if request.url.path.endswith("/catalogs/catalog-runtime"):
+            return httpx.Response(
+                200,
+                json={
+                    "id": "catalog-runtime",
+                    "instructions": runtime_only_markdown,
+                },
+                request=request,
+            )
+        if request.url.path.endswith("/catalogs/catalog-invalid"):
+            return httpx.Response(
+                200,
+                json={"id": "catalog-invalid", "instructions": ""},
+                request=request,
+            )
         assert request.url.path.endswith("/resource-bundles")
+        facets = request.url.params.get_list("facets")
+        if facets == ["FACET_ENV:none"]:
+            return httpx.Response(200, json=[], request=request)
+        assert facets in (
+            [],
+            ["FACET_ENV:dev"],
+            ["FACET_ENV:dev", "FACET_OWNER:platform"],
+        )
         return httpx.Response(
             200,
-            json=[{
-                "id": "resource-bundle-1",
-                "name": "vSphere pool",
-                "cloudEntryTypeId": "yacmp:cloudentry:type:vsphere",
-                "networks": [{"id": "network-1", "raw": "provider-only"}],
-                "storageTypes": [{"id": "storage-1"}],
-                "stats": {"cpu": 42},
-            }],
+            json=[
+                {
+                    "id": "resource-bundle-1",
+                    "name": "vSphere pool",
+                    "cloudEntryTypeId": "yacmp:cloudentry:type:vsphere",
+                    "networks": [{"id": "network-1", "raw": "provider-only"}],
+                    "storageTypes": [{"id": "storage-1"}],
+                    "stats": {"cpu": 42},
+                },
+                {
+                    "id": "resource-bundle-2",
+                    "name": "Later matching pool",
+                    "cloudEntryTypeId": "yacmp:cloudentry:type:vsphere",
+                },
+            ],
             request=request,
         )
 
@@ -902,24 +966,76 @@ def test_resource_bundle_list_returns_request_identity_only() -> None:
             request_scope,
             transport=httpx.MockTransport(handler),
         ) as client:
-            return await list_resource_bundles(
+            result = await list_resource_bundles(
                 client,
+                ResourceBundleQuery(
+                    business_group_id="business-group-1",
+                    component_type="resource.iaas.machine.instance.abstract",
+                    node_type="cloudchef.nodes.Compute",
+                    catalog_id="catalog-1",
+                    node_template_name="Compute",
+                    resource_bundle_tags=("FACET_ENV:dev", "FACET_OWNER:platform"),
+                ),
+            )
+            with pytest.raises(
+                SmartCmpValidationError,
+                match="No resource pools match the selected resource tags",
+            ):
+                await list_resource_bundles(
+                    client,
+                    ResourceBundleQuery(
+                        business_group_id="business-group-1",
+                        component_type="resource.iaas.machine.instance.abstract",
+                        node_type="cloudchef.nodes.Compute",
+                        catalog_id="catalog-1",
+                        node_template_name="Compute",
+                        resource_bundle_tags=("FACET_ENV:none",),
+                    ),
+                )
+            runtime_result = await list_resource_bundles(
+                client,
+                ResourceBundleQuery(
+                    business_group_id="business-group-1",
+                    component_type="resource.iaas.machine.instance.abstract",
+                    node_type="cloudchef.nodes.Compute",
+                    catalog_id="catalog-runtime",
+                    node_template_name="Compute",
+                ),
+            )
+            with pytest.raises(
+                SmartCmpValidationError,
+                match="generated request instructions",
+            ):
+                await list_resource_bundles(
+                    client,
+                    ResourceBundleQuery(
+                        business_group_id="business-group-1",
+                        component_type="cloudchef.nodes.Compute",
+                        node_type="cloudchef.nodes.Compute",
+                        catalog_id="catalog-invalid",
+                        node_template_name="Compute",
+                        resource_bundle_tags=("FACET_ENV:dev",),
+                    ),
+                )
+            with pytest.raises(ValueError, match="resource_bundle_tags"):
                 ResourceBundleQuery(
                     business_group_id="business-group-1",
                     component_type="cloudchef.nodes.Compute",
                     node_type="cloudchef.nodes.Compute",
                     catalog_id="catalog-1",
                     node_template_name="Compute",
-                ),
-            )
+                    resource_bundle_tags=(),
+                )
+            return result, runtime_result
 
-    result = asyncio.run(invoke())
+    result, runtime_result = asyncio.run(invoke())
 
     assert result.items == ({
         "id": "resource-bundle-1",
         "name": "vSphere pool",
         "cloudEntryTypeId": "yacmp:cloudentry:type:vsphere",
     },)
+    assert runtime_result.items == result.items
 
 
 def test_resource_bundle_resolves_declared_placement_fields() -> None:
@@ -953,6 +1069,17 @@ def test_resource_bundle_resolves_declared_placement_fields() -> None:
                 200,
                 json={
                     "id": "catalog-1",
+                    "sourceKey": "catalog-resource-type",
+                    "instructions": (
+                        "# Request Parameter Instructions\n\n"
+                        "catalog:\n"
+                        "  component_type: catalog-resource-type\n"
+                        "resource_specs:\n"
+                        "- node: SecurityGroup\n"
+                        "  type: cloudchef.nodes.SecurityGroup\n"
+                        "  resourceBundleId:\n"
+                        "    required: true\n"
+                    ),
                     "blueprint": {
                         "mainYaml": (
                             "node_templates:\n"
@@ -1241,6 +1368,17 @@ def test_resource_bundle_rejects_ambiguous_or_missing_node_component(
                 200,
                 json={
                     "id": "catalog-1",
+                    "sourceKey": "catalog-resource-type",
+                    "instructions": (
+                        "# Request Parameter Instructions\n\n"
+                        "catalog:\n"
+                        "  component_type: catalog-resource-type\n"
+                        "resource_specs:\n"
+                        "- node: Compute\n"
+                        "  type: cloudchef.nodes.Compute\n"
+                        "  resourceBundleId:\n"
+                        "    required: true\n"
+                    ),
                     "blueprint": {
                         "mainYaml": (
                             "node_templates:\n"
@@ -1277,8 +1415,8 @@ def test_resource_bundle_rejects_ambiguous_or_missing_node_component(
         asyncio.run(invoke())
 
     assert requested_paths == [
-        "/platform-api/resource-bundles",
         "/platform-api/catalogs/catalog-1",
+        "/platform-api/resource-bundles",
         "/platform-api/components",
     ]
 
@@ -1367,6 +1505,18 @@ def test_windows_compute_rejects_an_exhausted_ip_pool(
                 200,
                 json={
                     "id": "catalog-windows",
+                    "sourceKey": "resource.iaas.machine.windows_instance.abstract",
+                    "instructions": (
+                        "# Request Parameter Instructions\n\n"
+                        "catalog:\n"
+                        "  component_type: "
+                        "resource.iaas.machine.windows_instance.abstract\n"
+                        "resource_specs:\n"
+                        "- node: WindowsCompute\n"
+                        "  type: cloudchef.nodes.WindowsCompute\n"
+                        "  resourceBundleId:\n"
+                        "    required: true\n"
+                    ),
                     "blueprint": {
                         "mainYaml": (
                             "node_templates:\n"
@@ -1600,6 +1750,243 @@ def test_cloud_flavor_query_returns_the_request_flavor_id() -> None:
 
 
 
+def test_request_submission_revalidates_the_previewed_resource_pool() -> None:
+    """Submission must reuse and revalidate the pool selected for preview."""
+
+    request_scope = make_request(
+        instance_name="cmp-a",
+        base_url="https://cmp.example",
+        user_id="user-a",
+        token="session-a",
+    )
+    submitted: list[dict[str, Any]] = []
+    tag_only_markdown = """
+# Request Parameter Instructions
+
+catalog:
+  component_type: resource.iaas.machine.instance.abstract
+resource_specs:
+- node: Compute
+  type: cloudchef.nodes.Compute
+  resourceBundleTags:
+    required: true
+    ask: true
+""".strip()
+    combined_markdown = """
+# Request Parameter Instructions
+
+catalog:
+  component_type: resource.iaas.machine.instance.abstract
+resource_specs:
+- node: Compute
+  type: cloudchef.nodes.Compute
+  resourceBundleTags:
+    required: true
+    ask: true
+  resourceBundleId:
+    required: true
+    ask: true
+""".strip()
+    runtime_only_markdown = """
+# Request Parameter Instructions
+
+catalog:
+  component_type: resource.iaas.machine.instance.abstract
+resource_specs:
+- node: Compute
+  type: cloudchef.nodes.Compute
+  runtime_fields:
+    resolver: resource_bundle_placement
+""".strip()
+    markdown_by_catalog = {
+        "catalog-tag-only": tag_only_markdown,
+        "catalog-combined": combined_markdown,
+        "catalog-runtime": runtime_only_markdown,
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        catalog_id = request.url.path.rsplit("/", 1)[-1]
+        if catalog_id == "catalog-legacy-compute":
+            return httpx.Response(
+                200,
+                json={
+                    "id": catalog_id,
+                    "name": "Standard request catalog",
+                    "type": "cloudchef.nodes.Database",
+                    "instructions": "",
+                },
+                request=request,
+            )
+        if catalog_id in markdown_by_catalog:
+            return httpx.Response(
+                200,
+                json={
+                    "id": catalog_id,
+                    "name": "Linux resource pool mode",
+                    "instructions": markdown_by_catalog[catalog_id],
+                },
+                request=request,
+            )
+        if request.url.path.endswith("/resource-bundles"):
+            assert request.url.params.get_list("facets") in (
+                [],
+                ["FACET_ENV:dev"],
+            )
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "id": "resource-bundle-first",
+                        "name": "First matching pool",
+                        "cloudEntryTypeId": "yacmp:cloudentry:type:vsphere",
+                    },
+                    {
+                        "id": "resource-bundle-later",
+                        "name": "Later matching pool",
+                        "cloudEntryTypeId": "yacmp:cloudentry:type:vsphere",
+                    },
+                    {
+                        "id": "resource-bundle-selected",
+                        "name": "Explicitly selected pool",
+                        "cloudEntryTypeId": "yacmp:cloudentry:type:vsphere",
+                    },
+                ],
+                request=request,
+            )
+        if request.url.path.endswith("/generic-request/submit"):
+            submitted.append(json.loads(request.content))
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "id": "request-record-1",
+                        "workflowId": "RES20260821000064",
+                        "state": "INITIALING",
+                    }
+                ],
+                request=request,
+            )
+        if request.url.path.endswith("/generic-request/request-record-1"):
+            return httpx.Response(
+                200,
+                json={
+                    "workflowId": "RES20260821000064",
+                    "state": "INITIALING",
+                    "processInstanceId": "process-1",
+                },
+                request=request,
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    async def invoke():
+        async with SmartCmpClient(
+            request_scope,
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            async def submit(
+                body: dict[str, Any],
+                selections: dict[str, str] | None = None,
+            ):
+                return await submit_request(
+                    client,
+                    RequestSubmissionInput(
+                        body=body,
+                        resource_bundle_selections=selections or {},
+                        actor=RequestActorIdentity(
+                            user_id="user-1",
+                            login_id="admin",
+                        ),
+                        verification_attempts=1,
+                        verification_interval_seconds=0,
+                    ),
+                )
+
+            tag_only = await submit(
+                {
+                    "catalogId": "catalog-tag-only",
+                    "businessGroupId": "business-group-1",
+                    "name": "tag-only-vm",
+                    "resourceSpecs": [{
+                        "node": "Compute",
+                        "type": "untrusted.node.Type",
+                        "resourceBundleTags": ["FACET_ENV:dev"],
+                    }],
+                },
+                {"Compute": "resource-bundle-first"},
+            )
+            combined = await submit({
+                "catalogId": "catalog-combined",
+                "businessGroupId": "business-group-1",
+                "name": "combined-vm",
+                "resourceSpecs": [{
+                    "node": "Compute",
+                    "type": "cloudchef.nodes.Compute",
+                    "resourceBundleTags": ["FACET_ENV:dev"],
+                    "resourceBundleId": "resource-bundle-selected",
+                }],
+            })
+            runtime_only = await submit(
+                {
+                    "catalogId": "catalog-runtime",
+                    "businessGroupId": "business-group-1",
+                    "name": "runtime-only-vm",
+                    "resourceSpecs": [{
+                        "node": "Compute",
+                        "type": "cloudchef.nodes.Compute",
+                    }],
+                },
+                {"Compute": "resource-bundle-first"},
+            )
+            with pytest.raises(
+                SmartCmpValidationError,
+                match="previewed resource-pool selection changed",
+            ):
+                await submit(
+                    {
+                        "catalogId": "catalog-tag-only",
+                        "businessGroupId": "business-group-1",
+                        "name": "changed-tag-only-vm",
+                        "resourceSpecs": [{
+                            "node": "Compute",
+                            "type": "cloudchef.nodes.Compute",
+                            "resourceBundleTags": ["FACET_ENV:dev"],
+                        }],
+                    },
+                    {"Compute": "resource-bundle-later"},
+                )
+            no_instructions = await submit({
+                "catalogId": "catalog-legacy-compute",
+                "businessGroupId": "business-group-1",
+                "name": "standard-catalog-request",
+                "resourceSpecs": [{
+                    "node": "Database",
+                    "type": "cloudchef.nodes.Database",
+                    "resourceBundleTags": ["FACET_ENV:dev"],
+                }],
+            })
+            return tag_only, combined, runtime_only, no_instructions
+
+    results = asyncio.run(invoke())
+
+    assert len(submitted) == 4
+    assert submitted[0]["resourceSpecs"][0]["resourceBundleId"] == (
+        "resource-bundle-first"
+    )
+    assert "resourceBundleTags" not in submitted[0]["resourceSpecs"][0]
+    assert submitted[1]["resourceSpecs"][0]["resourceBundleId"] == (
+        "resource-bundle-selected"
+    )
+    assert "resourceBundleTags" not in submitted[1]["resourceSpecs"][0]
+    assert submitted[2]["resourceSpecs"][0]["resourceBundleId"] == (
+        "resource-bundle-first"
+    )
+    assert submitted[3]["resourceSpecs"][0]["resourceBundleTags"] == [
+        "FACET_ENV:dev"
+    ]
+    assert "resourceBundleId" not in submitted[3]["resourceSpecs"][0]
+    assert all(result.items[0].request_id == "RES20260821000064" for result in results)
+
+
 def test_request_submission_normalizes_payload_and_submits_exactly_once():
     request_scope = make_request(
         instance_name="cmp-a",
@@ -1612,6 +1999,12 @@ def test_request_submission_normalizes_payload_and_submits_exactly_once():
 
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal submit_calls
+        if request.url.path.endswith("/catalogs/catalog-linux"):
+            return httpx.Response(
+                200,
+                json={"id": "catalog-linux", "instructions": ""},
+                request=request,
+            )
         if request.url.path.endswith("/generic-request/submit"):
             submit_calls += 1
             submitted.append(json.loads(request.content))

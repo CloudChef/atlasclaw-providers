@@ -36,6 +36,7 @@ class RequestSubmissionInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     body: dict[str, Any]
+    resource_bundle_selections: dict[str, str] = Field(default_factory=dict)
     actor: RequestActorIdentity | None = None
     verification_attempts: int = Field(default=8, ge=1)
     verification_interval_seconds: float = Field(default=1.0, ge=0)

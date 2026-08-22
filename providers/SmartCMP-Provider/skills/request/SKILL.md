@@ -108,7 +108,7 @@ tool_catalog_detail_parameters: |
     "required": ["catalog_id"]
   }
 tool_submit_name: "smartcmp_submit_request"
-tool_submit_description: "Submit resource request to SmartCMP. RULES: (1) NEVER claim submitted without calling this tool. (2) Reuse resolved workflow lookup evidence, display a preview from the exact generated instruction contract with credential secrets masked, and wait for user confirmation BEFORE calling. The displayed masked preview is not the submit body. (3) json_body is REQUIRED and must contain the corresponding original secret values; never submit ***, ******, or another preview mask. If an original secret is unavailable, stop, collect it again, revalidate, and obtain fresh confirmation. (4) catalogId MUST be UUID from catalog metadata id field. (5) Same-type multi-instance requests must use the selected catalog's declared count field, or fallback top-level quantity when no such field exists, without duplicating resourceSpecs; per-instance differences belong in request-decomposition-agent. See Field Placement table in skill body for exact structure rules."
+tool_submit_description: "Submit resource request to SmartCMP. RULES: (1) NEVER claim submitted without calling this tool. (2) Reuse resolved workflow lookup evidence, display a preview from the exact generated instruction contract with credential secrets masked, and wait for user confirmation BEFORE calling. The displayed masked preview is not the submit body. (3) json_body is REQUIRED and must contain the corresponding original secret values; never submit ***, ******, or another preview mask. If an original secret is unavailable, stop, collect it again, revalidate, and obtain fresh confirmation. (4) Pass resource_bundle_selections for every tag-only or internal pool resolution, keyed by resourceSpecs[].node, using the exact ID returned by smartcmp_list_resource_bundles. (5) catalogId MUST be UUID from catalog metadata id field. (6) Same-type multi-instance requests must use the selected catalog's declared count field, or top-level quantity when no such field exists, without duplicating resourceSpecs; per-instance differences belong in request-decomposition-agent. See Field Placement table in skill body for exact structure rules."
 tool_submit_entrypoint: "scripts/adapter.py:submit"
 tool_submit_groups:
   - cmp
@@ -126,7 +126,12 @@ tool_submit_parameters: |
     "properties": {
       "json_body": {
         "type": "string",
-        "description": "REQUIRED. The complete unmasked request JSON as a string. It must contain each corresponding original secret value and must never contain preview masks such as *** or ******. For cloud/resource requests: include catalogId, catalogName, businessGroupId, name, resourceSpecs built from generated Markdown instructions.resourceSpecs, and optional top-level params built from instructions.params. Put resourceBundleId at resourceSpecs[].resourceBundleId, resourceBundleTags at resourceSpecs[].resourceBundleTags, resourceBundleParams under resourceSpecs[].resourceBundleParams, resource-spec params under resourceSpecs[].params, resource-spec fields under resourceSpecs[] directly, and catalog form params under top-level params. For same-type multi-instance requests, use the selected catalog's declared quantity/count field in its declared location; when no catalog field exists, add top-level quantity. Do not duplicate resourceSpecs just to represent count. If resourceBundleTags is used, omit resourceBundleId for the same resource spec. For tickets: build genericRequest.description and optional genericRequest.processForm from generated Markdown instructions.genericRequest; for tickets without Markdown, include catalogId, catalogName, businessGroupId, name, and genericRequest {description}. Do NOT include userLoginId (auto-injected by script). FORBIDDEN fields: never add priority, category, requestor, parameters, impactScope, urgency, contactName, or any field not listed above. DO NOT omit this parameter."
+        "description": "REQUIRED. The complete unmasked request JSON as a string. It must contain each corresponding original secret value and must never contain preview masks such as *** or ******. For cloud/resource requests: include catalogId, catalogName, businessGroupId, name, resourceSpecs built from generated Markdown instructions.resourceSpecs, and optional top-level params built from instructions.params. Put resourceBundleId at resourceSpecs[].resourceBundleId, resourceBundleTags at resourceSpecs[].resourceBundleTags, resourceBundleParams under resourceSpecs[].resourceBundleParams, resource-spec params under resourceSpecs[].params, resource-spec fields under resourceSpecs[] directly, and catalog form params under top-level params. For same-type multi-instance requests, use the selected catalog's declared quantity/count field in its declared location; when no catalog field exists, add top-level quantity. Do not duplicate resourceSpecs just to represent count. If both resourceBundleTags and resourceBundleId are declared, use tags only to filter pools and submit resourceBundleId; submit resourceBundleTags only when it is the sole declared pool selector. For tickets: build genericRequest.description and optional genericRequest.processForm from generated Markdown instructions.genericRequest; for tickets without Markdown, include catalogId, catalogName, businessGroupId, name, and genericRequest {description}. Do NOT include userLoginId (auto-injected by script). FORBIDDEN fields: never add priority, category, requestor, parameters, impactScope, urgency, contactName, or any field not listed above. DO NOT omit this parameter."
+      },
+      "resource_bundle_selections": {
+        "type": "object",
+        "additionalProperties": {"type": "string"},
+        "description": "Trace-bound pool evidence for tag-only and internal selection. Key each exact resourceSpecs[].node to the resource pool ID returned by smartcmp_list_resource_bundles. Omit for requests without those selector modes."
       }
     },
     "required": ["json_body"]
@@ -196,7 +201,7 @@ tool_facets_parameters: |
 tool_resource_bundles_name: "smartcmp_list_resource_bundles"
 tool_resource_bundles_read_only: true
 tool_resource_bundles_auto_select_single_option: true
-tool_resource_bundles_description: "List request-flow resource pools and resolve the active request fields for an exact selected or defaulted pool. Use when generated Markdown declares an active resourceBundleId or runtime_fields.resolver. Always pass catalog_id and node_template_name as explicit context; placement_values contains business field selections only. With resource_bundle_id, request options through placement_fields and follow the returned requestFields, targets, dependencies, missingRequiredFields, missingSelectionFields, and configurationErrors. Requires selected business_group_id, component_type from generated Markdown catalog/component metadata, and node_type from resourceSpecs[].type. Fixed API filters: strategy=RB_POLICY_STATIC, enabled=true, readOnly=false. If resourceBundleId has ask:true and multiple results exist, present the returned names and wait for the user's selection. Ask the user to identify the resource-pool field and selected number when replying; never suggest that a bare number is sufficient."
+tool_resource_bundles_description: "List request-flow resource pools, optionally filtered by selected resource tags, and resolve the active request fields for an exact selected or defaulted pool. Use when generated Markdown declares an active resourceBundleId, resourceBundleTags, or runtime_fields.resolver. Always pass catalog_id and node_template_name as explicit context; placement_values contains business field selections only. Pass resource_bundle_tags as exact facet.key:option.key values whenever tags were selected. With resource_bundle_id, request options through placement_fields and follow the returned requestFields, targets, dependencies, missingRequiredFields, missingSelectionFields, and configurationErrors. Requires selected business_group_id, component_type from generated Markdown catalog/component metadata, and node_type from resourceSpecs[].type. Fixed API filters: strategy=RB_POLICY_STATIC, enabled=true, readOnly=false. If resourceBundleId has ask:true and multiple results exist, present the returned names and wait for the user's selection. Ask the user to identify the resource-pool field and selected number when replying; never suggest that a bare number is sufficient."
 tool_resource_bundles_entrypoint: "scripts/adapter.py:list_resource_bundles"
 tool_resource_bundles_group: "cmp"
 tool_resource_bundles_capability_class: "provider:smartcmp"
@@ -238,6 +243,13 @@ tool_resource_bundles_parameters: |
       "resource_bundle_id": {
         "type": "string",
         "description": "Exact selected or defaulted resource pool ID when resolving placement fields. Omit only while listing resource pools."
+      },
+      "resource_bundle_tags": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Selected resource tag filters as exact facet.key:option.key values. Pass them while listing pools and on later exact-pool placement calls."
       },
       "placement_fields": {
         "type": "array",
@@ -566,15 +578,19 @@ Status semantics:
    exception is `flavorId` after `computeProfileId` is selected when the exact
    selected resource-pool item has `cloudEntryTypeId` equal to
    `yacmp:cloudentry:type:vsphere`; omit that field instead of asking for it.
-7. Reuse resolved workflow lookup evidence. For every spec with an active
-   `resourceBundleId`, resolve its dynamic request fields and collect each
-   active required or `ask: true` value that has no default. Use the exact
-   returned option ID for option-backed fields. Once all declared fields have
-   values, show a schema-exact JSON preview with credential secrets masked, ask
-   for confirmation, and stop. Do not run a final resource-pool revalidation
-   solely to authorize the preview.
+7. Reuse resolved workflow lookup evidence. For every resource spec with an
+   active `resourceBundleTags`, active `resourceBundleId`, or
+   `runtime_fields.resolver`, resolve its resource pool and dynamic request
+   fields, then collect each active required or `ask: true` value that has no
+   default. Ticket/work-order `genericRequest` catalogs have no resource specs
+   and skip this step. Use the exact returned option ID for option-backed
+   fields. Once all declared fields have values, show a schema-exact JSON
+   preview with credential secrets masked, ask for confirmation, and stop. Do
+   not run a final resource-pool revalidation solely to authorize the preview.
 8. After the user confirms, call `smartcmp_submit_request` with the corresponding
-   unmasked request body. The displayed preview is presentation-only; restore
+   unmasked request body. For tag-only and internal resource-pool modes, also pass
+   `resource_bundle_selections` keyed by node with the exact pool ID already
+   resolved for the preview. The displayed preview is presentation-only; restore
    each original secret value and never submit a preview mask.
 
 Steps 1 through 3 are mandatory for every new request. Never ask the user to type a
@@ -604,11 +620,14 @@ question.
 
 ### Tool sequencing
 
-- Resolve request lookup fields in dependency order:
-  `resourceBundleId` -> `computeProfileId` -> explicitly selectable `flavorId`
-  when declared -> `logicTemplateId` ->
+- Resolve resource-spec lookup fields in dependency order:
+  active `resourceBundleTags` -> active `resourceBundleId` ->
+  `computeProfileId` -> explicitly selectable `flavorId` when declared -> `logicTemplateId` ->
   `physicalTemplateId` or `templateId`. Do not call tools for two unresolved
-  `ask: true` fields in one model response.
+  `ask: true` fields in one model response. When tags are the sole pool
+  selector, use the first filtered result in CMP response order only for
+  internal dynamic-field resolution and do not submit its ID. Ticket/work-order
+  `genericRequest` catalogs skip this resource-spec lookup sequence.
 - After `resourceBundleId` is selected, `smartcmp_list_flavors` is the only
   valid next lookup while an active `computeProfileId` or explicitly selectable
   `flavorId` remains unresolved. Resolve `computeProfileId` first, then call the same tool with
@@ -823,22 +842,41 @@ scope.
   `resourceBundleParams`, and `params` in Markdown. If it is active and has no
   `defaultValue` / `default_value`, call `smartcmp_list_facets` after
   business group selection with `node_type` from that spec's `type`, then ask
-  the user to choose resource tags. Serialize selected values at
-  `resourceSpecs[].resourceBundleTags` as `["<facet.key>:<option.key>"]`.
-- `resourceBundleTags` and `resourceBundleId` are mutually exclusive for the
-  same `resourceSpecs[]` item. If both are declared and active, use
-  `resourceBundleTags` and omit both `resourceBundleId` and
-  `resourceBundleParams`.
-- If `resourceBundleId.defaultValue` exists and no active `resourceBundleTags`
-  is used for that spec, put that value at `resourceSpecs[].resourceBundleId`.
+  the user to choose resource tags. Retain selected values as exact
+  `"<facet.key>:<option.key>"` filters for the resource-pool step.
+- When both `resourceBundleTags` and `resourceBundleId` are active, resolve tags
+  first and pass them as `resource_bundle_tags` to
+  `smartcmp_list_resource_bundles`. Use one returned pool exactly as the
+  `resourceBundleId` selection: adopt a sole result automatically, or show
+  multiple returned pool names and wait for the user. Keep both the selected
+  tags and `resourceBundleId` in the Provider Tool `json_body` so the Provider
+  can revalidate the same placement. The Provider removes
+  `resourceBundleTags` before submitting to SmartCMP, so the upstream request
+  contains only `resourceBundleId`.
+- When only `resourceBundleTags` is active, pass the selected tags to
+  `smartcmp_list_resource_bundles`. The Provider returns only the first matching
+  pool in CMP response order for subsequent lookups; do not expose or ask the
+  user to choose that pool. Submit only `resourceBundleTags`; the Provider
+  verifies and submits the same pool ID from `resource_bundle_selections`. An
+  empty filtered result is an error and must not be retried without the selected
+  tags.
+- If `resourceBundleId.defaultValue` exists, filter with any selected tags and
+  require that exact pool to remain available, then put that value at
+  `resourceSpecs[].resourceBundleId`.
 - If a spec uses a defaulted `resourceBundleId` but declares a request-time
   placement field without a default, call `smartcmp_list_resource_bundles` and
   pass that default as `resource_bundle_id`. This lookup supplies the selectable
   resources; it does not reopen resource-pool selection.
-- If an active `resourceBundleId` has no default and no active
-  `resourceBundleTags`, call `smartcmp_list_resource_bundles` after business
-  group selection and ask the user to choose one. Use the selected bundle `id`
-  at `resourceSpecs[].resourceBundleId`.
+- If an active `resourceBundleId` has no default, call
+  `smartcmp_list_resource_bundles` after business group and tag selection. Adopt
+  a sole result automatically; with multiple results, ask the user to choose
+  one. Use the selected bundle `id` at `resourceSpecs[].resourceBundleId`.
+- If no pool selector is active but `runtime_fields.resolver` requires a pool,
+  call `smartcmp_list_resource_bundles` without tags or a pool ID. The Provider
+  returns only its internally selected first CMP-sorted pool for downstream
+  lookups. Reuse that ID as lookup context and in
+  `resource_bundle_selections`, but do not expose the pool to the user or
+  serialize it in the preview body.
 - For `smartcmp_list_resource_bundles`, pass `business_group_id` from the
   selected business group, `node_type` from `resourceSpecs[].type`, and
   `component_type` from `instructions.componentType` / catalog
@@ -849,7 +887,8 @@ scope.
 - For every resource-pool call, pass the catalog UUID as `catalog_id` and the
   generated resource-spec node as `node_template_name`. Keep only business field
   selections in `placement_values`; never put `catalogId` or `node` there. Pass
-  any currently requested fields as `placement_fields`. The returned
+  selected tags as `resource_bundle_tags` on both list and exact-pool calls, and
+  pass any currently requested fields as `placement_fields`. The returned
   `requestFields` is the authoritative active field set for that pool and the
   current selections.
 - When a spec declares `runtime_fields.resolver: resource_bundle_placement`,
@@ -937,7 +976,6 @@ scope.
       "node": "<from instructions.resourceSpecs[].node>",
       "type": "<from instructions.resourceSpecs[].type>",
       "resourceBundleId": "<from resourceBundleId default or selected resource pool id>",
-      "resourceBundleTags": ["<facet.key>:<option.key>"],
       "resourceBundleParams": {
         "<key>": "<active value>"
       },
@@ -956,9 +994,9 @@ scope.
 Omit empty objects. Do not move `resourceBundleId` into either top-level
 `params` or `resourceSpecs[].params`, do not put declared `resourceBundleParams`
 fields inside any `params`, and do not put network fields inside
-`resourceBundleParams`. Never include `resourceBundleId` or
-`resourceBundleParams` when `resourceBundleTags` is used in the same spec. Do
-not serialize a `fields` wrapper. Serialize each active direct resource-spec
+`resourceBundleParams`. When tags are the only pool selector, replace
+`resourceBundleId` with `resourceBundleTags`; when both selectors are declared,
+submit only `resourceBundleId`. Do not serialize a `fields` wrapper. Serialize each active direct resource-spec
 field schema as `resourceSpecs[].<key>`. Same-type multi-instance requests must
 use the catalog-declared quantity field or fallback `quantity`; never duplicate
 identical `resourceSpecs[]` entries just to represent quantity. Catalogs that
@@ -1002,8 +1040,9 @@ determines their order. Call only the lookup for the current active field with
 no usable default, use its selected returned ID only for that declared field,
 and keep display names user-facing.
 
-- For `resourceBundleTags`, use `smartcmp_list_facets` with the spec node type
-  and serialize selected values as `"<facet.key>:<option.key>"`.
+- For `resourceBundleTags`, use `smartcmp_list_facets` with the spec node type.
+  Pass selected `"<facet.key>:<option.key>"` values to the resource-pool lookup;
+  serialize them only when tags are the sole pool selector.
 - For resource-pool placement, pass the selected business group, component
   type, spec node, catalog UUID, node template name, exact pool ID when known,
   requested fields, and only business selections in `placement_values`. The
@@ -1034,8 +1073,9 @@ tag data only:
   example: `请选择资源环境：1. 开发 2. 测试 3. 生产`.
 - When asking the facet question, stop and wait for the user's answer. Do not
   show a JSON preview in the same reply.
-- Store selected tags only as `"<facet.key>:<option.key>"` strings in
-  `resourceSpecs[].resourceBundleTags`.
+- Store selected tags as `"<facet.key>:<option.key>"` strings. Submit them at
+  `resourceSpecs[].resourceBundleTags` only when tags are the sole pool
+  selector; otherwise use them only as pool lookup filters.
 
 ## Missing Markdown
 
