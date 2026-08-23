@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 
@@ -607,12 +608,12 @@ def test_reject_opposite_approved_status_is_not_reported_as_success():
     assert result.items[0].status == "failed"
 
 
-def test_resource_action_uses_current_robot_operations_and_submits_once():
+def test_resource_action_uses_current_robot_operations_and_submits_tear_down_once():
     get_count = 0
-    post_count = 0
+    submitted: list[dict] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal get_count, post_count
+        nonlocal get_count
         assert request.headers["Authorization"] == "Bearer cmp_tk_robot"
         assert "CloudChef-Authenticate" not in request.headers
         if request.method == "GET":
@@ -624,17 +625,19 @@ def test_resource_action_uses_current_robot_operations_and_submits_once():
                 200,
                 json=[
                     {
-                        "id": "stop",
+                        "id": "tear_down_in_resource",
+                        "name": "Tear Down",
+                        "nameZh": "删除",
                         "enabled": True,
-                        "parameters": "{}",
-                        "inputsForm": None,
+                        "parameters": '{"legacyMetadata": true}',
+                        "inputsForm": {"legacyField": "ignored"},
                         "webOperation": False,
                     }
                 ],
                 request=request,
             )
-        post_count += 1
         assert request.url.path.endswith("/nodes/resource-operations")
+        submitted.append(json.loads(request.content))
         return httpx.Response(
             200,
             json={"taskId": "internal-task-id"},
@@ -657,14 +660,16 @@ def test_resource_action_uses_current_robot_operations_and_submits_once():
                             resource_id="resource-1",
                         ),
                     ),
-                    action="stop",
+                    action="tear_down_in_resource",
                 ),
             )
 
     result = asyncio.run(invoke())
 
     assert get_count == 1
-    assert post_count == 1
+    assert len(submitted) == 1
+    assert submitted[0]["operationId"] == "tear_down_in_resource"
+    assert submitted[0]["resourceIds"] == "resource-1"
     assert result.resource_ids == ("resource-1",)
     assert "internal-task-id" not in result.model_dump_json()
 
@@ -708,6 +713,54 @@ def test_resource_action_rejects_disabled_current_user_operation_before_post():
             )
 
     with pytest.raises(SmartCmpValidationError, match="请先启动实例"):
+        asyncio.run(invoke())
+    assert post_count == 0
+
+
+def test_resource_action_rejects_operation_outside_agent_supported_set():
+    post_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal post_count
+        if request.method == "POST":
+            post_count += 1
+            raise AssertionError("unsupported operation must not be submitted")
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "id": "tear-down-in-resource",
+                    "enabled": True,
+                    "parameters": "{}",
+                    "inputsForm": None,
+                    "webOperation": False,
+                }
+            ],
+            request=request,
+        )
+
+    async def invoke():
+        async with SmartCmpClient(
+            make_request(),
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            await execute_resource_action(
+                client,
+                ResourceActionInput(
+                    targets=(
+                        ResourceActionTarget(
+                            category="virtual-machines",
+                            resource_id="resource-1",
+                        ),
+                    ),
+                    action="tear-down-in-resource",
+                ),
+            )
+
+    with pytest.raises(
+        SmartCmpValidationError,
+        match="not supported by the Agent",
+    ):
         asyncio.run(invoke())
     assert post_count == 0
 

@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 from urllib.parse import quote
 
 from smartcmp_provider.domain.object_operations import serialize_available_operations
 from smartcmp_provider.domain.resource_actions import (
     available_resource_operations,
-    normalize_operation_id,
 )
 from smartcmp_provider.domain.resource_normalization import (
     build_flat_resource_properties,
@@ -36,6 +34,16 @@ from smartcmp_provider.transport.client import SmartCmpClient
 
 RESOURCE_NAME_SEARCH_SIZE = 100
 RESOURCE_NAME_SEARCH_MAX_PAGES = 20
+SUPPORTED_RESOURCE_OPERATION_IDS = frozenset(
+    {
+        "refresh",
+        "restart",
+        "start",
+        "stop",
+        "suspend",
+        "tear_down_in_resource",
+    }
+)
 
 
 def build_resource_search_path(query: ResourceListQuery) -> str:
@@ -289,14 +297,14 @@ async def list_resource_operations(
     client: SmartCmpClient,
     query: ResourceOperationsQuery,
 ) -> ResourceOperationsResult:
-    """List enabled no-parameter operations for the current SmartCMP user.
+    """List enabled operations from the Agent's explicit supported set.
 
     Args:
         client: Client bound to the current request credential.
         query: Resource category and internal ID.
 
     Returns:
-        Operations executable by the current user without additional form input.
+        Operations supported by the Agent and enabled for the current user.
 
     Raises:
         SmartCmpValidationError: If category or resource ID is empty.
@@ -334,27 +342,10 @@ async def list_resource_operations(
     return ResourceOperationsResult(operations=operations)
 
 
-def parameters_are_empty(value: Any) -> bool:
-    """Return whether an operation parameter declaration needs no user input."""
-
-    if value in (None, "", {}, []):
-        return True
-    if isinstance(value, str):
-        stripped = value.strip()
-        if stripped in ("", "{}"):
-            return True
-        try:
-            parsed = json.loads(stripped)
-        except (TypeError, ValueError):
-            return False
-        return parsed in ({}, [])
-    return False
-
-
 def operation_rejection_reason(operation: dict[str, Any]) -> str:
-    """Explain why an operation is outside the no-parameter execution scope."""
+    """Explain why SmartCMP does not expose an operation in the current state."""
 
-    if not normalize_operation_id(str(operation.get("id") or "")):
+    if not str(operation.get("id") or "").strip():
         return "Operation has no ID."
     if operation.get("enabled") is not True:
         return str(
@@ -364,17 +355,24 @@ def operation_rejection_reason(operation: dict[str, Any]) -> str:
         )
     if operation.get("webOperation") is True:
         return "Operation must be executed in the SmartCMP web UI."
-    if operation.get("inputsForm") not in (None, "", {}, []):
-        return "Operation requires form input, which is not supported by this tool."
-    if not parameters_are_empty(operation.get("parameters")):
-        return "Operation requires parameters, which is not supported by this tool."
     return ""
 
 
-def operation_is_executable(operation: dict[str, Any]) -> bool:
-    """Return whether the operation is executable by the current read adapter."""
+def resource_operation_rejection_reason(operation: dict[str, Any]) -> str:
+    """Explain why an operation is outside the Agent-supported resource scope."""
 
-    return not operation_rejection_reason(operation)
+    operation_id = str(operation.get("id") or "").strip()
+    if not operation_id:
+        return "Operation has no ID."
+    if operation_id not in SUPPORTED_RESOURCE_OPERATION_IDS:
+        return f"Operation '{operation_id}' is not supported by the Agent."
+    return operation_rejection_reason(operation)
+
+
+def operation_is_executable(operation: dict[str, Any]) -> bool:
+    """Return whether the operation is in the Agent's explicit supported set."""
+
+    return not resource_operation_rejection_reason(operation)
 
 
 async def _load_one_resource_evidence(

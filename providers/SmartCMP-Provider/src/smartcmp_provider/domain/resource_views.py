@@ -313,6 +313,9 @@ def build_resource_operation_view(
     operation_id = normalize_operation_id(str(operation.get("id") or ""))
     name = str(operation.get("name") or "")
     name_zh = str(operation.get("nameZh") or "")
+    if operation_id == "tear_down_in_resource":
+        name = "Tear Down"
+        name_zh = "删除"
     executable_action = available_resource_execution(
         resource_id,
         operation_id,

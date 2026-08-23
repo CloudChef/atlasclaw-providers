@@ -9,10 +9,8 @@ from smartcmp_provider.domain.object_operations import (
     available_operation,
     serialize_available_operations,
 )
-from smartcmp_provider.domain.resource_actions import normalize_operation_id
 from smartcmp_provider.errors import (
     SmartCmpTargetResolutionError,
-    SmartCmpUnknownOutcomeError,
     SmartCmpUpstreamError,
     SmartCmpValidationError,
 )
@@ -197,8 +195,7 @@ async def permanently_remove_recycled_resource(
         (
             item
             for item in operations
-            if normalize_operation_id(str(item.get("id") or ""))
-            == PERMANENT_DELETE_ACTION
+            if str(item.get("id") or "").strip() == PERMANENT_DELETE_ACTION
         ),
         None,
     )
@@ -216,23 +213,11 @@ async def permanently_remove_recycled_resource(
             f"'{deployment_name or deployment_id}': {rejection}",
             trace_id=client.request.context.trace_id,
         )
-    submission_payload = await submit_deployment_actions_once(
+    await submit_deployment_actions_once(
         client,
         operations=((deployment_id, str(operation.get("id") or "")),),
         recycled=True,
     )
-    if (
-        not isinstance(submission_payload, dict)
-        or not isinstance(submission_payload.get("results"), dict)
-        or deployment_id not in submission_payload["results"]
-    ):
-        raise SmartCmpUnknownOutcomeError(
-            "SmartCMP permanent-removal outcome is unknown because the single "
-            "submission response did not confirm the owning deployment in "
-            "BatchExecutionResponse.results; do not retry automatically. "
-            "Refresh the recycle bin before taking any further action.",
-            trace_id=client.request.context.trace_id,
-        )
     return PermanentResourceRemovalResult(
         deployment_id=deployment_id,
         deployment_name=deployment_name,
@@ -639,8 +624,7 @@ def _project_deployment_rows(
         (
             item
             for item in operations
-            if normalize_operation_id(str(item.get("id") or ""))
-            == PERMANENT_DELETE_ACTION
+            if str(item.get("id") or "").strip() == PERMANENT_DELETE_ACTION
             and not operation_rejection_reason(item)
         ),
         None,

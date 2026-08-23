@@ -43,6 +43,8 @@ triggers:
   - 查看云主机可执行操作
   - 执行资源操作
   - 执行云主机操作
+  - 卸除资源
+  - Tear Down 删除
   - 查看资源回收站
   - 永久卸除资源
   - list resources
@@ -64,6 +66,7 @@ triggers:
   - run resource operation
   - execute day-2 operation
   - run day-2 change
+  - tear down resource
   - list recycled resources
   - permanently remove recycled resource
   - change resource state
@@ -72,18 +75,13 @@ triggers:
   - restart resource
   - refresh resource
   - suspend resource
-  - resume resource
   - start vm
   - stop vm
   - restart vm
   - refresh vm
   - suspend vm
-  - resume vm
   - power on vm
   - power off vm
-  - create snapshot
-  - take snapshot
-  - restore snapshot
 
 use_when:
   - User wants a standalone list of SmartCMP cloud resources with current status
@@ -94,7 +92,7 @@ use_when:
   - User wants to determine whether one exact resource has CMP-confirmed Security violations
   - User wants to search resources or virtual machines by keyword through the CMP UI list endpoint
   - User wants to see which resource operations the current SmartCMP user can execute on a resource
-  - User wants to execute an enabled no-parameter operation on an existing SmartCMP cloud resource or virtual machine
+  - User wants to execute `refresh`, `start`, `stop`, `restart`, `suspend`, or `tear_down_in_resource` on an existing SmartCMP cloud resource or virtual machine
   - User wants to browse resources in the SmartCMP recycle bin or permanently remove one recycled deployment through a resource-centered workflow
 
 avoid_when:
@@ -113,7 +111,8 @@ examples:
   - "综合分析资源 vm-a 的告警、健康、合规和费用优化"
   - "List executable operations for vm-a"
   - "Stop vm-a"
-  - "Execute create_snapshot on this virtual machine"
+  - "Suspend this virtual machine"
+  - "Tear Down 删除 vm-a"
   - "Permanently remove recycled resource vm-a"
   - "Start the first virtual machine"
   - "Stop resource 3615d791-36b4-4fa1-be61-f8550c7fbcb8"
@@ -193,7 +192,7 @@ tool_detail_parameters: |
     "required": []
   }
 tool_operations_name: "smartcmp_list_resource_operations"
-tool_operations_description: "List enabled no-parameter SmartCMP operations executable by the current user. Node resources use `GET /nodes/{category}/{resource_id}/resource-actions`; category `deployments` uses `GET /deployments/{resource_id}/deployment-actions`. Accepts a SmartCMP detail URL or a raw UUID. Do not use definition-level or built-in action endpoints as fallback. If the user only asked what operations are available, return the Markdown operation table and invite an exact operation command. A later exact command for that resolved target is explicit confirmation and must call `smartcmp_operate_resource`; do not ask for a redundant second confirmation."
+tool_operations_description: "List enabled SmartCMP operations from the Agent's explicit supported set: `refresh`, `start`, `stop`, `restart`, `suspend`, and `tear_down_in_resource` (Tear Down / 删除). Node resources use `GET /nodes/{category}/{resource_id}/resource-actions`; category `deployments` uses `GET /deployments/{resource_id}/deployment-actions`. Accepts a SmartCMP detail URL or a raw UUID. Do not use definition-level or built-in action endpoints as fallback. If the user only asked what operations are available, return the Markdown operation table and invite an exact operation command. A later exact command for that resolved target is explicit confirmation and must call `smartcmp_operate_resource`; do not ask for a redundant second confirmation."
 tool_operations_entrypoint: "scripts/adapter.py:list_resource_operations"
 tool_operations_groups:
   - cmp
@@ -221,7 +220,7 @@ tool_operations_parameters: |
     "required": ["resource_ref"]
   }
 tool_power_name: "smartcmp_operate_resource"
-tool_power_description: "Execute an enabled no-parameter SmartCMP operation. Node resources use `POST /nodes/resource-operations`; category `deployments` uses `POST /deployments/execute-action`. `action` accepts the exact operation ID returned by `smartcmp_list_resource_operations`. RULES: (1) NEVER claim an operation was submitted without calling this tool. (2) Before calling, confirm the exact target and operation; an exact operation command after the target and executable operations were displayed is already confirmation. (3) Pass real SmartCMP UUIDs or detail URLs, not display names or list indexes. (4) The tool rechecks the current user's operation endpoint immediately before submission. (5) After success, keep the response short and omit raw payloads."
+tool_power_description: "Execute an enabled SmartCMP operation from the Agent's explicit supported set: `refresh`, `start`, `stop`, `restart`, `suspend`, and `tear_down_in_resource` (Tear Down / 删除). Node resources use `POST /nodes/resource-operations`; category `deployments` uses `POST /deployments/execute-action`. `action` accepts the exact operation ID returned by `smartcmp_list_resource_operations`. RULES: (1) NEVER claim an operation was submitted without calling this tool. (2) Before calling, confirm the exact target and operation; an exact operation command after the target and executable operations were displayed is already confirmation. (3) Pass real SmartCMP UUIDs or detail URLs, not display names or list indexes. (4) The tool rechecks the current user's operation endpoint immediately before submission. (5) After success, keep the response short and omit raw payloads."
 tool_power_entrypoint: "scripts/adapter.py:operate_resource"
 tool_power_groups:
   - cmp
@@ -249,14 +248,14 @@ tool_power_parameters: |
       },
       "action": {
         "type": "string",
-        "description": "Exact SmartCMP operation ID returned by smartcmp_list_resource_operations, such as restart, refresh, or Tear Down. Permanent recycle-bin removal must use smartcmp_permanently_remove_recycled_resource."
+        "description": "Exact SmartCMP operation ID returned by smartcmp_list_resource_operations. Supported IDs are refresh, start, stop, restart, suspend, and tear_down_in_resource. Permanent recycle-bin removal must use smartcmp_permanently_remove_recycled_resource."
       }
     },
     "required": ["resource_ids", "action"]
   }
 
 tool_recycle_list_name: "smartcmp_list_recycled_resources"
-tool_recycle_list_description: "List recycle-bin resources with their owning deployments. Accept at most one exact resource/deployment ID or name. Pagination describes deployments; items are expanded resource rows. Use immediately before permanent removal to obtain the complete affected scope."
+tool_recycle_list_description: "List recycle-bin resources with their owning deployments. Accept at most one exact resource/deployment ID or name. Pagination describes deployments; items are expanded resource rows. Each row's `operations` contains `permanently_delete_deployment` only when the current user can execute the dedicated permanent-removal action. Use immediately before permanent removal to obtain the complete affected scope."
 tool_recycle_list_entrypoint: "scripts/adapter.py:list_recycled_resources"
 tool_recycle_list_groups:
   - cmp
@@ -501,7 +500,7 @@ tool_comprehensive_cost_parameters: |
 
 Browse SmartCMP resources, inspect cloud host details, coordinate comprehensive
 single-resource analysis, manage recycle-bin resources, list current-user
-executable operations, and execute enabled no-parameter resource operations.
+executable operations, and execute the six explicitly supported resource operations.
 
 ## Purpose
 
@@ -513,8 +512,8 @@ comprehensive analysis coordination, and day2 resource operations.
 - Call `PATCH /nodes/{id}/view` for one cloud host detail snapshot until the CMP view API bug is fixed
 - Present cloud-host detail in a compact CMP-style layout instead of dumping raw metadata
 - Coordinate existing domain tools for comprehensive single-resource analysis without duplicating their evidence collection or LLM verdict rules
-- Use `GET /nodes/{category}/{id}/resource-actions` to list enabled no-parameter operations executable by the current SmartCMP user
-- Use `POST /nodes/resource-operations` for immediate no-parameter resource operations
+- Use `GET /nodes/{category}/{id}/resource-actions` to list enabled operations in the explicit Agent-supported set: `refresh`, `start`, `stop`, `restart`, `suspend`, and `tear_down_in_resource`
+- Use `POST /nodes/resource-operations` for those six immediate resource operations
 - Manage deployment-oriented recycle-bin records through resource rows and a confirmed permanent-removal workflow.
 
 ## Scope Rules
@@ -525,7 +524,7 @@ comprehensive analysis coordination, and day2 resource operations.
 - Keep single-dimension questions in their owning workflows: Alarm for monitoring health, this Resource Skill for resource-first Security analysis, security-compliance for violation-object workflows, and cost-optimization for resource cost analysis.
 - If the user provides an exact visible cloud-host name for detail, call `smartcmp_resource_detail` with `resource_name` directly. Do not call `smartcmp_list_all_resource` first just to resolve or display the name.
 - Use `smartcmp_list_resource_operations` when the user asks what operations the current user can execute on a resource.
-- Use `smartcmp_operate_resource` when the user wants to execute an enabled no-parameter operation on an existing cloud resource.
+- Use `smartcmp_operate_resource` only for enabled `refresh`, `start`, `stop`, `restart`, `suspend`, or `tear_down_in_resource` operations on an existing cloud resource.
 - Treat "我的" and "所有" the same for now because the provided UI URLs do not expose a separate owner-only filter; rely on SmartCMP access control and the current user's visible scope.
 
 For resource-first Security analysis and violation-correlation rules, read
@@ -580,40 +579,47 @@ health score.
 
 ## Operation Workflow
 
-An operation intent means the user wants to change an existing resource state, for example `stop 1 vm-a`, `restart vm-a`, `execute create_snapshot on this virtual machine`, `stop the second VM`, or `take a snapshot`.
+An operation intent means the user wants to run one of the six explicitly supported actions on an existing resource: `refresh`, `start`, `stop`, `restart`, `suspend`, or `tear_down_in_resource`.
 
 When operation intent is present, a resource lookup is only a target-resolution step. Do not stop at the `smartcmp_list_all_resource` or `smartcmp_resource_detail` output, and do not answer only with `Found N ...` or the resource status summary. Use the returned metadata to continue to operation resolution, confirmation, or a clarification question.
 
 1. Resolve the target resource.
+   - When Current Host Page Context contains one server-validated resource and the user gives a supported action without naming another target, such as bare `restart`, bind the action to that current resource ID and name. Treat the omitted target as the current page resource; do not ask whether the user meant the current resource.
    - If the user references a recent table `#` item, such as `1`, `第 1 台`, or `the first one`, use the matching item from the latest `smartcmp_list_all_resource` metadata.
    - If the user provides action + index + name, such as `stop 1 vm-a`, treat the index as the selection and the name as a safety check. If they match, use that resource UUID. If they conflict, ask the user to clarify.
    - If the user provides only a display name, call `smartcmp_list_all_resource` with `query_value`, then map an exact unique match to its UUID. If multiple resources remain plausible, ask the user to choose by table `#`.
    - Never pass a display name, list index, or natural-language phrase as `resource_id` to `smartcmp_resource_detail` or as `resource_ids` to `smartcmp_operate_resource`; use `resource_name` for name-based detail inspection and concrete UUIDs for operations.
 2. Resolve the operation.
-   - Use `start`, `stop`, `开机`, and `关机` aliases directly.
-   - Use exact operation IDs such as `restart`, `refresh`, or `create_snapshot` directly.
-   - If the user gives a natural-language operation name, such as `take a snapshot`, first call `smartcmp_list_resource_operations` for the resolved resource and match only against the current user's executable no-parameter operations. If there is no unambiguous match, show the executable operation IDs and ask which one to run.
+   - Map power-on aliases such as `开机` and `启动` to `start`, and power-off aliases such as `关机` and `停止` to `stop`.
+   - Map `重启` to `restart`, `刷新` to `refresh`, and `挂起` to `suspend`.
+   - Map `Tear Down`, `删除`, and `卸除资源` to `tear_down_in_resource`.
+   - Reject every other generic resource operation as unsupported by the Agent. Do not resolve, confirm, or submit resize, snapshot, disk, network, credential, ownership, metadata-delete, or other action IDs through `smartcmp_operate_resource`.
+   - Call `smartcmp_list_resource_operations` for the resolved target and continue only if the normalized action ID is returned as currently enabled.
 3. Confirm before submission.
    - Once both the resource UUID and operation ID are known, ask one concise confirmation using the resource name and operation ID/name, for example `Confirm stop on vm-a?`
+   - Inheriting the current page resource binds the target but does not confirm the operation. Treat the target as already resolved. When no preceding workflow turn displayed the target and executable operations, state the resolved target as a fact and ask only the single combined action confirmation above, for example `Confirm restart on MyBG3409?`
+   - Never phrase the combined confirmation as target clarification. Do not say `Do you mean the current resource?`, `Do you want to restart the resource currently shown?`, `If yes, confirm`, or `Otherwise, provide the target`; do not ask a separate target question and then a second operation confirmation.
    - Stop after asking for confirmation. Do not submit until the user explicitly confirms.
    - If the immediately preceding workflow turn already showed the resolved resource and its executable operations, a later exact command such as `execute restart` or `confirm stop` for that resource is the explicit confirmation. Proceed to submission in that turn instead of asking the same question again.
 4. Submit after confirmation.
    - After explicit confirmation, call `smartcmp_operate_resource` with concrete resource UUIDs or detail URLs and the operation ID.
-   - The latest explicit operation command supersedes older unfinished operation intent. For example, if the previous turn was about snapshots but the latest user message says `stop 1 vm-a`, handle `stop`.
+   - The latest explicit operation command supersedes older unfinished operation intent. For example, if the previous turn was about `restart` but the latest user message says `stop 1 vm-a`, handle `stop`.
 
 ## Recycle-bin permanent removal
 
-Removal is `tear_down_in_resource` → a fresh recycle-bin read →
-`permanently_delete_deployment`. Never call `delete_metadata_in_resource` between
-tear down and permanent removal; it deletes CMP management information instead
-of advancing the recycle-bin workflow. A stopped node can already belong to a
-recycled deployment, so wait for the exact recycle row and its complete scope
-rather than inferring progress from node status.
+Removal follows an explicitly confirmed `tear_down_in_resource` operation, a fresh
+exact recycle-bin read, and then the dedicated `permanently_delete_deployment`
+workflow. `delete_metadata_in_resource` is not supported and must not be used as
+an intermediate step. A stopped node can already belong to a recycled deployment,
+so rely on a fresh exact recycle-bin read and its complete scope rather than
+inferring eligibility from node status.
 
 1. Call `smartcmp_list_recycled_resources` with zero or one of `resource_id`,
    `resource_name`, `deployment_id`, or `deployment_name`. Names must match exactly;
    ambiguity fails closed. Pagination counts deployments, while `items` are resource
-   rows. Exact lookup scans at most 2,000 deployments.
+   rows. Exact lookup scans at most 2,000 deployments. Treat
+   `items[].operations` as the authoritative Agent-visible recycle-bin operation
+   list and continue only when it contains `permanently_delete_deployment`.
 2. Freshly list the selected target, display its deployment and every affected
    resource, warn that removal is irreversible, then stop for explicit confirmation.
 3. After confirmation, call `smartcmp_permanently_remove_recycled_resource` once
@@ -639,10 +645,11 @@ rather than inferring progress from node status.
   target's authoritative endpoint: `/nodes/{category}/{id}/resource-actions` for
   node resources or `/deployments/{id}/deployment-actions` for deployments. Do
   not use definition-level or built-in action endpoints as fallback.
-- Only show enabled no-parameter operations as executable choices. Operations that are disabled, web-only, have `inputsForm`, or require non-empty `parameters` are outside this tool's execution scope.
+- Only show `refresh`, `start`, `stop`, `restart`, `suspend`, and `tear_down_in_resource` when the authoritative endpoint returns them as enabled and not web-only. Do not infer Agent support from `inputsForm`, `parameters`, or `parametersControl`; all other operation IDs are outside the generic tool's execution scope.
 - **NEVER claim a resource operation was submitted or succeeded without actually calling `smartcmp_operate_resource`.** You must call the tool and receive a real response before telling the user the operation is done.
 - **NEVER pass `permanently_delete_deployment` to `smartcmp_operate_resource`; use the dedicated confirmed workflow above.**
 - **Before calling the operation tool, confirm with the user:** show the target resource name + operation ID/name, ask `Confirm this operation?`, and STOP. An exact operation command made after that resource and operation were just displayed is the confirmation; call the tool instead of adding a redundant confirmation turn.
+- Treat `tear_down_in_resource` as destructive: label it as Tear Down / 删除, show the exact target, and require explicit confirmation before submission.
 - After a resource operation succeeds, respond with only the action, resource ID(s), submitted status, message, and verification hint. Do not print raw request payloads or raw response details.
 - Resolve every target to a concrete SmartCMP resource UUID before calling `smartcmp_operate_resource`.
 - When the user only provides a resource name for a state-changing operation, use `smartcmp_list_all_resource` to find the resource and map the chosen item to its `id`; for detail inspection by name, use `smartcmp_resource_detail.resource_name` instead.
@@ -688,8 +695,8 @@ All eight resource-owned Tool commands are co-located in `scripts/adapter.py`:
 | `scripts/adapter.py:resource_detail` | Fetch one cloud host view and emit a compact grouped detail summary |
 | `scripts/adapter.py:analyze_resource_security` | Combine bounded resource facts, associated Security violations, inference inputs, and evidence gaps |
 | `scripts/adapter.py:list_resource_security_violations` | Scan root-category Security violations and retain exact resource-ID matches with coverage |
-| `scripts/adapter.py:list_resource_operations` | List enabled no-parameter operations executable by the current SmartCMP user for one resource |
-| `scripts/adapter.py:operate_resource` | Submit SmartCMP no-parameter resource operations for one or more resource IDs |
+| `scripts/adapter.py:list_resource_operations` | List enabled `refresh`, `start`, `stop`, `restart`, `suspend`, and `tear_down_in_resource` operations for one resource |
+| `scripts/adapter.py:operate_resource` | Submit one of those six explicit operations for one or more resource IDs |
 | `scripts/adapter.py:list_recycled_resources` | Project recycle-bin deployments as resource rows and support resource/deployment locators |
 | `scripts/adapter.py:permanently_remove_recycled_resource` | Re-resolve and submit one explicitly confirmed permanent recycle-bin removal |
 

@@ -30,6 +30,7 @@ from smartcmp_provider.models.requests import (
     RequestSubmissionItem,
     RequestSubmissionResult,
 )
+from smartcmp_provider.models.resources import RecycledResourceListResult
 from smartcmp_provider.services.security_compliance import (
     _project_security_violation,
 )
@@ -279,7 +280,7 @@ def test_resource_recycle_adapters_bind_public_locators_to_dedicated_operations(
     async def fake_execute_with_request(_ctx, operation, operation_input):
         calls.append((operation, operation_input))
         if operation is adapter.list_recycled_resources_operation:
-            result = SimpleNamespace(items=())
+            result = RecycledResourceListResult()
         else:
             result = SimpleNamespace(message="Permanent removal request submitted.")
         return result, provider_request
@@ -340,6 +341,69 @@ def test_resource_recycle_adapters_bind_public_locators_to_dedicated_operations(
         "deployment_name": "application-a",
         "confirmed": True,
     }
+
+
+def test_resource_recycle_list_exposes_dedicated_operation_to_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Project permanent removal without exposing internal MCP call arguments."""
+
+    adapter = _load(
+        SKILLS_ROOT / "resource" / "scripts" / "adapter.py",
+        "test_resource_recycle_agent_operations",
+    )
+    provider_request = SimpleNamespace(
+        context=SimpleNamespace(
+            trace_id="trace-resource",
+            instance=SimpleNamespace(name="cmp"),
+        )
+    )
+
+    async def fake_execute_with_request(_ctx, _operation, _operation_input):
+        return (
+            RecycledResourceListResult(
+                items=(
+                    {
+                        "resource_id": "resource-1",
+                        "available_operations": [
+                            {
+                                "operation_id": "permanently_delete_deployment",
+                                "tool_name": (
+                                    "smartcmp_permanently_remove_recycled_resource"
+                                ),
+                                "arguments": {
+                                    "deployment_id": "deployment-1",
+                                },
+                                "required_inputs": ["confirmed"],
+                            }
+                        ],
+                    },
+                ),
+                total=1,
+            ),
+            provider_request,
+        )
+
+    monkeypatch.setattr(adapter, "execute_with_request", fake_execute_with_request)
+
+    result = asyncio.run(
+        adapter.list_recycled_resources(
+            object(),
+            deployment_id="deployment-1",
+        )
+    )
+
+    assert result["items"][0]["operations"] == [
+        {
+            "index": 1,
+            "id": "permanently_delete_deployment",
+            "name": "Permanently Delete Deployment",
+            "name_zh": "从回收站删除",
+            "display_name": "从回收站删除",
+        }
+    ]
+    assert "available_operations" not in result["items"][0]
+    assert "smartcmp_permanently_remove_recycled_resource" not in result["_internal"]
 
 
 def test_embedded_object_uses_server_owned_turn_context() -> None:
@@ -1209,7 +1273,7 @@ def test_request_adapter_does_not_confirm_unknown_submission(monkeypatch) -> Non
 
 
 def test_request_resource_bundle_contract_is_explicit_and_redacted(monkeypatch) -> None:
-    """Keep lookup secrets out of summaries while retaining structured data."""
+    """Keep lookup secrets out of the complete structured Tool result."""
 
     adapter = _load(
         SKILLS_ROOT / "request" / "scripts" / "adapter.py",
@@ -1346,13 +1410,10 @@ def test_request_resource_bundle_contract_is_explicit_and_redacted(monkeypatch) 
     assert operation_input.resource_bundle_tags == ("FACET_ENV:dev",)
     assert "catalogId" not in operation_input.placement_values
     assert "node" not in operation_input.placement_values
-    assert result["items"][0]["requestFields"][0]["value"] == "lookup-secret"
-    assert result["items"][0]["requestFields"][1]["value"] == "api-token-secret"
-    assert result["items"][0]["requestFields"][2]["value"] == "client-secret-value"
-    assert result["items"][0]["requestFields"][3]["value"] == "private-key-value"
-    assert result["items"][0]["requestFields"][4]["value"] == "backup-passphrase-value"
-    assert result["items"][0]["requestFields"][5]["value"] == "authentication-header-value"
-    assert result["items"][0]["requestFields"][6]["value"] == "ssh-key-value"
+    assert all(
+        field["value"] == "***"
+        for field in result["items"][0]["requestFields"][:7]
+    )
     output = json.loads(result["output"])
     assert output["pendingFields"] == [
         {
@@ -1403,6 +1464,7 @@ def test_request_resource_bundle_contract_is_explicit_and_redacted(monkeypatch) 
     assert internal["items"][0]["requestFields"][6]["value"] == "***"
     assert internal["items"][0]["requestFields"][7]["value"] == 2048
     assert internal["items"][0]["requestFields"][8]["value"] == 37
+    serialized_result = json.dumps(result, ensure_ascii=False)
     for secret in (
         "lookup-secret",
         "api-token-secret",
@@ -1427,7 +1489,7 @@ def test_request_resource_bundle_contract_is_explicit_and_redacted(monkeypatch) 
         "authentication-header-value",
         "ssh-key-value",
     ):
-        assert secret not in result["_internal"]
+        assert secret not in serialized_result
 
 
 def test_request_resource_bundle_schema_requires_explicit_catalog_context() -> None:

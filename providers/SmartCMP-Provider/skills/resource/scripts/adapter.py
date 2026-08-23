@@ -177,13 +177,37 @@ async def list_recycled_resources(
                 size=size,
             ),
         )
+        projection = _recycled_resource_agent_projection(result)
         return tool_result(
-            result,
+            projection,
             summary=f"Found {len(result.items)} recycled resource rows.",
             request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
+
+
+def _recycled_resource_agent_projection(result: Any) -> dict[str, Any]:
+    """Expose only the dedicated recycle-bin operation in Agent result shape."""
+
+    projection = result.model_dump(mode="json")
+    for item in projection["items"]:
+        operations: list[dict[str, Any]] = []
+        for operation in item.get("available_operations", []):
+            operation_id = str(operation.get("operation_id") or "").strip()
+            if operation_id != "permanently_delete_deployment":
+                continue
+            operations.append(
+                {
+                    "index": 1,
+                    "id": operation_id,
+                    "name": "Permanently Delete Deployment",
+                    "name_zh": "从回收站删除",
+                    "display_name": "从回收站删除",
+                }
+            )
+        item["operations"] = operations
+    return projection
 
 
 async def permanently_remove_recycled_resource(

@@ -51,7 +51,7 @@ keywords:
 
 capabilities:
   - Browse available services, business-group scopes such as tenant/租户/部门/BU/项目, resource pools, resources, cloud hosts, host details, templates, and other reference data before making a request
-  - Start, stop, tear down, delete metadata for, or permanently remove existing cloud resources or deployments after resolving one exact SmartCMP target
+  - Refresh, start, stop, restart, suspend, tear down, or permanently remove existing cloud resources or deployments after resolving one exact SmartCMP target
   - Submit self-service requests for virtual machines, cloud resources, application environments, or ticket/work order services
   - View pending approvals and approve or reject service requests
   - List alerts, analyze alert context, and update alert status with remediation guidance
@@ -67,7 +67,7 @@ use_when:
   - User wants to request a VM, database, application environment, or other service catalog item
   - User wants to submit a ticket or work order for infrastructure or support needs
   - User asks what services, business groups, tenants, departments, projects, resource pools, resources, or cloud hosts are available before making a request
-  - User wants to start, stop, tear down, delete metadata for, or permanently remove an existing cloud resource, virtual machine, or recycled deployment
+  - User wants to refresh, start, stop, restart, suspend, tear down, or permanently remove an existing cloud resource, virtual machine, or recycled deployment
   - User needs to approve or reject a request
   - User wants to check pending approvals
   - User wants to inspect, analyze, or operate on resource alarms
@@ -339,12 +339,12 @@ Use `smartcmp_list_all_resource_pools`, optionally with `query_value`.
 
 List all resources or all cloud hosts directly from the CMP UI list endpoint,
 inspect one cloud host by resource ID with the `/nodes/{id}/view` evidence view, and
-list or execute current-user no-parameter operations on existing resources or
-their recycled deployments.
+list or execute explicitly supported operations on existing resources or their
+recycled deployments.
 Use this when the user says "查看我的云资源", "查看所有资源", "查看我的云主机",
 "查看所有云主机", "查看某个云主机详情", "分析某个云主机属性",
 "查看可执行操作", "执行资源操作", "云资源开机", "云资源关机", "启动云主机",
-"停止云主机", "卸除资源", "删除资源元数据", or "从回收站永久卸除资源".
+"停止云主机", "卸除资源", or "从回收站永久卸除资源".
 
 Use `smartcmp_list_all_resource`, `smartcmp_resource_detail`,
 `smartcmp_analyze_resource_security`,
@@ -363,9 +363,8 @@ The operation list comes from `GET /nodes/{category}/{id}/resource-actions`
 with the current user's SmartCMP credentials. It does not use resource-type
 definition endpoints as executable-operation fallback.
 
-`delete_metadata_in_resource` is a separate metadata-only operation. It removes
-CMP node management information and must never be used as an intermediate step
-in recycle-bin permanent removal.
+`delete_metadata_in_resource` is not supported by the Agent. It must never be
+used as an intermediate step in recycle-bin permanent removal.
 
 Permanent removal follows `tear_down_in_resource` → a fresh exact recycle-bin
 read → `permanently_delete_deployment`. After tear down, wait for the exact

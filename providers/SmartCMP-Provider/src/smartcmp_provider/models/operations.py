@@ -15,7 +15,7 @@ class ResourceActionTarget(BaseModel):
 
 
 class ResourceActionInput(BaseModel):
-    """Describe one confirmed no-parameter resource action."""
+    """Describe one confirmed action from the explicit Agent-supported set."""
 
     model_config = ConfigDict(frozen=True)
 

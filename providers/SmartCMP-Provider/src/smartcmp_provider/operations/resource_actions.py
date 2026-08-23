@@ -7,7 +7,6 @@ from typing import Any
 from urllib.parse import quote
 
 from smartcmp_provider.capabilities import capability_by_id
-from smartcmp_provider.domain.resource_actions import normalize_operation_id
 from smartcmp_provider.errors import (
     SmartCmpError,
     SmartCmpUnknownOutcomeError,
@@ -18,7 +17,9 @@ from smartcmp_provider.models.operations import (
     ResourceActionInput,
     ResourceActionResult,
 )
-from smartcmp_provider.operations.resources import operation_rejection_reason
+from smartcmp_provider.operations.resources import (
+    resource_operation_rejection_reason,
+)
 from smartcmp_provider.transport.client import SmartCmpClient
 from smartcmp_provider.transport.mutations import write_result_is_unknown
 
@@ -41,7 +42,7 @@ async def execute_resource_action(
     client: SmartCmpClient,
     action_input: ResourceActionInput,
 ) -> ResourceActionResult:
-    """Validate and submit a no-parameter resource action exactly once.
+    """Validate and submit an explicitly Agent-supported resource action once.
 
     Every target is checked through the current credential's authoritative
     operation endpoint immediately before submission. The POST is never retried; an
@@ -56,12 +57,12 @@ async def execute_resource_action(
 
     Raises:
         SmartCmpValidationError: If the action is absent, disabled, web-only,
-            or requires form/parameter input for any target.
+            or outside the Agent's explicit supported resource-operation set.
         SmartCmpUnknownOutcomeError: If the write may have reached SmartCMP.
         SmartCmpError: If SmartCMP definitely rejects the request.
     """
 
-    action = normalize_operation_id(action_input.action)
+    action = str(action_input.action or "").strip()
     if not action:
         raise SmartCmpValidationError(
             "action is required.",
@@ -95,7 +96,7 @@ async def execute_resource_action(
             (
                 item
                 for item in operations
-                if normalize_operation_id(str(item.get("id") or "")) == action
+                if str(item.get("id") or "").strip() == action
             ),
             None,
         )
@@ -105,7 +106,7 @@ async def execute_resource_action(
                 f"{resource_id} under category {category}.",
                 trace_id=client.request.context.trace_id,
             )
-        reason = operation_rejection_reason(operation)
+        reason = resource_operation_rejection_reason(operation)
         if reason:
             raise SmartCmpValidationError(
                 f"Operation '{action}' is not executable for resource "
@@ -202,11 +203,17 @@ async def submit_deployment_actions_once(
         }
         for deployment_id, operation_id in operations
     }
-    return await _submit_resource_operation_once(
+    response_payload = await _submit_resource_operation_once(
         client,
         path="/deployments/execute-action",
         payload=payload,
     )
+    _validate_batch_execution_response(
+        client,
+        response_payload,
+        deployment_ids=tuple(deployment_id for deployment_id, _ in operations),
+    )
+    return response_payload
 
 
 def _schedule_metadata() -> dict[str, Any]:
@@ -277,16 +284,21 @@ async def _fetch_current_user_operations(
 def _resource_business_error(payload: Any) -> str:
     if not isinstance(payload, dict):
         return ""
-    message = str(
-        payload.get("message")
-        or payload.get("error")
+    explicit_error = str(
+        payload.get("error")
         or payload.get("errMsg")
+        or payload.get("errorMessage")
         or ""
     ).strip()
+    if explicit_error:
+        return explicit_error
+    message = str(payload.get("message") or "").strip()
     success = payload.get("success")
     if success is False or str(success or "").casefold() == "false":
         return message or "SmartCMP reported operation failure."
-    state = str(payload.get("status") or payload.get("state") or "").casefold()
+    state = str(
+        payload.get("status") or payload.get("state") or payload.get("outcome") or ""
+    ).casefold()
     if state in _FAILED_STATES:
         return message or f"SmartCMP reported operation state: {state}."
     code = payload.get("code")
@@ -296,3 +308,40 @@ def _resource_business_error(payload: Any) -> str:
     ):
         return message or f"SmartCMP returned business code: {code}."
     return ""
+
+
+def _validate_batch_execution_response(
+    client: SmartCmpClient,
+    payload: Any,
+    *,
+    deployment_ids: tuple[str, ...],
+) -> None:
+    """Require one non-failed acknowledgement for every submitted deployment."""
+
+    results = payload.get("results") if isinstance(payload, dict) else None
+    if not isinstance(results, dict):
+        raise SmartCmpUnknownOutcomeError(
+            "SmartCMP deployment operation outcome is unknown because the "
+            "submission response has no BatchExecutionResponse.results; do not "
+            "retry automatically.",
+            trace_id=client.request.context.trace_id,
+        )
+    for deployment_id in deployment_ids:
+        if (
+            deployment_id not in results
+            or not isinstance(results[deployment_id], dict)
+            or not results[deployment_id]
+        ):
+            raise SmartCmpUnknownOutcomeError(
+                "SmartCMP deployment operation outcome is unknown because the "
+                f"submission response did not acknowledge deployment '{deployment_id}'; "
+                "do not retry automatically.",
+                trace_id=client.request.context.trace_id,
+            )
+        business_error = _resource_business_error(results[deployment_id])
+        if business_error:
+            raise SmartCmpUpstreamError(
+                f"SmartCMP deployment '{deployment_id}' operation failed: "
+                f"{business_error}",
+                trace_id=client.request.context.trace_id,
+            )

@@ -67,7 +67,6 @@ try:
     from smartcmp_provider.operations.resources import (
         get_resource_detail,
         load_resource_evidence,
-        list_resource_operations,
         list_resources,
     )
     from smartcmp_provider.operations.catalogs import (
@@ -82,6 +81,9 @@ try:
         submit_request,
     )
     from smartcmp_provider.operations.resource_actions import execute_resource_action
+    from smartcmp_provider.services.resources import (
+        get_resource_operations_view,
+    )
     from smartcmp_provider.transport.client import SmartCmpClient
     from smartcmp_provider.instance import SmartCmpInstance
 finally:
@@ -343,7 +345,7 @@ def test_list_resources_projects_compact_rows_before_attaching_operations():
     assert result.items[0]["status"] == "started"
 
 
-def test_resource_operations_preserve_paths_resolution_and_filtering():
+def test_resource_operations_keep_only_enabled_agent_supported_actions():
     request_scope = make_request(
         instance_name="cmp-a",
         base_url="https://cmp.example",
@@ -382,9 +384,42 @@ def test_resource_operations_preserve_paths_resolution_and_filtering():
                         "parameters": "{}",
                     },
                     {
+                        "id": "restart",
+                        "name": "RESTART",
+                        "enabled": True,
+                        "parameters": '{"legacyMetadata": true}',
+                        "inputsForm": {"legacyField": "ignored"},
+                    },
+                    {
+                        "id": "suspend",
+                        "name": "SUSPEND",
+                        "enabled": True,
+                        "parameters": None,
+                    },
+                    {
                         "id": "stop",
                         "name": "STOP",
-                        "enabled": False,
+                        "enabled": True,
+                        "parameters": "{}",
+                    },
+                    {
+                        "id": "tear_down_in_resource",
+                        "name": "upstream-remove-label",
+                        "nameZh": "",
+                        "enabled": True,
+                        "parameters": None,
+                    },
+                    {
+                        "id": "start",
+                        "name": "START",
+                        "enabled": True,
+                        "webOperation": True,
+                    },
+                    {
+                        "id": "tear-down-in-resource",
+                        "name": "NEAR_ALIAS",
+                        "enabled": True,
+                        "parameters": "{}",
                     },
                 ],
                 request=request,
@@ -399,7 +434,7 @@ def test_resource_operations_preserve_paths_resolution_and_filtering():
                 client,
                 ResourceDetailQuery(resource_name="vm-a"),
             )
-            operations = await list_resource_operations(
+            operations = await get_resource_operations_view(
                 client,
                 ResourceOperationsQuery(
                     category="virtual-machines",
@@ -412,7 +447,19 @@ def test_resource_operations_preserve_paths_resolution_and_filtering():
 
     assert detail_result.resource_id == "res-1"
     assert detail_result.payload["name"] == "vm-a"
-    assert [item["id"] for item in operation_result.operations] == ["refresh"]
+    assert [item.id for item in operation_result.operations] == [
+        "refresh",
+        "restart",
+        "suspend",
+        "stop",
+        "tear_down_in_resource",
+    ]
+    tear_down = operation_result.operations[-1]
+    assert (tear_down.name, tear_down.name_zh, tear_down.display_name) == (
+        "Tear Down",
+        "删除",
+        "删除",
+    )
     assert seen[0][0] == "GET"
     assert "queryValue=vm-a" in seen[0][1]
     assert seen[1] == (
@@ -1636,14 +1683,8 @@ def test_windows_compute_rejects_an_exhausted_ip_pool(
         ][0]
 
 
-@pytest.mark.parametrize(
-    ("action", "extra"),
-    [
-        ("Tear Down", {}),
-    ],
-)
-def test_deployment_operation_rechecks_and_submits_once(action: str, extra: dict) -> None:
-    """Deployment actions preserve the exact current operation contract."""
+def test_supported_deployment_operation_rechecks_and_submits_once() -> None:
+    """An allowed deployment action preserves the deployment request contract."""
 
     request_scope = make_request(
         instance_name="cmp-a",
@@ -1661,16 +1702,24 @@ def test_deployment_operation_rechecks_and_submits_once(action: str, extra: dict
             return httpx.Response(
                 200,
                 json=[{
-                    "id": action,
+                    "id": "restart",
                     "enabled": True,
                     "supportBatchAction": True,
                     "parameters": {},
                 }],
                 request=request,
             )
-        submitted.append(json.loads(request.content))
         assert request.url.path.endswith("/deployments/execute-action")
-        return httpx.Response(200, json={"success": True}, request=request)
+        submitted.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "results": {
+                    "deployment-1": {"id": "task-1", "state": "CREATED"}
+                }
+            },
+            request=request,
+        )
 
     async def invoke():
         async with SmartCmpClient(
@@ -1684,7 +1733,7 @@ def test_deployment_operation_rechecks_and_submits_once(action: str, extra: dict
                         category="deployments",
                         resource_id="deployment-1",
                     ),),
-                    action=action,
+                    action="restart",
                 ),
             )
 
@@ -1693,10 +1742,13 @@ def test_deployment_operation_rechecks_and_submits_once(action: str, extra: dict
     assert result.submitted is True
     assert len(submitted) == 1
     deployment_request = submitted[0]["deployment-1"]
-    assert deployment_request["operationName"] == action
-    assert {key: deployment_request[key] for key in extra} == extra
-
-
+    assert deployment_request["operationName"] == "restart"
+    assert deployment_request["scheduledTaskMetadataRequest"]["cycled"] is False
+    assert json.loads(deployment_request["operationParamJson"]) == {
+        "systemForm": None,
+    }
+    assert "recycle" not in deployment_request
+    assert "manual" not in deployment_request
 
 
 def test_cloud_flavor_query_returns_the_request_flavor_id() -> None:
@@ -1914,17 +1966,20 @@ resource_specs:
                 },
                 {"Compute": "resource-bundle-first"},
             )
-            combined = await submit({
-                "catalogId": "catalog-combined",
-                "businessGroupId": "business-group-1",
-                "name": "combined-vm",
-                "resourceSpecs": [{
-                    "node": "Compute",
-                    "type": "cloudchef.nodes.Compute",
-                    "resourceBundleTags": ["FACET_ENV:dev"],
-                    "resourceBundleId": "resource-bundle-selected",
-                }],
-            })
+            combined = await submit(
+                {
+                    "catalogId": "catalog-combined",
+                    "businessGroupId": "business-group-1",
+                    "name": "combined-vm",
+                    "resourceSpecs": [{
+                        "node": "Compute",
+                        "type": "cloudchef.nodes.Compute",
+                        "resourceBundleTags": ["FACET_ENV:dev"],
+                        "resourceBundleId": "resource-bundle-selected",
+                    }],
+                },
+                {"Compute": "resource-bundle-selected"},
+            )
             runtime_only = await submit(
                 {
                     "catalogId": "catalog-runtime",

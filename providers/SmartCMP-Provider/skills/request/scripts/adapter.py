@@ -373,8 +373,11 @@ async def list_resource_bundles(
                     "selectionCandidates": list(result.selection_candidates or ()),
                 }
             )
+        public_result = _redact_request_secrets(
+            result.model_dump(mode="json", by_alias=True)
+        )
         return tool_result(
-            result,
+            public_result,
             summary=(
                 _resource_bundle_field_summary(result)
                 if normalized_resource_bundle_id

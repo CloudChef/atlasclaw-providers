@@ -268,7 +268,7 @@ operations, and operate on SmartCMP resources or cloud hosts.
 - 执行云主机操作
 - 把某个云资源关机
 - 把某个云主机开机
-- 卸除云资源并删除资源元数据
+- 卸除云资源
 - 从 CMP 回收站永久卸除资源
 - Query resources or virtual machines by keyword without entering the request workflow
 
@@ -295,9 +295,10 @@ The operation list comes from `GET /nodes/{category}/{id}/resource-actions`
 with the current user's SmartCMP credentials. It does not use resource-type
 definition endpoints as executable-operation fallback.
 
-SmartCMP exposes `delete_metadata_in_resource` as a separate metadata-only
-operation. It deletes CMP node management information and must never be used as
-an intermediate step between tear down and recycle-bin permanent removal.
+The Agent supports exactly `refresh`, `start`, `stop`, `restart`, `suspend`, and
+`tear_down_in_resource` through the generic resource-operation tools.
+`delete_metadata_in_resource` is unsupported and must never be used as an
+intermediate step between tear down and recycle-bin permanent removal.
 
 Permanent removal follows **`tear_down_in_resource` → a fresh exact
 recycle-bin read → `permanently_delete_deployment`**. After tear down, wait for

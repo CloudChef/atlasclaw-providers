@@ -45,7 +45,8 @@ RESOURCES = [
 PURGE_ACTION = {
     "id": "permanently_delete_deployment",
     "enabled": True,
-    "parameters": {},
+    "parameters": {"legacyMetadata": True},
+    "inputsForm": {"legacyField": "ignored"},
 }
 EXPECTED_PURGE_REQUEST = {
     "operationName": "permanently_delete_deployment",

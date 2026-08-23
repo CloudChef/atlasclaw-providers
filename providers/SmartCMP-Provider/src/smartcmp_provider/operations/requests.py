@@ -315,11 +315,22 @@ async def _resolve_resource_bundles(
                 "Resource-pool resolution requires businessGroupId.",
                 trace_id=client.request.context.trace_id,
             )
+        previewed_resource_bundle_id = normalized_selections.get(node_name, "")
         selected_resource_bundle_id = (
             _normalize_value(resolved_spec.get("resourceBundleId"))
             if selection_mode in {"pool", "tags_and_pool"}
-            else normalized_selections.get(node_name, "")
+            else previewed_resource_bundle_id
         )
+        if (
+            selection_mode in {"pool", "tags_and_pool"}
+            and previewed_resource_bundle_id
+        ):
+            if previewed_resource_bundle_id != selected_resource_bundle_id:
+                raise SmartCmpValidationError(
+                    "The previewed resource-pool selection changed before submission.",
+                    trace_id=client.request.context.trace_id,
+                )
+            consumed_selection_nodes.add(node_name)
         if selection_mode in {"tags_only", "internal"}:
             consumed_selection_nodes.add(node_name)
         if not selected_resource_bundle_id:

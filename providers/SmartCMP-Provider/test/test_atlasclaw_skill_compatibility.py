@@ -201,6 +201,29 @@ def test_security_and_resource_natural_language_routing_metadata_is_distinct() -
     assert "global violation list" in resource_avoid
 
 
+def test_resource_skill_binds_bare_page_actions_without_redundant_confirmation(
+) -> None:
+    """Keep current-page target inheritance distinct from write confirmation."""
+    resource_skill = (SKILLS_ROOT / "resource" / "SKILL.md").read_text(
+        encoding="utf-8-sig"
+    )
+
+    assert "supported action without naming another target" in resource_skill
+    assert "Treat the omitted target as the current page resource" in resource_skill
+    assert "do not ask whether the user meant the current resource" in resource_skill
+    assert "binds the target but does not confirm the operation" in resource_skill
+    assert "Treat the target as already resolved" in resource_skill
+    assert "Confirm restart on MyBG3409?" in resource_skill
+    assert (
+        "Never phrase the combined confirmation as target clarification"
+        in resource_skill
+    )
+    assert "Do you want to restart the resource currently shown?" in resource_skill
+    assert "do not ask a separate target question" in resource_skill
+    assert "a later exact command" in resource_skill
+    assert "Proceed to submission in that turn" in resource_skill
+
+
 def test_atlasclaw_bootstrap_imports_colocated_provider_without_config(
     monkeypatch: pytest.MonkeyPatch,
     isolated_provider_import: ModuleType,
