@@ -83,6 +83,11 @@ def test_routes_match_context_to_existing_skills_with_one_provider_resolver() ->
         ),
         ("catalog-request", "/main/catalog-ui/request/{catalog_id}", "smartcmp:request"),
         (
+            "work-order-request",
+            "/main/work-order-request/{catalog_id}",
+            "smartcmp:request",
+        ),
+        (
             "request-detail",
             "/main/new-process/myApplication/{application_type}/{request_id}",
             "smartcmp:request",

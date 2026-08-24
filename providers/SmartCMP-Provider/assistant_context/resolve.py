@@ -518,12 +518,6 @@ async def _resolve_request(
     )
 
 
-def _is_virtual_machine(resource: dict[str, Any]) -> bool:
-    component_type = text(resource.get("componentType")).lower()
-    resource_type = text(resource.get("resourceType")).lower()
-    return ".machine.instance." in component_type or resource_type.endswith(".nodes.server")
-
-
 async def _resolve_resource(
     route_parameters: dict[str, Any],
     *,
@@ -545,8 +539,6 @@ async def _resolve_resource(
             return _failure("resource_id_mismatch")
     except (SmartCmpError, TypeError, ValueError):
         return _failure("provider_unavailable")
-    if expected_kind == "virtual_machine" and not _is_virtual_machine(resource):
-        return _failure("resource_category_mismatch")
 
     return success_object(
         object_type=expected_kind,

@@ -124,6 +124,16 @@
       }
     },
     {
+      "id": "work-order-request",
+      "priority": 300,
+      "match": {"path_template": "/main/work-order-request/{catalog_id}"},
+      "result": {
+        "page_type": "work-order-request",
+        "object_type": "catalog",
+        "skill_ref": "smartcmp:request"
+      }
+    },
+    {
       "id": "request-detail",
       "priority": 300,
       "match": {

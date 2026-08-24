@@ -16,6 +16,18 @@ from _object_actions_common import (
 from smartcmp_provider.domain.catalogs import available_catalog_operations
 
 
+_WORK_ORDER_SERVICE_CATEGORIES = frozenset(
+    {
+        "GENERIC_SERVICE",
+        "PROBLEM_SERVICE",
+        "REQUEST_SERVICE",
+        "INCIDENT_SERVICE",
+        "CHANGE_SERVICE",
+        "CLOUD_RESOURCE_CHANGE_SERVICE",
+    }
+)
+
+
 def build_catalog_object_actions(
     ui_base_url: str,
     catalog: dict[str, Any],
@@ -33,9 +45,15 @@ def build_catalog_object_actions(
     if not catalog_id:
         return []
 
+    service_category = _text(catalog.get("serviceCategory")).upper()
+    request_page = (
+        "work-order-request"
+        if service_category in _WORK_ORDER_SERVICE_CATEGORIES
+        else "catalog-ui/request"
+    )
     href = build_ui_hash_href(
         ui_base_url,
-        f"#/main/catalog-ui/request/{quote(catalog_id, safe='')}",
+        f"#/main/{request_page}/{quote(catalog_id, safe='')}",
     )
     actions: list[dict[str, object]] = []
     open_action = build_object_open_action(href)
