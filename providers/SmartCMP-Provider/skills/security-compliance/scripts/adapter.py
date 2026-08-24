@@ -13,7 +13,7 @@ if str(_SHARED_SCRIPTS) not in sys.path:
 
 from _atlasclaw_adapter import (  # noqa: E402
     RunContext,
-    execute,
+    execute_with_request,
     split_values,
     tool_error,
     tool_result,
@@ -54,7 +54,7 @@ async def get_security_overview(
     """
 
     try:
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             get_security_compliance_overview,
             SecurityOverviewQuery(
@@ -65,6 +65,7 @@ async def get_security_overview(
         return tool_result(
             result,
             summary="Collected the current SmartCMP Security compliance overview.",
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -99,7 +100,7 @@ async def list_security_violations(
         normalized_status = str(status or "").strip().upper()
         if normalized_status == "ALL":
             normalized_status = ""
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             list_security_violations_service,
             SecurityViolationListQuery(
@@ -123,6 +124,7 @@ async def list_security_violations(
             summary=(
                 f"Found {visible_total} SmartCMP Security violations."
             ),
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -144,7 +146,7 @@ async def analyze_security_violation(
     """
 
     try:
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             analyze_security_violation_service,
             SecurityViolationAnalysisQuery(violation_id=violation_id),
@@ -180,6 +182,7 @@ async def analyze_security_violation(
         return tool_result(
             projected,
             summary=f"Collected current evidence for Security violation {violation_id}.",
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -206,7 +209,7 @@ async def mark_security_violation_fixed(
     """
 
     try:
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             mark_security_violation_fixed_service,
             SecurityViolationMarkFixedInput(
@@ -220,6 +223,7 @@ async def mark_security_violation_fixed(
                 f"Marked Security violation {violation_id} as FIXED; "
                 "the resource was not remediated."
             ),
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)

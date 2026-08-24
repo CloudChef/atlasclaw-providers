@@ -16,7 +16,7 @@ if str(_SHARED_SCRIPTS) not in sys.path:
 from _atlasclaw_adapter import (  # noqa: E402
     RunContext,
     embedded_object_id,
-    execute,
+    execute_with_request,
     tool_error,
     tool_result,
 )
@@ -43,7 +43,7 @@ async def read_current_form(ctx: RunContext[Any]) -> dict[str, Any]:
             raise ValueError(
                 "This tool requires an active SmartCMP form page Context."
             )
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             read_form_operation,
             FormReadQuery(form_id=form_id),
@@ -52,6 +52,7 @@ async def read_current_form(ctx: RunContext[Any]) -> dict[str, Any]:
         return tool_result(
             result,
             summary=f"Loaded current SmartCMP form {result.name or form_id}.",
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -68,7 +69,7 @@ async def read_form(
             ctx,
             expected_object_type="form_definition",
         )
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             read_form_operation,
             FormReadQuery(
@@ -80,6 +81,7 @@ async def read_form(
         return tool_result(
             result,
             summary=f"Loaded SmartCMP form {result.name or result.form_id}.",
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -109,7 +111,7 @@ async def design_form(
         )
         form_id = current_id or ""
         normalized_form_url = form_url or ""
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             design_form_operation,
             FormDesignInput(
@@ -128,6 +130,7 @@ async def design_form(
         payload = tool_result(
             result,
             summary=final_output,
+            request=request,
         )
         # AtlasClaw's provider-neutral ``final_user_output`` contract bypasses
         # model summarization and Tool-evidence truncation for exact artifacts.

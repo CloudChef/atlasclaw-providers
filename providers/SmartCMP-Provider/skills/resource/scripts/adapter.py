@@ -277,7 +277,7 @@ async def analyze_resource_security(
             resource_directory_json=resource_directory_json,
             resource_id=resource_id,
         )
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             security_service.analyze_resource_security,
             ResourceSecurityAnalysisQuery(resource_id=selected_resource_id),
@@ -285,6 +285,7 @@ async def analyze_resource_security(
         return tool_result(
             result,
             summary="Collected resource Security posture and violation evidence.",
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -322,7 +323,7 @@ async def list_resource_security_violations(
             resource_directory_json=resource_directory_json,
             resource_id=resource_id,
         )
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             security_service.list_resource_security_violations,
             ResourceSecurityViolationQuery(
@@ -338,6 +339,7 @@ async def list_resource_security_violations(
         return tool_result(
             payload,
             summary=_resource_security_summary(payload),
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)

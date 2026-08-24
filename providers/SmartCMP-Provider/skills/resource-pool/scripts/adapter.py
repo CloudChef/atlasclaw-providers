@@ -13,7 +13,7 @@ if str(_SHARED_SCRIPTS) not in sys.path:
 
 from _atlasclaw_adapter import (  # noqa: E402
     RunContext,
-    execute,
+    execute_with_request,
     tool_error,
     tool_result,
 )
@@ -30,7 +30,7 @@ async def list_resource_pools(
     """List standalone resource pools visible to the current principal."""
 
     try:
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             list_resource_pool_directory,
             DirectorySearchQuery(query_value=query_value or ""),
@@ -38,6 +38,7 @@ async def list_resource_pools(
         return tool_result(
             result,
             summary=f"Found {result.total or len(result.items)} resource pools.",
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)

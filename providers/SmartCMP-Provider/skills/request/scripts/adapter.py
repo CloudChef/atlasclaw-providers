@@ -14,11 +14,9 @@ if str(_SHARED_SCRIPTS) not in sys.path:
 
 from _atlasclaw_adapter import (  # noqa: E402
     RunContext,
-    execute,
     execute_with_request,
     tool_error,
     tool_result,
-    workflow_identity,
 )
 from _request_object_actions import (  # noqa: E402
     attach_catalog_object_metadata,
@@ -144,7 +142,6 @@ async def list_services(
             result,
             summary=f"Found {result.total} request catalogs.",
             internal={
-                **workflow_identity(request),
                 "catalogs": [
                     {
                         key: item.get(key)
@@ -154,6 +151,7 @@ async def list_services(
                     for item in result.catalogs
                 ],
             },
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -184,10 +182,10 @@ async def get_request_catalog(
             summary="Loaded the selected SmartCMP request catalog.",
             internal=_redact_request_secrets(
                 {
-                    **workflow_identity(request),
                     "metadata": result.metadata,
                 }
             ),
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -204,7 +202,7 @@ async def submit(
         body = json.loads(json_body)
         if not isinstance(body, dict):
             raise ValueError("json_body must contain one JSON object.")
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             submit_request_operation,
             RequestSubmissionInput(
@@ -233,7 +231,7 @@ async def submit(
             summary = f"Submitted SmartCMP request: {', '.join(request_ids)}"
         else:
             summary = "SmartCMP request submission did not return a confirmed Request ID."
-        projected = tool_result(result, summary=summary)
+        projected = tool_result(result, summary=summary, request=request)
         if result.overall_failed:
             projected["success"] = False
             projected["error"] = summary
@@ -268,7 +266,7 @@ async def status(
             request=raw_result.detail,
             ui_base_url=request.context.instance.ui_base_url,
         )
-        return tool_result(projected, summary=summary)
+        return tool_result(projected, summary=summary, request=request)
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
 
@@ -281,7 +279,7 @@ async def list_facets(
     """List request facets for one business group and node type."""
 
     try:
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             list_facets_operation,
             FacetQuery(
@@ -292,6 +290,7 @@ async def list_facets(
         return tool_result(
             result,
             summary=f"Found {len(result.items)} request facets.",
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -397,7 +396,7 @@ async def list_available_bgs(
     """List business groups available to one selected request catalog."""
 
     try:
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             list_available_business_groups,
             BusinessGroupQuery(catalog_id=catalog_id),
@@ -405,6 +404,7 @@ async def list_available_bgs(
         return tool_result(
             result,
             summary=f"Found {len(result.items)} available business groups.",
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -449,7 +449,7 @@ async def list_physical_templates(
     """List physical templates compatible with one logical template."""
 
     try:
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             list_physical_templates_operation,
             PhysicalTemplateQuery(
@@ -460,6 +460,7 @@ async def list_physical_templates(
         return tool_result(
             result,
             summary=f"Found {len(result.items)} physical templates.",
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)

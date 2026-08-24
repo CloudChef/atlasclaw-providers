@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import importlib.util
 import inspect
@@ -26,6 +27,7 @@ from smartcmp_provider.models.catalogs import (
     CatalogItemsResult,
     CatalogListResult,
 )
+from smartcmp_provider.models.cost import CostRecommendationListResult
 from smartcmp_provider.models.forms import FormDesignResult, FormReadResult
 from smartcmp_provider.models.requests import (
     RequestSubmissionItem,
@@ -83,6 +85,24 @@ def _ctx(
                 "active_internal_request_trace_id": "trace-1",
                 "context": {},
             },
+        )
+    )
+
+
+def _resolved_request(
+    trace_id: str = "trace-adapter",
+    *,
+    instance_name: str = "cmp",
+) -> SimpleNamespace:
+    """Build the selected Provider request identity projected by adapters."""
+
+    return SimpleNamespace(
+        context=SimpleNamespace(
+            trace_id=trace_id,
+            instance=SimpleNamespace(
+                name=instance_name,
+                ui_base_url="https://cmp.example.com",
+            ),
         )
     )
 
@@ -177,6 +197,41 @@ def test_multi_tool_skills_use_one_adapter_entrypoint_module() -> None:
             and not str(value).startswith("../")
         }
         assert owned_entrypoints == {"scripts/adapter.py"}
+
+
+def test_every_adapter_result_binds_the_selected_provider_request() -> None:
+    """Require every successful adapter projection to retain workflow identity."""
+
+    failures: list[str] = []
+    for adapter_path in sorted(SKILLS_ROOT.glob("*/scripts/adapter.py")):
+        tree = ast.parse(adapter_path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+                continue
+            if node.func.id == "tool_result" and not any(
+                keyword.arg == "request" for keyword in node.keywords
+            ):
+                failures.append(
+                    f"{adapter_path.relative_to(PROVIDER_ROOT)}:{node.lineno} "
+                    "must pass request to tool_result"
+                )
+        for function in (
+            node
+            for node in tree.body
+            if isinstance(node, ast.AsyncFunctionDef) and not node.name.startswith("_")
+        ):
+            if any(
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "execute"
+                for node in ast.walk(function)
+            ):
+                failures.append(
+                    f"{adapter_path.relative_to(PROVIDER_ROOT)}:{function.lineno} "
+                    f"public handler {function.name} must retain the selected request"
+                )
+
+    assert not failures, "\n".join(failures)
 
 
 def test_approval_analysis_returns_to_llm_for_visible_guidance() -> None:
@@ -645,6 +700,45 @@ def test_alarm_list_result_preserves_workflow_identity(monkeypatch) -> None:
     assert internal["items"][0]["id"] == "alert-1"
 
 
+def test_cost_list_result_preserves_workflow_identity(monkeypatch) -> None:
+    """Bind cost recommendation actions to their exact SmartCMP workflow."""
+
+    adapter = _load(
+        SKILLS_ROOT / "cost-optimization" / "scripts" / "adapter.py",
+        "test_cost_list_workflow_identity",
+    )
+
+    async def fake_execute_with_request(_ctx, _operation, _operation_input):
+        return (
+            CostRecommendationListResult(
+                items=(
+                    {
+                        "id": "cost-1",
+                        "category": "COST-OPTIMIZATION.MACHINE",
+                        "status": "ACTIVED",
+                        "fixType": "DAY2",
+                    },
+                ),
+                total=1,
+            ),
+            _resolved_request("trace-cost-list"),
+        )
+
+    monkeypatch.setattr(
+        adapter,
+        "execute_with_request",
+        fake_execute_with_request,
+    )
+    result = asyncio.run(adapter.list_recommendations(object()))
+
+    internal = json.loads(result["_internal"])
+    assert internal["internal_request_trace_id"] == "trace-cost-list"
+    assert internal["provider_instance_ref"] == "smartcmp.cmp"
+    assert [
+        action["action_id"] for action in internal["items"][0]["object_actions"]
+    ] == ["view_detail", "remediate"]
+
+
 def test_atlasclaw_split_values_accepts_omitted_optional_value() -> None:
     """Treat AtlasClaw's explicit null for an optional split field as empty."""
 
@@ -667,12 +761,19 @@ def test_resource_security_adapter_uses_canonical_resource_id(
     )
     captured: dict[str, Any] = {}
 
-    async def fake_execute(_ctx, operation, operation_input):
+    async def fake_execute_with_request(_ctx, operation, operation_input):
         captured["operation"] = operation
         captured["input"] = operation_input
-        return {"analysis_status": "evidence_collected"}
+        return (
+            {"analysis_status": "evidence_collected"},
+            _resolved_request("trace-resource-security"),
+        )
 
-    monkeypatch.setattr(adapter, "execute", fake_execute)
+    monkeypatch.setattr(
+        adapter,
+        "execute_with_request",
+        fake_execute_with_request,
+    )
     result = asyncio.run(
         adapter.analyze_resource_security(
             object(),
@@ -741,10 +842,14 @@ def test_security_violation_list_uses_row_count_when_total_is_unknown(
                 "coverage": "complete",
             }
 
-    async def fake_execute(_ctx, _operation, _operation_input):
-        return FakeListResult()
+    async def fake_execute_with_request(_ctx, _operation, _operation_input):
+        return FakeListResult(), _resolved_request("trace-security-list")
 
-    monkeypatch.setattr(adapter, "execute", fake_execute)
+    monkeypatch.setattr(
+        adapter,
+        "execute_with_request",
+        fake_execute_with_request,
+    )
     result = asyncio.run(adapter.list_security_violations(object()))
 
     assert result["success"] is True
@@ -786,10 +891,14 @@ def test_security_analysis_uses_nested_authoritative_violation_for_actions(
                 },
             }
 
-    async def fake_execute(_ctx, _operation, _operation_input):
-        return FakeAnalysisResult()
+    async def fake_execute_with_request(_ctx, _operation, _operation_input):
+        return FakeAnalysisResult(), _resolved_request("trace-security-analysis")
 
-    monkeypatch.setattr(adapter, "execute", fake_execute)
+    monkeypatch.setattr(
+        adapter,
+        "execute_with_request",
+        fake_execute_with_request,
+    )
     result = asyncio.run(
         adapter.analyze_security_violation(object(), "violation-real-id")
     )
@@ -829,10 +938,14 @@ def test_security_analysis_rejects_missing_nested_violation(
                 "cmp_confirmed_facts": {"policy": None, "resource": None},
             }
 
-    async def fake_execute(_ctx, _operation, _operation_input):
-        return InvalidAnalysisResult()
+    async def fake_execute_with_request(_ctx, _operation, _operation_input):
+        return InvalidAnalysisResult(), _resolved_request("trace-security-invalid")
 
-    monkeypatch.setattr(adapter, "execute", fake_execute)
+    monkeypatch.setattr(
+        adapter,
+        "execute_with_request",
+        fake_execute_with_request,
+    )
     result = asyncio.run(
         adapter.analyze_security_violation(object(), "violation-real-id")
     )
@@ -882,10 +995,14 @@ def test_cost_analysis_preserves_violation_id_alias_for_follow_up_actions(
                 "facts": dict(self.facts),
             }
 
-    async def fake_execute(_ctx, _operation, _operation_input):
-        return FakeAnalysisResult()
+    async def fake_execute_with_request(_ctx, _operation, _operation_input):
+        return FakeAnalysisResult(), _resolved_request("trace-cost-analysis")
 
-    monkeypatch.setattr(adapter, "execute", fake_execute)
+    monkeypatch.setattr(
+        adapter,
+        "execute_with_request",
+        fake_execute_with_request,
+    )
     result = asyncio.run(
         adapter.analyze_recommendation(object(), "cost-real-id")
     )
@@ -1180,31 +1297,38 @@ def test_request_adapter_parses_confirmed_json_once(monkeypatch) -> None:
     )
     captured: dict[str, Any] = {}
 
-    async def fake_execute(_ctx, operation, operation_input):
+    async def fake_execute_with_request(_ctx, operation, operation_input):
         captured["operation"] = operation
         captured["input"] = operation_input
-        return RequestSubmissionResult(
-            normalized_body={
-                **operation_input.body,
-                "credentialPassword": "vm-secret",
-                "APITOKEN": "uppercase-api-token-secret",
-                "APISECRET": "uppercase-api-secret",
-                "SESSIONTOKEN": "uppercase-session-token-secret",
-                "privateKeyPem": "private-key-pem-secret",
-                "bearer": "standalone-bearer-secret",
-                "tokenBudget": 4096,
-                "resourceKey": "resource-key-value",
-                "nested": {"password": "nested-secret"},
-            },
-            items=(
-                RequestSubmissionItem(
-                    outcome="success",
-                    request_id="RES20260731000002",
+        return (
+            RequestSubmissionResult(
+                normalized_body={
+                    **operation_input.body,
+                    "credentialPassword": "vm-secret",
+                    "APITOKEN": "uppercase-api-token-secret",
+                    "APISECRET": "uppercase-api-secret",
+                    "SESSIONTOKEN": "uppercase-session-token-secret",
+                    "privateKeyPem": "private-key-pem-secret",
+                    "bearer": "standalone-bearer-secret",
+                    "tokenBudget": 4096,
+                    "resourceKey": "resource-key-value",
+                    "nested": {"password": "nested-secret"},
+                },
+                items=(
+                    RequestSubmissionItem(
+                        outcome="success",
+                        request_id="RES20260731000002",
+                    ),
                 ),
             ),
+            _resolved_request("trace-request-submit"),
         )
 
-    monkeypatch.setattr(adapter, "execute", fake_execute)
+    monkeypatch.setattr(
+        adapter,
+        "execute_with_request",
+        fake_execute_with_request,
+    )
     result = asyncio.run(
         adapter.submit(
             object(),
@@ -1257,20 +1381,27 @@ def test_request_adapter_does_not_confirm_failed_submission(
         "test_request_adapter_failed_submission",
     )
 
-    async def fake_execute(_ctx, _operation, operation_input):
-        return RequestSubmissionResult(
-            normalized_body=operation_input.body,
-            items=(
-                RequestSubmissionItem(
-                    outcome=outcome,
-                    request_id="RES20260731000003",
-                    error="workflow initialization failed",
+    async def fake_execute_with_request(_ctx, _operation, operation_input):
+        return (
+            RequestSubmissionResult(
+                normalized_body=operation_input.body,
+                items=(
+                    RequestSubmissionItem(
+                        outcome=outcome,
+                        request_id="RES20260731000003",
+                        error="workflow initialization failed",
+                    ),
                 ),
+                overall_failed=True,
             ),
-            overall_failed=True,
+            _resolved_request("trace-request-failed"),
         )
 
-    monkeypatch.setattr(adapter, "execute", fake_execute)
+    monkeypatch.setattr(
+        adapter,
+        "execute_with_request",
+        fake_execute_with_request,
+    )
     result = asyncio.run(
         adapter.submit(
             object(),
@@ -1292,10 +1423,14 @@ def test_request_adapter_does_not_confirm_unknown_submission(monkeypatch) -> Non
         "test_request_adapter_unknown_submission",
     )
 
-    async def fake_execute(_ctx, _operation, _operation_input):
+    async def fake_execute_with_request(_ctx, _operation, _operation_input):
         raise RuntimeError("submission outcome is unknown; do not resubmit")
 
-    monkeypatch.setattr(adapter, "execute", fake_execute)
+    monkeypatch.setattr(
+        adapter,
+        "execute_with_request",
+        fake_execute_with_request,
+    )
     result = asyncio.run(
         adapter.submit(
             object(),
@@ -1596,7 +1731,7 @@ def test_form_adapter_normalizes_omitted_optional_strings(monkeypatch) -> None:
     )
     captured: dict[str, Any] = {}
 
-    async def fake_execute(
+    async def fake_execute_with_request(
         _ctx,
         _operation,
         operation_input,
@@ -1605,16 +1740,23 @@ def test_form_adapter_normalizes_omitted_optional_strings(monkeypatch) -> None:
     ):
         captured["input"] = operation_input
         captured["request_cookie_only"] = request_cookie_only
-        return FormDesignResult(
-            mode="modify",
-            source={"formId": "form-1", "name": "test-form"},
-            warnings=(),
-            changeSummary="",
-            schema={"type": "object"},
+        return (
+            FormDesignResult(
+                mode="modify",
+                source={"formId": "form-1", "name": "test-form"},
+                warnings=(),
+                changeSummary="",
+                schema={"type": "object"},
+            ),
+            _resolved_request("trace-form-design"),
         )
 
     monkeypatch.setattr(adapter, "embedded_object_id", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(adapter, "execute", fake_execute)
+    monkeypatch.setattr(
+        adapter,
+        "execute_with_request",
+        fake_execute_with_request,
+    )
     result = asyncio.run(
         adapter.design_form(
             object(),
@@ -1651,7 +1793,7 @@ def test_form_read_adapter_passes_editor_url_to_provider(monkeypatch) -> None:
         "123e4567-e89b-12d3-a456-426614174000"
     )
 
-    async def fake_execute(
+    async def fake_execute_with_request(
         _ctx,
         _operation,
         operation_input,
@@ -1660,19 +1802,26 @@ def test_form_read_adapter_passes_editor_url_to_provider(monkeypatch) -> None:
     ):
         captured["input"] = operation_input
         captured["request_cookie_only"] = request_cookie_only
-        return FormReadResult(
-            form_id="123e4567-e89b-12d3-a456-426614174000",
-            name="Design form",
-            description="",
-            schema={"type": "object"},
-            model={},
-            design_mode="schema",
-            component_count=0,
-            source_route="design",
+        return (
+            FormReadResult(
+                form_id="123e4567-e89b-12d3-a456-426614174000",
+                name="Design form",
+                description="",
+                schema={"type": "object"},
+                model={},
+                design_mode="schema",
+                component_count=0,
+                source_route="design",
+            ),
+            _resolved_request("trace-form-read"),
         )
 
     monkeypatch.setattr(adapter, "embedded_object_id", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(adapter, "execute", fake_execute)
+    monkeypatch.setattr(
+        adapter,
+        "execute_with_request",
+        fake_execute_with_request,
+    )
 
     result = asyncio.run(adapter.read_form(object(), form_url))
 
@@ -1763,12 +1912,16 @@ def test_datasource_adapter_normalizes_optional_logical_template_fields(
     )
     captured: dict[str, Any] = {}
 
-    async def fake_execute(_ctx, operation, operation_input):
+    async def fake_execute_with_request(_ctx, operation, operation_input):
         captured["operation"] = operation
         captured["input"] = operation_input
-        return CatalogItemsResult()
+        return CatalogItemsResult(), _resolved_request("trace-logical-templates")
 
-    monkeypatch.setattr(adapter, "execute", fake_execute)
+    monkeypatch.setattr(
+        adapter,
+        "execute_with_request",
+        fake_execute_with_request,
+    )
     result = asyncio.run(
         adapter.list_logical_templates(
             object(),

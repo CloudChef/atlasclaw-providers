@@ -13,7 +13,7 @@ if str(_SHARED_SCRIPTS) not in sys.path:
 
 from _atlasclaw_adapter import (  # noqa: E402
     RunContext,
-    execute,
+    execute_with_request,
     tool_error,
     tool_result,
 )
@@ -46,7 +46,7 @@ async def list_all_business_groups(
     """List business groups visible to the selected SmartCMP principal."""
 
     try:
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             list_business_group_directory,
             DirectorySearchQuery(
@@ -58,6 +58,7 @@ async def list_all_business_groups(
         return tool_result(
             result,
             summary=f"Found {result.total or len(result.items)} business groups.",
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -70,7 +71,7 @@ async def list_applications(
     """List applications for one explicit SmartCMP business group."""
 
     try:
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             list_applications_operation,
             ApplicationListQuery(business_group_id=business_group_id),
@@ -78,6 +79,7 @@ async def list_applications(
         return tool_result(
             result,
             summary=f"Found {result.total or len(result.items)} applications.",
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -90,7 +92,7 @@ async def list_components(
     """List component metadata for one explicit SmartCMP resource type."""
 
     try:
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             list_components_operation,
             ComponentListQuery(source_key=source_key),
@@ -98,6 +100,7 @@ async def list_components(
         return tool_result(
             result,
             summary=f"Found {result.total or len(result.items)} components.",
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -114,7 +117,7 @@ async def list_logical_templates(
     """List logical templates after normalizing omitted AtlasClaw fields."""
 
     try:
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             list_logical_templates_operation,
             LogicalTemplateQuery(
@@ -128,6 +131,7 @@ async def list_logical_templates(
         return tool_result(
             result,
             summary=f"Found {len(result.items)} logical templates.",
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -142,7 +146,7 @@ async def list_images(
     """List images for one resource-pool and logical-template selection."""
 
     try:
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             list_images_operation,
             ImageQuery(
@@ -152,7 +156,11 @@ async def list_images(
             ),
         )
         if not result.items:
-            return tool_result(result, summary="No cloud images are available.")
+            return tool_result(
+                result,
+                summary="No cloud images are available.",
+                request=request,
+            )
 
         image_lines = []
         for index, item in enumerate(result.items, start=1):
@@ -165,6 +173,6 @@ async def list_images(
 
         summary = "Available cloud images:\n" + "\n".join(image_lines)
         summary += "\nReply with the cloud image number to select it."
-        return tool_result(result, summary=summary)
+        return tool_result(result, summary=summary, request=request)
     except (ValueError, RuntimeError) as error:
         return tool_error(error)

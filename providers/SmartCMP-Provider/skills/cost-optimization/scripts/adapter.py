@@ -14,6 +14,7 @@ if str(_SHARED_SCRIPTS) not in sys.path:
 from _atlasclaw_adapter import (  # noqa: E402
     RunContext,
     execute,
+    execute_with_request,
     tool_error,
     tool_result,
 )
@@ -69,7 +70,7 @@ async def list_recommendations(
     if category:
         filters["category"] = category
     try:
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             list_cost_recommendations_operation,
             CostRecommendationListQuery(
@@ -97,6 +98,7 @@ async def list_recommendations(
                 f"Found {result.total or len(result.items)} "
                 "cost recommendations."
             ),
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -109,7 +111,7 @@ async def analyze_recommendation(
     """Analyze one SmartCMP cost recommendation and its resource evidence."""
 
     try:
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             analyze_cost_recommendation_operation,
             CostRecommendationFactsQuery(violation_id=violation_id),
@@ -122,6 +124,7 @@ async def analyze_recommendation(
         return tool_result(
             projected,
             summary=f"Analyzed cost recommendation {result.violationId}.",
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -144,7 +147,7 @@ async def analyze_resource_cost(
             resource_index=resource_index,
             resource_directory_json=resource_directory_json,
         )
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             analyze_resource_cost_operation,
             ResourceCostAnalysisQuery(resource_id=resolved_id),
@@ -152,6 +155,7 @@ async def analyze_resource_cost(
         return tool_result(
             result,
             summary=f"Collected cost evidence for {resolved_name}.",
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -164,12 +168,12 @@ async def execute_optimization(
     """Submit one user-confirmed native SmartCMP cost remediation."""
 
     try:
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             execute_cost_optimization_operation,
             CostExecutionInput(violation_id=violation_id),
         )
-        return tool_result(result, summary=result.message)
+        return tool_result(result, summary=result.message, request=request)
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
 
@@ -181,7 +185,7 @@ async def track_execution(
     """Return aggregate execution status for one cost recommendation."""
 
     try:
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             get_cost_execution_status,
             CostExecutionStatusQuery(violation_id=violation_id),
@@ -192,6 +196,7 @@ async def track_execution(
                 f"Violation {result.violationId}: "
                 f"{result.overallStatus}."
             ),
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
