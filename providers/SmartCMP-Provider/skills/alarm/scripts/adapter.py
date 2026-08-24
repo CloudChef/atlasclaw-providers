@@ -15,6 +15,7 @@ if str(_SHARED_SCRIPTS) not in sys.path:
 from _atlasclaw_adapter import (  # noqa: E402
     RunContext,
     execute,
+    execute_with_request,
     resolve_selected_provider_request,
     split_values,
     tool_error,
@@ -85,7 +86,7 @@ async def list_alerts(
                 resource_index=resource_index,
                 resource_directory_json=resource_directory_json,
             )
-            result = await execute(
+            result, request = await execute_with_request(
                 ctx,
                 collect_resource_alerts,
                 ResourceAlertListQuery(
@@ -119,6 +120,7 @@ async def list_alerts(
                     f"association coverage is "
                     f"{result.coverage.association_status}."
                 ),
+                request=request,
             )
         filters = build_list_params(
             page=page,
@@ -134,7 +136,7 @@ async def list_alerts(
             alarm_categories=alarm_category,
             query=query,
         )
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             list_alarms_operation,
             AlarmListQuery(filters=filters),
@@ -155,6 +157,7 @@ async def list_alerts(
         return tool_result(
             projected,
             summary=f"Found {result.total or len(result.items)} alerts.",
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -168,7 +171,7 @@ async def analyze_alert(
     """Analyze one SmartCMP alert through shared deterministic evidence rules."""
 
     try:
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             analyze_alarm,
             AlarmAnalysisFactsQuery(alert_id=alert_id, days=days),
@@ -186,6 +189,7 @@ async def analyze_alert(
         return tool_result(
             projected,
             summary=f"Analyzed SmartCMP alert {alert_id}.",
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -224,6 +228,7 @@ async def analyze_resource_health(
                 f"monitoring state is "
                 f"{payload.get('monitoring_state', 'unknown')}."
             ),
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
@@ -237,7 +242,7 @@ async def operate_alert(
     """Execute one user-confirmed status operation for explicit alert IDs."""
 
     try:
-        result = await execute(
+        result, request = await execute_with_request(
             ctx,
             execute_alarm_operation,
             AlarmOperationInput(
@@ -251,6 +256,7 @@ async def operate_alert(
                 f"Applied {result.action} to "
                 f"{len(result.alert_ids)} SmartCMP alerts."
             ),
+            request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)

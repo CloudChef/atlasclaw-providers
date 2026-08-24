@@ -16,6 +16,7 @@ import pytest
 import yaml
 
 from smartcmp_provider.analysis.cost.recommendation import normalize_analysis_facts
+from smartcmp_provider.models.alarms import AlarmListResult
 from smartcmp_provider.models.approvals import (
     ApprovalDecisionItem,
     ApprovalDecisionResult,
@@ -607,6 +608,41 @@ def test_atlasclaw_result_omits_mcp_specific_operation_arguments() -> None:
     internal = json.loads(result["_internal"])
     assert internal["internal_request_trace_id"] == "trace-resource"
     assert internal["provider_instance_ref"] == "smartcmp.cmp"
+
+
+def test_alarm_list_result_preserves_workflow_identity(monkeypatch) -> None:
+    """Bind a later alarm action to the exact list request and Provider instance."""
+
+    adapter = _load(
+        SKILLS_ROOT / "alarm" / "scripts" / "adapter.py",
+        "test_alarm_list_workflow_identity",
+    )
+
+    async def fake_execute_with_request(_ctx, _operation, _operation_input):
+        return (
+            AlarmListResult(
+                items=({"id": "alert-1", "status": "ALERT_FIRING"},),
+                total=1,
+            ),
+            SimpleNamespace(
+                context=SimpleNamespace(
+                    trace_id="trace-alarm",
+                    instance=SimpleNamespace(name="cmp"),
+                )
+            ),
+        )
+
+    monkeypatch.setattr(
+        adapter,
+        "execute_with_request",
+        fake_execute_with_request,
+    )
+    result = asyncio.run(adapter.list_alerts(object()))
+
+    internal = json.loads(result["_internal"])
+    assert internal["internal_request_trace_id"] == "trace-alarm"
+    assert internal["provider_instance_ref"] == "smartcmp.cmp"
+    assert internal["items"][0]["id"] == "alert-1"
 
 
 def test_atlasclaw_split_values_accepts_omitted_optional_value() -> None:
