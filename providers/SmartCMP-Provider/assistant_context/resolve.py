@@ -130,6 +130,9 @@ _OBJECT_PARAMETER_NAMES: dict[str, frozenset[str]] = {
     "security_compliance_violation_collection": frozenset(),
     "virtual_machine": frozenset(("resource_id",)),
 }
+_ALTERNATE_OBJECT_PARAMETER_NAMES: dict[str, frozenset[str]] = {
+    "approval_request": frozenset(("generic_request_id",)),
+}
 
 
 def _resolve_security_violation_collection() -> dict[str, Any]:
@@ -442,6 +445,91 @@ async def _resolve_pending_approval(
     )
 
 
+async def _resolve_work_order_approval(
+    route_parameters: dict[str, Any],
+    *,
+    reader: ContextReader,
+) -> dict[str, Any]:
+    """Resolve one current-user work-order approval by GenericRequest ID."""
+
+    generic_request_id = exact_uuid(route_parameters.get("generic_request_id"))
+    if not generic_request_id:
+        return _failure("invalid_request_id")
+
+    try:
+        request = await reader.read_request(generic_request_id)
+        if (
+            not isinstance(request, dict)
+            or exact_uuid(request.get("id")) != generic_request_id
+        ):
+            return _failure("request_id_mismatch")
+        workflow_id = exact_request_id(request.get("workflowId"))
+        if not workflow_id:
+            return _failure("invalid_workflow_id")
+
+        rows = [
+            item
+            for item in await reader.list_current_approvals(workflow_id)
+            if exact_uuid(item.get("id")) == generic_request_id
+            and exact_request_id(item.get("workflowId")) == workflow_id
+        ]
+        if not rows:
+            return _failure("not_in_current_user_approval_queue")
+        if len(rows) != 1:
+            return _failure("ambiguous_current_user_approval")
+        row = rows[0]
+        extensions = row.get("exts")
+        extensions = extensions if isinstance(extensions, dict) else {}
+        approval_id = exact_uuid(extensions.get("approval_id"))
+        approval_type = text(extensions.get("approval_type")).upper()
+        approval_state = text(extensions.get("approval_state")).upper()
+        if (
+            not approval_id
+            or not _APPROVAL_TYPE.fullmatch(approval_type)
+            or not approval_state
+        ):
+            return _failure("approval_reference_unavailable")
+
+        approval = await reader.read_approval(approval_id)
+        if (
+            not isinstance(approval, dict)
+            or exact_uuid(approval.get("id")) != approval_id
+        ):
+            return _failure("approval_id_mismatch")
+        if exact_uuid(approval.get("genericRequestId")) != generic_request_id:
+            return _failure("approval_request_mismatch")
+        if exact_request_id(approval.get("workflowId")) != workflow_id:
+            return _failure("approval_workflow_mismatch")
+        if text(approval.get("type")).upper() != approval_type:
+            return _failure("approval_type_mismatch")
+    except (SmartCmpError, TypeError, ValueError):
+        return _failure("provider_unavailable")
+
+    approval_detail_state = text(approval.get("state")).upper()
+    is_pending = (
+        approval_state == "PENDING" and approval_detail_state == "PENDING"
+    )
+    object_actions = build_approval_object_actions(
+        reader.ui_base_url,
+        row,
+        include_detail_actions=is_pending,
+    )
+    if not is_pending:
+        object_actions = [
+            action
+            for action in object_actions
+            if action.get("action_id") == "open_detail"
+        ]
+    return success_object(
+        object_type="approval_request",
+        object_id=workflow_id,
+        name=text(approval.get("name")) or text(row.get("name")) or workflow_id,
+        state=(approval_detail_state or approval_state).lower(),
+        attributes={"approval_type": approval_type},
+        object_actions=object_actions,
+    )
+
+
 async def _resolve_catalog(
     route_parameters: dict[str, Any],
     *,
@@ -599,10 +687,21 @@ async def resolve_page_context(
         return _failure("unsupported_object_type")
     # Exact parameter names keep the manifest as the only URL contract. The
     # resolver adapts an object type and cannot accept client-added query data.
-    if set(route_parameters) != parameter_names:
+    alternate_parameter_names = _ALTERNATE_OBJECT_PARAMETER_NAMES.get(
+        normalized_object_type
+    )
+    if (
+        set(route_parameters) != parameter_names
+        and set(route_parameters) != alternate_parameter_names
+    ):
         return _failure("invalid_route_contract")
 
     if normalized_object_type == "approval_request":
+        if (
+            set(route_parameters)
+            == _ALTERNATE_OBJECT_PARAMETER_NAMES["approval_request"]
+        ):
+            return await _resolve_work_order_approval(route_parameters, reader=reader)
         return await _resolve_pending_approval(route_parameters, reader=reader)
     if normalized_object_type == "form_definition":
         return await _resolve_form_definition(route_parameters, reader=reader)

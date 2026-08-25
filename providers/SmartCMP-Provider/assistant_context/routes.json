@@ -114,6 +114,18 @@
       }
     },
     {
+      "id": "work-order-approval-detail",
+      "priority": 400,
+      "match": {
+        "path_template": "/main/work-order-process/ServiceRequest/myApproval/{generic_request_id}"
+      },
+      "result": {
+        "page_type": "approval-detail",
+        "object_type": "approval_request",
+        "skill_ref": "smartcmp:approval"
+      }
+    },
+    {
       "id": "catalog-request",
       "priority": 300,
       "match": {"path_template": "/main/catalog-ui/request/{catalog_id}"},

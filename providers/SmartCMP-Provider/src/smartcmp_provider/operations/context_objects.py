@@ -106,6 +106,41 @@ async def list_current_pending_approvals(
     return tuple(item for item in content if isinstance(item, dict))
 
 
+async def list_current_approvals(
+    client: SmartCmpClient,
+    workflow_id: str,
+) -> tuple[dict[str, Any], ...]:
+    """List the current principal's approval rows for one visible Request ID.
+
+    The work-order approval page remains accessible after a decision, so this
+    identity-scoped lookup deliberately includes both pending and completed
+    rows. ``searchValue`` is the SmartCMP list API's exact search parameter.
+
+    Args:
+        client: Request-scoped SmartCMP client carrying the current user.
+        workflow_id: User-visible request number shown on the approval page.
+
+    Returns:
+        Approval rows visible in the current user's "My approvals" list.
+    """
+
+    payload = await client.request_json(
+        "GET",
+        "/generic-request/current-activity-approval",
+        params={
+            "page": 1,
+            "size": 20,
+            "stage": "all",
+            "sort": "updatedDate,desc",
+            "searchValue": workflow_id,
+        },
+    )
+    content = payload.get("content") if isinstance(payload, dict) else None
+    if not isinstance(content, list):
+        return ()
+    return tuple(item for item in content if isinstance(item, dict))
+
+
 async def read_catalog(
     client: SmartCmpClient,
     catalog_id: str,

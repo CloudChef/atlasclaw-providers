@@ -20,6 +20,7 @@ from smartcmp_provider.operations.context_objects import (
     CATALOG_ENTITY_CLASS,
     RESOURCE_ENTITY_CLASS,
     has_instance_permission,
+    list_current_approvals,
     list_current_pending_approvals,
     read_alert,
     read_approval,
@@ -72,6 +73,12 @@ class ContextReader(Protocol):
         workflow_id: str,
     ) -> tuple[dict[str, Any], ...]:
         """List current-user pending approvals for one Request ID."""
+
+    async def list_current_approvals(
+        self,
+        workflow_id: str,
+    ) -> tuple[dict[str, Any], ...]:
+        """List current-user pending and completed approvals for one Request ID."""
 
     async def read_catalog(self, object_id: str) -> dict[str, Any]:
         """Read one exact catalog."""
@@ -171,6 +178,17 @@ class SmartCmpProviderContextReader:
         """List current-user pending approvals for one Request ID through SmartCMP Provider."""
 
         return await list_current_pending_approvals(
+            self._require_client(),
+            workflow_id,
+        )
+
+    async def list_current_approvals(
+        self,
+        workflow_id: str,
+    ) -> tuple[dict[str, Any], ...]:
+        """List current-user approval rows for one Request ID through SmartCMP Provider."""
+
+        return await list_current_approvals(
             self._require_client(),
             workflow_id,
         )

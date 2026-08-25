@@ -81,6 +81,11 @@ def test_routes_match_context_to_existing_skills_with_one_provider_resolver() ->
             "/main/new-application/pendingApproval/{approval_type}/{approval_id}",
             "smartcmp:approval",
         ),
+        (
+            "work-order-approval-detail",
+            "/main/work-order-process/ServiceRequest/myApproval/{generic_request_id}",
+            "smartcmp:approval",
+        ),
         ("catalog-request", "/main/catalog-ui/request/{catalog_id}", "smartcmp:request"),
         (
             "work-order-request",
