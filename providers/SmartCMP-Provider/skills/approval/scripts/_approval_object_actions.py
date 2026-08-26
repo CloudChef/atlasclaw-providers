@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -15,6 +14,7 @@ from _object_actions_common import (
     build_ui_hash_href,
 )
 from smartcmp_provider.domain.approval_context import available_approval_operations
+from smartcmp_provider.domain.approval_validation import request_id_from_item
 
 
 _APPROVAL_DETAIL_FROM_PARAMS = {"from": "normal", "fromPagePartUrl": "SR_MY_APPROVAL"}
@@ -30,18 +30,6 @@ _APPROVAL_APPLICATION_TYPES = {
     "VM_OPERATION",
     "TASK_EXECUTION_REQUEST",
 }
-_REQUEST_ID_PATTERN = re.compile(r"^[A-Z]{3}\d{14}$", re.IGNORECASE)
-_REQUEST_ID_FIELD_NAMES = (
-    "requestId",
-    "request_id",
-    "workflowId",
-    "workflow_id",
-    "requestNo",
-    "requestNumber",
-    "customizedId",
-)
-
-
 def build_approval_object_actions(
     ui_base_url: str,
     item: dict,
@@ -59,7 +47,7 @@ def build_approval_object_actions(
     Returns:
         Provider-agnostic actions for the current approval projection.
     """
-    request_id = _approval_request_id(item)
+    request_id = request_id_from_item(item)
     available_action_ids = {
         operation.operation_id
         for operation in available_approval_operations(request_id)
@@ -205,40 +193,6 @@ def build_approval_page_href(ui_base_url: str, item: dict) -> str:
     if not hash_route:
         return ""
     return build_ui_hash_href(ui_base_url, hash_route)
-
-
-def _approval_request_id(item: dict) -> str:
-    if not isinstance(item, dict):
-        return ""
-    request_id = _request_id_from_mapping(item)
-    if request_id:
-        return request_id
-
-    current_activity = item.get("currentActivity")
-    request_id = _request_id_from_mapping(current_activity)
-    if request_id:
-        return request_id
-    if not isinstance(current_activity, dict):
-        return ""
-
-    approval_requests = current_activity.get("approvalRequests")
-    if not isinstance(approval_requests, list):
-        return ""
-    for approval_request in approval_requests:
-        request_id = _request_id_from_mapping(approval_request)
-        if request_id:
-            return request_id
-    return ""
-
-
-def _request_id_from_mapping(mapping: object) -> str:
-    if not isinstance(mapping, dict):
-        return ""
-    for field_name in _REQUEST_ID_FIELD_NAMES:
-        candidate = _text(mapping.get(field_name))
-        if _REQUEST_ID_PATTERN.fullmatch(candidate):
-            return candidate
-    return ""
 
 
 def _build_approval_hash_route(item: dict) -> str:

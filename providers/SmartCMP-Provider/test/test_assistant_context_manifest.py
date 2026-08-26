@@ -91,6 +91,11 @@ def test_routes_match_context_to_existing_skills_with_one_provider_resolver() ->
             "/main/work-order-process/ServiceRequest/myApproval/{generic_request_id}",
             "smartcmp:approval",
         ),
+        (
+            "work-order-application-detail",
+            "/main/work-order-process/ServiceRequest/myApplication/{generic_request_id}",
+            "smartcmp:request",
+        ),
         ("catalog-request", "/main/catalog-ui/request/{catalog_id}", "smartcmp:request"),
         (
             "work-order-request",
@@ -119,3 +124,11 @@ def test_routes_match_context_to_existing_skills_with_one_provider_resolver() ->
         }
         skill_name = route["result"]["skill_ref"].split(":", 1)[1]
         assert (PROVIDER_ROOT / "skills" / skill_name / "SKILL.md").is_file()
+    work_order_application = next(
+        route for route in routes if route["id"] == "work-order-application-detail"
+    )
+    assert work_order_application["result"] == {
+        "page_type": "request-detail",
+        "object_type": "request",
+        "skill_ref": "smartcmp:request",
+    }

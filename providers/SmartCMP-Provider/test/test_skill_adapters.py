@@ -1378,7 +1378,7 @@ def test_approval_adapter_reject_requires_reason(monkeypatch) -> None:
     result = asyncio.run(
         adapter.reject(
             object(),
-            "RES20260731000001",
+            "SR 2026,000001",
             reason="   ",
         )
     )
@@ -1386,9 +1386,9 @@ def test_approval_adapter_reject_requires_reason(monkeypatch) -> None:
     assert result["success"] is True
     assert result["required_input"] == "reason"
     assert result["executed"] is False
-    assert result["request_ids"] == ["RES20260731000001"]
+    assert result["request_ids"] == ["SR 2026,000001"]
     assert result["output"] == (
-        "Please provide a rejection reason for RES20260731000001. "
+        "Please provide a rejection reason for SR 2026,000001. "
         "No rejection was executed."
     )
     internal = json.loads(result["_internal"])

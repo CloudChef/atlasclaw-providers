@@ -122,7 +122,7 @@ tool_detail_parameters: |
     "properties": {
       "identifier": {
         "type": "string",
-        "description": "The single lookup identifier. Use the SmartCMP user-facing Request ID only, such as RES20260505000010, TIC20260502000003, or CHG20260413000011."
+        "description": "The exact SmartCMP user-facing Request ID returned by the request or pending-approval list. Its format is opaque and may vary."
       },
       "days": {
         "type": "integer",
@@ -175,7 +175,7 @@ tool_analyze_parameters: |
     "properties": {
       "identifier": {
         "type": "string",
-        "description": "The SmartCMP user-facing Request ID to analyze, such as RES20260505000010, TIC20260502000003, or CHG20260413000011."
+        "description": "The exact SmartCMP user-facing Request ID returned by the request or pending-approval list. Request IDs have no required prefix or character pattern."
       },
       "days": {
         "type": "integer",
@@ -186,7 +186,7 @@ tool_analyze_parameters: |
     "required": ["identifier"]
   }
 tool_approve_name: "smartcmp_approve"
-tool_approve_description: "Approve requests in SmartCMP. `ids` must be SmartCMP user-facing Request ID(s), e.g. RES20260505000010, TIC20260502000003, or CHG20260413000011. For user selections like 'approve 1', '同意 1', or '批准 1', resolve the row index to the latest smartcmp_list_pending `_internal.items[].request_id` before calling. Never pass row numbers, UUID-shaped internal IDs, or placeholder/dummy values; SmartCMP Provider resolves Request IDs internally."
+tool_approve_description: "Approve requests in SmartCMP. `ids` must contain the exact SmartCMP user-facing Request ID(s) returned by the latest pending-approval list; their format is opaque and may vary. Only when the user explicitly refers to a displayed row, resolve that row to the latest smartcmp_list_pending `_internal.items[].request_id`. Otherwise preserve a supplied ID exactly, including numeric or UUID-shaped values. Never invent an ID; SmartCMP Provider resolves Request IDs internally."
 tool_approve_entrypoint: "scripts/adapter.py:approve"
 tool_approve_aliases:
   - "approve request"
@@ -223,15 +223,16 @@ tool_approve_priority: 120
 tool_approve_result_mode: "tool_only_ok"
 tool_approve_cli_positional:
   - ids
-tool_approve_cli_split:
-  - ids
 tool_approve_parameters: |
   {
     "type": "object",
     "properties": {
       "ids": {
-        "type": "string",
-        "description": "SmartCMP user-facing Request ID(s) only, such as 'RES20260505000010', 'TIC20260502000003', or 'CHG20260413000011'. For multiple IDs, separate with space. Do not pass display indexes, UUID-shaped internal IDs, or placeholder/dummy values."
+        "anyOf": [
+          {"type": "string"},
+          {"type": "array", "items": {"type": "string"}}
+        ],
+        "description": "One exact opaque SmartCMP Request ID, or an array of exact IDs for a batch. String contents are never split on whitespace or punctuation."
       },
       "reason": {
         "type": "string",
@@ -241,7 +242,7 @@ tool_approve_parameters: |
     "required": ["ids"]
   }
 tool_reject_name: "smartcmp_reject"
-tool_reject_description: "Reject requests in SmartCMP. `ids` must be SmartCMP user-facing Request ID(s), e.g. RES20260505000010, TIC20260502000003, or CHG20260413000011. If `reason` is omitted, the tool returns an input-required result bound to the same request trace and does not execute a rejection; call it again only after the user supplies a non-empty reason. For user selections like 'reject 1' or '拒绝 1', resolve the row index to the latest smartcmp_list_pending `_internal.items[].request_id` before calling. Never pass row numbers, UUID-shaped internal IDs, or placeholder/dummy values; SmartCMP Provider resolves Request IDs internally."
+tool_reject_description: "Reject requests in SmartCMP. `ids` must contain the exact SmartCMP user-facing Request ID(s) returned by the latest pending-approval list; their format is opaque and may vary. If `reason` is omitted, the tool returns an input-required result bound to the same request trace and does not execute a rejection; call it again only after the user supplies a non-empty reason. Only when the user explicitly refers to a displayed row, resolve that row to the latest smartcmp_list_pending `_internal.items[].request_id`. Otherwise preserve a supplied ID exactly, including numeric or UUID-shaped values. Never invent an ID; SmartCMP Provider resolves Request IDs internally."
 tool_reject_entrypoint: "scripts/adapter.py:reject"
 tool_reject_aliases:
   - "reject request"
@@ -274,15 +275,16 @@ tool_reject_priority: 130
 tool_reject_result_mode: "tool_only_ok"
 tool_reject_cli_positional:
   - ids
-tool_reject_cli_split:
-  - ids
 tool_reject_parameters: |
   {
     "type": "object",
     "properties": {
       "ids": {
-        "type": "string",
-        "description": "SmartCMP user-facing Request ID(s) only, such as 'RES20260505000010', 'TIC20260502000003', or 'CHG20260413000011'. For multiple IDs, separate with space. Do not pass display indexes, UUID-shaped internal IDs, or placeholder/dummy values."
+        "anyOf": [
+          {"type": "string"},
+          {"type": "array", "items": {"type": "string"}}
+        ],
+        "description": "One exact opaque SmartCMP Request ID, or an array of exact IDs for a batch. String contents are never split on whitespace or punctuation."
       },
       "reason": {
         "type": "string",
@@ -380,7 +382,7 @@ Call `smartcmp_list_pending` with optional `days`.
 | Field | Description |
 |-------|-------------|
 | `index` | Display index (1, 2, 3...) — for user selection only |
-| `request_id` | **SmartCMP user-facing Request ID / request number** — use this for approve/reject tool input (e.g., RES20260505000010, TIC20260502000003, or CHG20260413000011) |
+| `request_id` | **Exact SmartCMP user-facing Request ID / request number** — use this opaque value for approve/reject tool input |
 | `name` | Request name |
 | `catalog_name` | Service catalog type |
 | `applicant` | Requester name |
@@ -398,13 +400,13 @@ Call `smartcmp_list_pending` with optional `days`.
 
 | Field | Format Example | Can Use as approve/reject tool input? |
 |-------|----------------|----------------------------|
-| `request_id` | `RES20260505000010`, `TIC20260502000003`, `CHG20260413000011` | **YES — USE THIS** |
+| `request_id` | Exact value from `_internal.items[].request_id`, such as `SR-2026/000019` | **YES — USE THIS** |
 | display index | `1`, `2`, `3` | **NO — resolve row index to `request_id` first** |
-| UUID-shaped internal ID | internal SmartCMP identifier | **NO — not exposed to the agent and not accepted by approve/reject** |
+| invented value | placeholder or guessed ID | **NO — re-list and use the returned `request_id`** |
 
 **Mapping user selection to correct ID:**
 ```
-User says "1", "approve 1", "同意 1", or "批准 1"
+User explicitly says "row 1", "approve the first row", or "同意第 1 行"
   |
   v
 Find the selected item in the latest `smartcmp_list_pending` `_internal.items`
@@ -416,7 +418,7 @@ Extract the `request_id` field
 Pass to `smartcmp_approve` or `smartcmp_reject`
 ```
 
-Never invent or pass placeholder values such as `dummy-id-placeholder`, `placeholder`, `example`, or `<request_id>`. If the latest list metadata is unavailable, list pending approvals again before calling approve/reject.
+Treat `request_id` as opaque: do not require a prefix, character set, or fixed length pattern. Never invent a value. If the latest list metadata is unavailable, list pending approvals again before calling approve/reject.
 
 ### Step 2: Approve Requests
 
@@ -449,12 +451,12 @@ rejection. Call the tool again with the reason after the user provides it.
 ### Quick Reference: Which ID to Use
 
 ```
-[OK]    smartcmp_approve(request_id) <- RES20260505000010
-[OK]    smartcmp_reject(request_id, reason) <- TIC20260502000003 or CHG20260413000011
+[OK]    smartcmp_approve(request_id) <- exact value returned by the pending list
+[OK]    smartcmp_reject(request_id, reason) <- exact value returned by the pending list
 
-[FAIL]  smartcmp_approve(<uuid>) <- internal SmartCMP UUID, not accepted
-[FAIL]  smartcmp_approve(1)      <- display row number; resolve it to request_id first
-[FAIL]  smartcmp_approve(dummy-id-placeholder) <- placeholder, never send to CMP
+[OK]    smartcmp_approve("1")   <- valid when "1" is the exact returned request_id
+[FAIL]  smartcmp_approve(row_index) <- resolve an explicitly selected row first
+[FAIL]  smartcmp_approve(guessed-value) <- invented value, re-list pending approvals
 ```
 
 ## Critical Rules
@@ -477,7 +479,7 @@ rejection. Call the tool again with the reason after the user provides it.
 | Error | Cause | Resolution |
 |-------|-------|------------|
 | `400` + `activity is null` | Used an internal or stale identifier after Request ID resolution | Re-list pending approvals, verify the item is still pending, and retry with `request_id` |
-| `Invalid SmartCMP Request ID(s)` | Used a display row number, UUID-shaped internal ID, or placeholder instead of `_internal.items[].request_id` | Re-list pending approvals and resolve the selected row to its `request_id` field |
+| `Invalid SmartCMP Request ID(s)` | Request ID is blank or exceeds the supported size limit | Re-list pending approvals and use the exact `request_id` field |
 | `401` / Token expired | Selected SmartCMP session expired | Refresh the selected SmartCMP session or credential |
 | `404` / Not found | Invalid or stale Request ID | Verify ID from the latest `smartcmp_list_pending` result |
 | `[ERROR]` output | Various | Report to user immediately; do NOT self-debug |

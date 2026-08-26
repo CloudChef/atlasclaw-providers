@@ -142,10 +142,10 @@ tool_submit_success_contract:
     - "requestId"
   text_labels:
     - "Request ID"
-  note: "Only user-facing SmartCMP Request IDs count as successful submit identifiers. Normalize source aliases to a single user-facing Request ID and never expose UUID-shaped internal identifiers as the submitted Request ID."
+  note: "Only values from SmartCMP user-facing Request ID fields count as successful submit identifiers. Normalize source aliases to one exact value and never substitute the separate internal `id` field."
 tool_status_name: "smartcmp_get_request_status"
 tool_status_read_only: true
-tool_status_description: "Query a submitted SmartCMP request status by user-facing Request ID, e.g. REQ20260501000095, RES20260501000095, TIC20260316000001, or CHG20260413000011. Use only for submitted request status or approval-result questions. For recent-submission follow-ups without an explicit ID, reuse the most recent Request ID from this conversation; if none exists, ask for it. Do NOT pass internal UUIDs, approve, or reject requests."
+tool_status_description: "Query a submitted SmartCMP request status by the exact user-facing Request ID returned by SmartCMP. Request ID format is opaque and may vary. Use only for submitted request status or approval-result questions. For recent-submission follow-ups without an explicit ID, reuse the most recent Request ID from this conversation; if none exists, ask for it. Do not approve or reject requests with this tool."
 tool_status_entrypoint: "scripts/adapter.py:status"
 tool_status_groups:
   - cmp
@@ -167,7 +167,7 @@ tool_status_parameters: |
     "properties": {
       "request_id": {
         "type": "string",
-        "description": "SmartCMP user-facing Request ID returned by submit, e.g. REQ20260501000095, RES20260501000095, TIC20260316000001, or CHG20260413000011. Do not pass internal UUIDs."
+        "description": "Exact opaque SmartCMP user-facing Request ID returned by submit or request lookup."
       }
     },
     "required": ["request_id"]
@@ -536,10 +536,9 @@ by a submit-script spec-count heuristic.
 Use `smartcmp_get_request_status` only for submitted request status or
 approval-result checks. Pass an explicit Request ID when present. For "刚才提交的
 申请", reuse the most recent `smartcmp_submit_request` Request ID in this
-conversation; if none exists, ask for the Request ID. Request IDs are
-user-facing values such as `REQ20260501000095`, `RES20260501000095`,
-`TIC20260316000001`, or `CHG20260413000011`. Never pass UUID-shaped internal
-identifiers to the status tool.
+conversation; if none exists, ask for the Request ID. Treat Request IDs as
+opaque user-facing values: do not require a prefix, character set, or fixed
+length pattern. Use the exact value returned by SmartCMP.
 
 The status script returns structured fields only. Treat the tool output as
 lookup data, not final user-facing text. Explain the result in the current user's message language using

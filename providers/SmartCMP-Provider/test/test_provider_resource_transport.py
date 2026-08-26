@@ -2577,7 +2577,7 @@ def test_request_status_resolves_visible_id_and_normalizes_approval_state():
         user_id="user-a",
         token="session-a",
     )
-    request_id = "RES20260731009993"
+    request_id = "SR-2026/00009993"
     detail_id = "1eeb334e-01c9-4e2b-bf72-b57d5ce2216d"
 
     def handler(request: httpx.Request) -> httpx.Response:

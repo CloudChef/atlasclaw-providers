@@ -7,17 +7,19 @@ Use the five AtlasClaw approval Tools. Their handlers are co-located in
 
 1. Call `smartcmp_list_pending` before approve or reject so the current
    `request_id` is known.
-2. Resolve a displayed row number to the latest list result's `_internal.items[].request_id`.
-3. Never pass a display index, internal UUID, or placeholder as a Request ID.
+2. When the user explicitly selects a displayed row, resolve that row to the
+   latest list result's `_internal.items[].request_id`. A supplied ID that
+   happens to be numeric remains an exact ID, not an implicit row selection.
+3. Treat Request IDs as opaque; never pass a display index or invent a value.
 4. Ask for confirmation before a batch approval or rejection.
 5. Parse `_internal` metadata silently; do not display raw workflow JSON.
 
 ## Request ID contract
 
-`smartcmp_approve` and `smartcmp_reject` accept SmartCMP user-facing Request
-IDs in `request_id`, such as `RES20260505000010`, `TIC20260502000003`, or
-`CHG20260413000011`. SmartCMP Provider resolves those values to the internal
-approval action identifiers.
+`smartcmp_approve` and `smartcmp_reject` accept the exact SmartCMP user-facing
+Request ID returned in `request_id`. The value has no required prefix,
+character set, or fixed-length pattern. SmartCMP Provider resolves it to the
+current internal approval action identifier.
 
 ## Flow
 

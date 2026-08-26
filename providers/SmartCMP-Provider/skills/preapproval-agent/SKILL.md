@@ -84,7 +84,7 @@ tool_analyze_parameters: |
   }
 
 tool_approve_name: "smartcmp_preapproval_approve"
-tool_approve_description: "Approve one or more pending SmartCMP Request IDs for the preapproval agent. Use user-facing IDs such as RES20260505000010, TIC20260502000003, or CHG20260413000011; the shared approval script resolves them to currentActivity.id internally."
+tool_approve_description: "Approve one or more pending SmartCMP Request IDs for the preapproval agent. Use the exact opaque user-facing IDs returned by the pending-approval list; the shared approval script resolves them to currentActivity.id internally."
 tool_approve_entrypoint: "../approval/scripts/adapter.py:approve"
 tool_approve_groups:
   - cmp
@@ -95,15 +95,16 @@ tool_approve_priority: 124
 tool_approve_result_mode: "llm"
 tool_approve_cli_positional:
   - ids
-tool_approve_cli_split:
-  - ids
 tool_approve_parameters: |
   {
     "type": "object",
     "properties": {
       "ids": {
-        "type": "string",
-        "description": "SmartCMP Request ID(s) to approve. For multiple IDs, separate with spaces. Do not pass approval activity UUIDs."
+        "anyOf": [
+          {"type": "string"},
+          {"type": "array", "items": {"type": "string"}}
+        ],
+        "description": "One exact opaque SmartCMP Request ID, or an array of exact IDs for a batch. String contents are never split on whitespace or punctuation."
       },
       "reason": {
         "type": "string",
@@ -114,7 +115,7 @@ tool_approve_parameters: |
   }
 
 tool_reject_name: "smartcmp_preapproval_reject"
-tool_reject_description: "Reject one or more pending SmartCMP Request IDs for the preapproval agent. Use user-facing IDs such as RES20260505000010, TIC20260502000003, or CHG20260413000011; the shared rejection script resolves them to currentActivity.id internally."
+tool_reject_description: "Reject one or more pending SmartCMP Request IDs for the preapproval agent. Use the exact opaque user-facing IDs returned by the pending-approval list; the shared rejection script resolves them to currentActivity.id internally."
 tool_reject_entrypoint: "../approval/scripts/adapter.py:reject"
 tool_reject_groups:
   - cmp
@@ -125,15 +126,16 @@ tool_reject_priority: 126
 tool_reject_result_mode: "llm"
 tool_reject_cli_positional:
   - ids
-tool_reject_cli_split:
-  - ids
 tool_reject_parameters: |
   {
     "type": "object",
     "properties": {
       "ids": {
-        "type": "string",
-        "description": "SmartCMP Request ID(s) to reject. For multiple IDs, separate with spaces. Do not pass approval activity UUIDs."
+        "anyOf": [
+          {"type": "string"},
+          {"type": "array", "items": {"type": "string"}}
+        ],
+        "description": "One exact opaque SmartCMP Request ID, or an array of exact IDs for a batch. String contents are never split on whitespace or punctuation."
       },
       "reason": {
         "type": "string",
@@ -214,7 +216,7 @@ Use this mode only for robot profiles whose `allowed_skills` include `smartcmp:p
 | `provider_instance` | string | Yes | CMP provider instance name (e.g., `cmp-prod`) |
 | `robot_profile` | string | For webhook robot mode | Robot profile configured on the selected provider instance |
 | `agent_identity` | string | Yes | Must be `agent-approver` |
-| `request_id` | string | Yes | SmartCMP Request ID for execution, e.g. `RES20260505000010`, `TIC20260502000003`, or `CHG20260413000011` |
+| `request_id` | string | Yes | Exact opaque SmartCMP Request ID returned by the pending-approval list |
 | `trigger_source` | string | No | Source label (e.g., `cmp-webhook`) |
 | `policy_mode` | string | No | Policy preset (default: `balanced`) |
 

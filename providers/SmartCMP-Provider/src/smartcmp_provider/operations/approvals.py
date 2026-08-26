@@ -147,7 +147,7 @@ async def get_pending_approval_detail(
         The exact pending row.
 
     Raises:
-        SmartCmpValidationError: If the Request ID format is invalid.
+        SmartCmpValidationError: If the Request ID is blank or exceeds the size limit.
         SmartCmpTargetResolutionError: If the row stays absent or is ambiguous.
         SmartCmpError: If a non-retryable upstream read fails.
     """
@@ -315,12 +315,11 @@ def _normalize_distinct_request_ids(values: tuple[str, ...]) -> tuple[str, ...]:
     seen: set[str] = set()
     for value in values:
         request_id = _validated_request_id(value)
-        key = request_id.casefold()
-        if key in seen:
+        if request_id in seen:
             raise SmartCmpValidationError(
                 f"Duplicate SmartCMP Request ID: {request_id}"
             )
-        seen.add(key)
+        seen.add(request_id)
         normalized.append(request_id)
     return tuple(normalized)
 
@@ -332,8 +331,8 @@ def _resolve_pending_item(
     matches: list[dict[str, Any]] = []
     for item in items:
         ids = request_ids_from_item(item)
-        if any(value.casefold() == request_id.casefold() for value in ids):
-            if any(value.casefold() != request_id.casefold() for value in ids):
+        if request_id in ids:
+            if any(value != request_id for value in ids):
                 raise SmartCmpTargetResolutionError(
                     f"Pending approval {request_id} returned conflicting Request IDs."
                 )
@@ -378,8 +377,7 @@ def _resolve_activity_ids(
             "Pending approval item(s) have no current activity ID: "
             + ", ".join(missing_activity)
         )
-    activity_keys = [activity_id.casefold() for activity_id in resolved]
-    if len(set(activity_keys)) != len(activity_keys):
+    if len(set(resolved)) != len(resolved):
         raise SmartCmpTargetResolutionError(
             "Multiple SmartCMP Request IDs resolved to the same current "
             "approval activity."

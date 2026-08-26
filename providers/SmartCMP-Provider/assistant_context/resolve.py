@@ -137,6 +137,7 @@ _OBJECT_PARAMETER_NAMES: dict[str, frozenset[str]] = {
 }
 _ALTERNATE_OBJECT_PARAMETER_NAMES: dict[str, frozenset[str]] = {
     "approval_request": frozenset(("generic_request_id",)),
+    "request": frozenset(("generic_request_id",)),
 }
 
 
@@ -610,9 +611,18 @@ async def _resolve_request(
     *,
     reader: ContextReader,
 ) -> dict[str, Any]:
-    application_type = _exact_application_type(route_parameters.get("application_type"))
-    request_id = exact_uuid(route_parameters.get("request_id"))
-    if not application_type:
+    is_work_order_route = "generic_request_id" in route_parameters
+    application_type = (
+        ""
+        if is_work_order_route
+        else _exact_application_type(route_parameters.get("application_type"))
+    )
+    request_id = exact_uuid(
+        route_parameters.get("generic_request_id")
+        if is_work_order_route
+        else route_parameters.get("request_id")
+    )
+    if not is_work_order_route and not application_type:
         return _failure("invalid_application_type")
     if not request_id:
         return _failure("invalid_request_id")
@@ -623,7 +633,10 @@ async def _resolve_request(
         return _failure("provider_unavailable")
     if not isinstance(request, dict) or exact_uuid(request.get("id")) != request_id:
         return _failure("request_id_mismatch")
-    if text(request.get("type")) != application_type:
+    request_application_type = _exact_application_type(request.get("type"))
+    if not request_application_type:
+        return _failure("invalid_application_type")
+    if application_type and request_application_type != application_type:
         return _failure("application_type_mismatch")
 
     workflow_id = exact_request_id(request.get("workflowId"))
@@ -635,7 +648,7 @@ async def _resolve_request(
         name=text(request.get("name") or request.get("requestName")) or workflow_id,
         state=text(request.get("state")).lower(),
         attributes={
-            "application_type": application_type,
+            "application_type": application_type or request_application_type,
             "catalog_name": text(request.get("catalogName")),
         },
         object_actions=build_request_object_actions(reader.ui_base_url, request),

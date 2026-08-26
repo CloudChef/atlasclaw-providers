@@ -400,5 +400,5 @@ def _extract_items(payload: Any) -> list[dict[str, Any]]:
 
 
 def _matches_identifier(item: dict[str, Any], identifier: str) -> bool:
-    normalized = identifier.strip().lower()
-    return bool(normalized and request_id(item).lower() == normalized)
+    normalized = identifier.strip()
+    return bool(normalized and request_id(item) == normalized)

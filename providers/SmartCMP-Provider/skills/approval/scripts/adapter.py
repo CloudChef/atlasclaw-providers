@@ -15,7 +15,6 @@ from _atlasclaw_adapter import (  # noqa: E402
     RunContext,
     execute_with_request,
     resolve_selected_provider_request,
-    split_values,
     tool_error,
     tool_result,
 )
@@ -229,7 +228,7 @@ async def _decide(
     """Execute one already-confirmed approval decision through SmartCMP Provider."""
 
     try:
-        request_ids = split_values(ids)
+        request_ids = _request_id_values(ids)
         if not request_ids:
             raise ValueError("At least one SmartCMP Request ID is required.")
         normalized_reason = str(reason or "").strip()
@@ -278,3 +277,10 @@ async def _decide(
         return tool_result(result, summary=summary, request=request)
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
+
+
+def _request_id_values(value: str | list[str]) -> tuple[str, ...]:
+    """Preserve each opaque Request ID instead of splitting on its content."""
+
+    values = (value,) if isinstance(value, str) else tuple(value)
+    return tuple(candidate for item in values if (candidate := str(item).strip()))

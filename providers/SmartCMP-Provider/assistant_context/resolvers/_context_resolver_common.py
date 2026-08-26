@@ -15,6 +15,7 @@ from _atlasclaw_adapter import (
     resolve_selected_provider_request,
 )
 from smartcmp_provider.auth.models import ResolvedSmartCmpRequest
+from smartcmp_provider.domain.request_ids import normalize_request_id
 from smartcmp_provider.errors import SmartCmpError
 from smartcmp_provider.operations.context_objects import (
     CATALOG_ENTITY_CLASS,
@@ -103,7 +104,6 @@ class ContextReader(Protocol):
 
 
 _CATALOG_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$")
-_REQUEST_ID = re.compile(r"^[A-Z]{3}\d{14}$")
 
 
 class SmartCmpProviderContextReader:
@@ -283,10 +283,9 @@ def exact_catalog_id(value: str) -> str:
 
 
 def exact_request_id(value: Any) -> str:
-    """Return one user-visible SmartCMP workflow ID or an empty string."""
+    """Return one opaque user-visible SmartCMP workflow ID or an empty string."""
 
-    normalized = str(value or "").strip().upper()
-    return normalized if _REQUEST_ID.fullmatch(normalized) else ""
+    return normalize_request_id(value)
 
 
 def text(value: Any) -> str:

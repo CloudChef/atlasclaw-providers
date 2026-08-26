@@ -165,7 +165,7 @@ def test_batch_approval_maps_complete_cmp_response_by_request_order():
                 json={
                     "content": [
                         {
-                            "workflowId": "RES20260820000019",
+                            "workflowId": "SR-2026/000019",
                             "currentActivity": {"id": "activity-internal-1"},
                         }
                     ]
@@ -194,14 +194,14 @@ def test_batch_approval_maps_complete_cmp_response_by_request_order():
                 client,
                 ApprovalDecisionInput(
                     decision="approve",
-                    request_ids=("RES20260820000019",),
+                    request_ids=("SR-2026/000019",),
                 ),
             )
 
     result = asyncio.run(invoke())
 
     assert result.overall_success is True
-    assert result.items[0].request_id == "RES20260820000019"
+    assert result.items[0].request_id == "SR-2026/000019"
     assert result.items[0].outcome == "succeeded"
     assert result.items[0].status == "completed"
 
@@ -303,8 +303,8 @@ def test_approval_conflicting_visible_ids_fails_before_write():
             json={
                 "content": [
                     {
-                        "workflowId": "RES20260505000010",
-                        "requestId": "TIC20260502000003",
+                        "workflowId": "Case-Sensitive-ID",
+                        "requestId": "case-sensitive-id",
                         "currentActivity": {"id": "activity-internal-1"},
                     }
                 ]
@@ -321,7 +321,7 @@ def test_approval_conflicting_visible_ids_fails_before_write():
                 client,
                 ApprovalDecisionInput(
                     decision="approve",
-                    request_ids=("RES20260505000010",),
+                    request_ids=("Case-Sensitive-ID",),
                 ),
             )
 

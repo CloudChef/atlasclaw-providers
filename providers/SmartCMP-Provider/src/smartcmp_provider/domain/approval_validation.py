@@ -5,26 +5,19 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
+
+from smartcmp_provider.domain.request_ids import (
+    MAX_REQUEST_ID_LENGTH,
+    is_request_id,
+    normalize_request_id,
+)
 
 
 APPROVAL_ID_FORMAT_HINT = (
-    "Use the SmartCMP user-facing Request ID, such as RES20260505000010 or "
-    "TIC20260502000003 or CHG20260413000011."
+    "Use the exact SmartCMP user-facing Request ID shown in the request or "
+    "approval queue. Request IDs are treated as opaque values."
 )
-
-_PLACEHOLDER_MARKERS = (
-    "dummy",
-    "placeholder",
-    "example",
-    "sample",
-    "todo",
-    "xxx",
-    "<",
-    ">",
-)
-_REQUEST_ID_PATTERN = re.compile(r"^[A-Z]{3}\d{14}$", re.IGNORECASE)
 REQUEST_ID_FIELD_NAMES = (
     "requestId",
     "request_id",
@@ -34,17 +27,6 @@ REQUEST_ID_FIELD_NAMES = (
     "requestNumber",
     "customizedId",
 )
-
-
-def is_request_id(identifier: str) -> bool:
-    """Return whether the identifier is a SmartCMP user-facing Request ID."""
-    return bool(_REQUEST_ID_PATTERN.fullmatch(identifier.strip()))
-
-
-def normalize_request_id(value: object) -> str:
-    """Return a normalized SmartCMP Request ID or blank for non-request values."""
-    candidate = str(value or "").strip()
-    return candidate if is_request_id(candidate) else ""
 
 
 def request_id_from_mapping(mapping: object) -> str:
@@ -106,28 +88,24 @@ def request_ids_from_item(item: object) -> tuple[str, ...]:
     distinct: list[str] = []
     seen: set[str] = set()
     for candidate in candidates:
-        key = candidate.casefold()
-        if key in seen:
+        if candidate in seen:
             continue
-        seen.add(key)
+        seen.add(candidate)
         distinct.append(candidate)
     return tuple(distinct)
 
 
 def invalid_approval_id_reason(approval_id: str) -> str | None:
-    """Return why an approval action ID is unsafe, or None when it can be sent."""
-    value = approval_id.strip()
-    if not value:
+    """Reject only missing or oversized IDs before exact pending-row resolution."""
+
+    raw_value = str(approval_id or "").strip()
+    if not raw_value:
         return "blank values are not SmartCMP Request IDs"
-    if value.isdigit():
-        return "display row numbers must be resolved to a SmartCMP Request ID before approval"
-    if any(marker in value.lower() for marker in _PLACEHOLDER_MARKERS):
-        return "placeholder values are not valid approval identifiers"
-    if is_request_id(value):
+    if normalize_request_id(raw_value):
         return None
     return (
-        "expected a SmartCMP Request ID like RES20260505000010, "
-        "TIC20260502000003, or CHG20260413000011"
+        "SmartCMP Request IDs must not exceed "
+        f"{MAX_REQUEST_ID_LENGTH} characters"
     )
 
 

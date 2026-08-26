@@ -138,6 +138,18 @@
       }
     },
     {
+      "id": "work-order-application-detail",
+      "priority": 400,
+      "match": {
+        "path_template": "/main/work-order-process/ServiceRequest/myApplication/{generic_request_id}"
+      },
+      "result": {
+        "page_type": "request-detail",
+        "object_type": "request",
+        "skill_ref": "smartcmp:request"
+      }
+    },
+    {
       "id": "catalog-request",
       "priority": 300,
       "match": {"path_template": "/main/catalog-ui/request/{catalog_id}"},

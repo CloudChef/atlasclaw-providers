@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any
 from urllib.parse import quote
 
+from smartcmp_provider.domain.request_ids import is_request_id
 from smartcmp_provider.errors import (
     SmartCmpError,
     SmartCmpTargetResolutionError,
@@ -35,7 +36,6 @@ from smartcmp_provider.operations.catalogs import (
 from smartcmp_provider.transport.client import SmartCmpClient
 from smartcmp_provider.transport.mutations import write_result_is_unknown
 
-_REQUEST_ID_PATTERN = re.compile(r"^[A-Z]{3}\d{14}$", re.IGNORECASE)
 _UUID_PATTERN = re.compile(
     r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
     re.IGNORECASE,
@@ -472,13 +472,13 @@ async def get_request_status(
 
     Args:
         client: Request-scoped SmartCMP client.
-        query: User-visible REQ/RES/TIC/CHG-style Request ID.
+        query: Exact user-visible Request ID returned by SmartCMP.
 
     Returns:
         Full SmartCMP request detail and normalized status facts.
 
     Raises:
-        SmartCmpValidationError: If the Request ID format is invalid.
+        SmartCmpValidationError: If the Request ID is blank or exceeds the size limit.
         SmartCmpTargetResolutionError: If no exact visible request is resolved
             or the matched detail cannot be loaded.
     """
@@ -557,7 +557,7 @@ async def get_request_status(
             trace_id=client.request.context.trace_id,
         )
     if any(
-        candidate.casefold() != request_id.casefold()
+        candidate != request_id
         for candidate in detail_request_ids
     ):
         raise SmartCmpTargetResolutionError(
@@ -572,9 +572,9 @@ async def get_request_status(
 
 
 def is_user_facing_request_id(value: Any) -> bool:
-    """Return whether a value matches the established visible Request ID form."""
+    """Return whether a value is a bounded, non-empty visible Request ID."""
 
-    return bool(_REQUEST_ID_PATTERN.fullmatch(_normalize_value(value)))
+    return is_request_id(value)
 
 
 def classify_request_status(state: Any) -> tuple[str, bool | None]:
@@ -1230,9 +1230,8 @@ def _extract_items(payload: Any) -> list[dict[str, Any]]:
 
 
 def _matches_request_id(item: dict[str, Any], request_id: str) -> bool:
-    normalized = request_id.lower()
     return any(
-        _normalize_value(item.get(field)).lower() == normalized
+        _normalize_value(item.get(field)) == request_id
         for field in _MATCH_FIELDS
     )
 
