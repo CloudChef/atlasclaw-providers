@@ -65,7 +65,7 @@ tool_list_parameters: |
       "category": {"type": "string", "default": "COST-OPTIMIZATION"},
       "query": {"type": "string"},
       "page": {"type": "integer", "default": 0, "minimum": 0},
-      "size": {"type": "integer", "default": 20, "minimum": 1},
+      "size": {"type": "integer", "default": 20, "minimum": 1, "maximum": 50},
       "with_related_policies": {"type": "boolean", "default": false}
     }
   }

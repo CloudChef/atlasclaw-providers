@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from smartcmp_provider.models.object_operations import AvailableOperation
 
 ResourceScope = Literal["all_resources", "virtual_machines"]
+RESOURCE_LIST_PAGE_SIZE_MAX = 100
 RECYCLE_BIN_PAGE_SIZE_MAX = 100
 
 
@@ -19,8 +20,13 @@ class ResourceListQuery(BaseModel):
 
     scope: ResourceScope = "all_resources"
     query_value: str = ""
-    page: int = Field(default=1, ge=1)
-    size: int = Field(default=20, ge=1)
+    page: int = Field(default=1, ge=1, strict=True)
+    size: int = Field(
+        default=20,
+        ge=1,
+        le=RESOURCE_LIST_PAGE_SIZE_MAX,
+        strict=True,
+    )
 
 
 class ResourceListResult(BaseModel):
@@ -50,8 +56,13 @@ class RecycledResourceQuery(RecycleBinLocator):
     the current credential's recycle bin before a destructive operation.
     """
 
-    page: int = Field(default=1, ge=1)
-    size: int = Field(default=20, ge=1, le=RECYCLE_BIN_PAGE_SIZE_MAX)
+    page: int = Field(default=1, ge=1, strict=True)
+    size: int = Field(
+        default=20,
+        ge=1,
+        le=RECYCLE_BIN_PAGE_SIZE_MAX,
+        strict=True,
+    )
 
 
 class RecycledResourceListResult(BaseModel):

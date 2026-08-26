@@ -150,12 +150,15 @@ tool_list_parameters: |
       "page": {
         "type": "integer",
         "description": "Page number. Default: 1.",
-        "default": 1
+        "default": 1,
+        "minimum": 1
       },
       "size": {
         "type": "integer",
         "description": "Page size. Default: 20.",
-        "default": 20
+        "default": 20,
+        "minimum": 1,
+        "maximum": 50
       }
     }
   }
@@ -269,7 +272,7 @@ tool_recycle_list_parameters:
     deployment_id: {type: string, description: "Exact recycle-bin deployment ID; use only one locator."}
     deployment_name: {type: string, description: "Exact recycle-bin deployment name; use only one locator."}
     page: {type: integer, description: "One-based deployment page.", default: 1, minimum: 1}
-    size: {type: integer, description: "Deployment page size.", default: 20, minimum: 1, maximum: 100}
+    size: {type: integer, description: "Deployment page size. The recycle workflow uses a smaller maximum because every deployment can expand to multiple exact resource IDs.", default: 20, minimum: 1, maximum: 20}
 
 tool_recycle_purge_name: "smartcmp_permanently_remove_recycled_resource"
 tool_recycle_purge_description: "Permanently remove one recycle-bin deployment. Requires exactly one resource/deployment locator, explicit confirmation, and the deployment/resource scope returned by a fresh recycle-bin read. A successful response means submitted, not completed."

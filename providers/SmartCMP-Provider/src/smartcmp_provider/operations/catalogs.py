@@ -22,6 +22,7 @@ from smartcmp_provider.models.catalogs import (
     CatalogListResult,
     FacetQuery,
     FlavorQuery,
+    ImageListResult,
     ImageQuery,
     LogicalTemplateQuery,
     PhysicalTemplateQuery,
@@ -82,6 +83,26 @@ _COMPUTE_DIRECT_FIELD_TYPES = {
 _NETWORK_METADATA_KEYS = ("VpcId", "NetworkId", "vpcId", "networkId")
 _ZONE_METADATA_KEYS = ("Zone", "zoneId", "availabilityZone")
 _RESOURCE_BUNDLE_RESULT_KEYS = ("id", "name", "cloudEntryTypeId")
+_FLAVOR_RESULT_KEYS = (
+    "id",
+    "name",
+    "nameZh",
+    "description",
+    "cpu",
+    "cpus",
+    "cpuNumber",
+    "memory",
+    "memoryMB",
+    "memoryMb",
+)
+_LOGICAL_TEMPLATE_RESULT_KEYS = (
+    "id",
+    "name",
+    "nameZh",
+    "description",
+    "osType",
+    "type",
+)
 
 
 def _normalize_catalog_summary(
@@ -121,6 +142,15 @@ def _project_resource_bundle(resource_bundle: dict[str, Any]) -> dict[str, Any]:
         for key in _RESOURCE_BUNDLE_RESULT_KEYS
         if key in resource_bundle
     }
+
+
+def _project_list_fields(
+    item: dict[str, Any],
+    fields: tuple[str, ...],
+) -> dict[str, Any]:
+    """Copy bounded request-choice fields while preserving false and zero values."""
+
+    return {field: item[field] for field in fields if field in item}
 
 
 async def list_catalogs(
@@ -2012,7 +2042,10 @@ async def list_flavors(
                     ),
                 }
             )
-        return CatalogItemsResult(items=tuple(normalized))
+        start = (query.page - 1) * query.size
+        return CatalogItemsResult(
+            items=tuple(normalized[start : start + query.size])
+        )
 
     payload = await client.request_json(
         "GET",
@@ -2042,7 +2075,12 @@ async def list_flavors(
             "Flavor query returned a non-object item.",
             trace_id=client.request.context.trace_id,
         )
-    return CatalogItemsResult(items=tuple(rows))
+    return CatalogItemsResult(
+        items=tuple(
+            _project_list_fields(item, _FLAVOR_RESULT_KEYS)
+            for item in rows
+        )
+    )
 
 
 async def list_logical_templates(
@@ -2068,7 +2106,12 @@ async def list_logical_templates(
         "Logical-template query",
         client,
     )
-    return CatalogItemsResult(items=tuple(rows))
+    return CatalogItemsResult(
+        items=tuple(
+            _project_list_fields(item, _LOGICAL_TEMPLATE_RESULT_KEYS)
+            for item in rows
+        )
+    )
 
 
 async def list_physical_templates(
@@ -2125,7 +2168,7 @@ async def list_physical_templates(
 async def list_images(
     client: SmartCmpClient,
     query: ImageQuery,
-) -> CatalogItemsResult:
+) -> ImageListResult:
     """List VM images for a selected resource pool and logical template.
 
     Raises:
@@ -2155,11 +2198,36 @@ async def list_images(
         },
     )
     rows = _require_direct_object_list(payload, "Image query", client)
-    return CatalogItemsResult(
-        items=tuple(
-            normalize_image(item, index)
-            for index, item in enumerate(rows, start=1)
-        )
+    normalized = [
+        normalize_image(item, index)
+        for index, item in enumerate(rows, start=1)
+    ]
+    query_value = query.query_value.strip().casefold()
+    if query_value:
+        normalized = [
+            item
+            for item in normalized
+            if query_value
+            in " ".join(
+                str(item.get(field) or "") for field in ("id", "name")
+            ).casefold()
+        ]
+    start = (query.page - 1) * query.size
+    selected = normalized[start : start + query.size]
+    items = tuple(
+        {**item, "index": index}
+        for index, item in enumerate(selected, start=1)
+    )
+    total = len(normalized)
+    has_more = start + len(items) < total
+    return ImageListResult(
+        items=items,
+        total=total,
+        page=query.page,
+        size=query.size,
+        has_more=has_more,
+        next_page=query.page + 1 if has_more else None,
+        source_truncated=len(rows) >= 500,
     )
 
 

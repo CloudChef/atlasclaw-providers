@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from smartcmp_provider.models.object_operations import AvailableOperation
+
+ALARM_LIST_PAGE_SIZE_MAX = 100
 
 
 class AlarmListQuery(BaseModel):
@@ -16,9 +18,35 @@ class AlarmListQuery(BaseModel):
 
     filters: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("filters")
+    @classmethod
+    def validate_page_size(cls, value: dict[str, Any]) -> dict[str, Any]:
+        """Reject coercible or unbounded pagination in the generic filter map."""
+
+        for field, maximum in (
+            ("page", None),
+            ("size", ALARM_LIST_PAGE_SIZE_MAX),
+        ):
+            if field not in value:
+                continue
+            field_value = value[field]
+            if isinstance(field_value, bool) or not isinstance(field_value, int):
+                raise ValueError(f"Alarm list {field} must be an integer.")
+            if field_value < 1 or (
+                maximum is not None and field_value > maximum
+            ):
+                if maximum is None:
+                    raise ValueError(
+                        f"Alarm list {field} must be 1 or greater."
+                    )
+                raise ValueError(
+                    f"Alarm list {field} must be between 1 and {maximum}."
+                )
+        return value
+
 
 class AlarmListResult(BaseModel):
-    """Return raw alert facts and optional pagination total."""
+    """Return compact alert facts and optional pagination total."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -39,7 +67,12 @@ class ResourceAlertListQuery(BaseModel):
     resource_name: str = ""
     scope: Literal["current", "current_and_recent"] = "current_and_recent"
     days: int = Field(default=7, ge=1)
-    size: int = Field(default=20, ge=1)
+    size: int = Field(
+        default=20,
+        ge=1,
+        le=ALARM_LIST_PAGE_SIZE_MAX,
+        strict=True,
+    )
     level: int | None = None
     alarm_type: str = ""
     alarm_categories: tuple[str, ...] = ()

@@ -21,9 +21,11 @@ from _atlasclaw_adapter import (  # noqa: E402
     RunContext,
     execute,
     execute_with_request,
+    list_workflow_internal,
     split_values,
     tool_error,
     tool_result,
+    validate_list_page_size,
 )
 from _resource_object_actions import attach_resource_object_metadata  # noqa: E402
 from _security_object_actions import (  # noqa: E402
@@ -74,6 +76,7 @@ async def list_all_resource(
     """List SmartCMP resources in the requested standalone browsing scope."""
 
     try:
+        size = validate_list_page_size(size)
         result, request = await execute_with_request(
             ctx,
             list_resources,
@@ -98,6 +101,7 @@ async def list_all_resource(
                         category=category,
                         include_detail_action=True,
                         include_operations_action=True,
+                        compact_prompts=True,
                     )
                     for item in result.items
                 )
@@ -106,6 +110,20 @@ async def list_all_resource(
         return tool_result(
             result,
             summary=f"Found {result.total or len(result.items)} resources.",
+            internal=list_workflow_internal(
+                result.items,
+                fields=("id", "name"),
+                total=result.total,
+                extra={
+                    "category": category,
+                    "pagination": {
+                        "page": page,
+                        "size": size,
+                        "scope": scope,
+                        "query_value": query_value,
+                    },
+                },
+            ),
             request=request,
         )
     except (ValueError, RuntimeError) as error:
@@ -165,6 +183,7 @@ async def list_recycled_resources(
     """
 
     try:
+        size = validate_list_page_size(size, maximum=20)
         result, request = await execute_with_request(
             ctx,
             list_recycled_resources_operation,
@@ -181,7 +200,17 @@ async def list_recycled_resources(
         return tool_result(
             projection,
             summary=f"Found {len(result.items)} recycled resource rows.",
-            internal=_recycled_resource_workflow_projection(projection),
+            internal=_recycled_resource_workflow_projection(
+                projection,
+                query={
+                    "resource_id": resource_id or "",
+                    "resource_name": resource_name or "",
+                    "deployment_id": deployment_id or "",
+                    "deployment_name": deployment_name or "",
+                    "page": page,
+                    "size": size,
+                },
+            ),
             request=request,
         )
     except (ValueError, RuntimeError) as error:
@@ -191,10 +220,31 @@ async def list_recycled_resources(
 def _recycled_resource_agent_projection(result: Any) -> dict[str, Any]:
     """Expose only the dedicated recycle-bin operation in Agent result shape."""
 
-    projection = result.model_dump(mode="json")
-    for item in projection["items"]:
+    source = result.model_dump(mode="json")
+    projection = {
+        "items": [],
+        "total": source.get("total", 0),
+        "page": source.get("page", 1),
+        "size": source.get("size", 20),
+    }
+    for source_item in source.get("items", []):
+        item = {
+            key: source_item[key]
+            for key in (
+                "resource_id",
+                "resource_name",
+                "resource_type",
+                "component_type",
+                "status",
+                "deployment_id",
+                "deployment_name",
+                "owning_deployment",
+                "affected_scope",
+            )
+            if key in source_item
+        }
         operations: list[dict[str, Any]] = []
-        for operation in item.get("available_operations", []):
+        for operation in source_item.get("available_operations", []):
             operation_id = str(operation.get("operation_id") or "").strip()
             if operation_id != "permanently_delete_deployment":
                 continue
@@ -208,11 +258,14 @@ def _recycled_resource_agent_projection(result: Any) -> dict[str, Any]:
                 }
             )
         item["operations"] = operations
+        projection["items"].append(item)
     return projection
 
 
 def _recycled_resource_workflow_projection(
     projection: dict[str, Any],
+    *,
+    query: dict[str, Any],
 ) -> dict[str, Any]:
     """Retain exact permanent-removal scope without replaying full resource payloads.
 
@@ -223,44 +276,53 @@ def _recycled_resource_workflow_projection(
     """
 
     workflow_items: list[dict[str, Any]] = []
+    deployment_scopes: dict[str, dict[str, Any]] = {}
+    deployment_refs: dict[str, str] = {}
     for item in projection.get("items", []) or []:
         if not isinstance(item, dict):
             continue
-        workflow_item = {
-            key: item[key]
-            for key in (
-                "resource_id",
-                "resource_name",
-                "resource_type",
-                "status",
-                "deployment_id",
-                "deployment_name",
-                "operations",
-            )
-            if key in item
-        }
-        owning_deployment = item.get("owning_deployment")
-        if isinstance(owning_deployment, dict):
-            workflow_item["owning_deployment"] = {
-                key: owning_deployment[key]
-                for key in (
-                    "id",
-                    "name",
-                    "state",
-                    "deleted",
-                    "recycled",
-                    "recycle_delete_time",
-                )
-                if key in owning_deployment
+        deployment_id = str(item.get("deployment_id") or "").strip()
+        scope_ref = deployment_refs.setdefault(
+            deployment_id,
+            str(len(deployment_refs) + 1),
+        )
+        workflow_items.append(
+            {
+                "id": item.get("resource_id"),
+                "name": item.get("resource_name"),
+                "scope_ref": scope_ref,
             }
-        workflow_items.append(workflow_item)
+        )
+        if not deployment_id or scope_ref in deployment_scopes:
+            continue
+        affected_scope = item.get("affected_scope")
+        resource_ids = (
+            affected_scope.get("resource_ids")
+            if isinstance(affected_scope, dict)
+            else ()
+        )
+        deployment_scopes[scope_ref] = {
+            "deployment_id": deployment_id,
+            "resource_ids": list(resource_ids or ()),
+            "action_id": next(
+                (
+                    operation.get("id")
+                    for operation in item.get("operations", [])
+                    if isinstance(operation, dict) and operation.get("id")
+                ),
+                "",
+            ),
+        }
 
-    return {
-        "items": workflow_items,
-        "total": projection.get("total", 0),
-        "page": projection.get("page", 1),
-        "size": projection.get("size", 20),
-    }
+    return list_workflow_internal(
+        workflow_items,
+        fields=("id", "name", "scope_ref"),
+        total=projection.get("total", 0),
+        extra={
+            "pagination": dict(query),
+            "deployment_scopes": deployment_scopes,
+        },
+    )
 
 
 async def permanently_remove_recycled_resource(
@@ -403,10 +465,46 @@ async def list_resource_security_violations(
         return tool_result(
             payload,
             summary=_resource_security_summary(payload),
+            internal=list_workflow_internal(
+                _security_violation_workflow_items(payload.get("items", [])),
+                fields=("id", "name"),
+                total=payload.get("matched_total"),
+                extra={
+                    "resource_id": selected_resource_id,
+                    "scan_context": {
+                        key: payload.get(key)
+                        for key in (
+                            "total",
+                            "matched_total",
+                            "scanned_pages",
+                            "has_more",
+                            "next_page",
+                            "coverage",
+                            "truncated",
+                            "errors",
+                        )
+                    },
+                    "max_pages": max_pages,
+                },
+            ),
             request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
+
+
+def _security_violation_workflow_items(
+    items: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    """Keep exact violation identities for resource-scoped analysis."""
+
+    return [
+        {
+            "id": str(item.get("id") or item.get("violationId") or "").strip(),
+            "name": str(item.get("policyName") or "").strip(),
+        }
+        for item in items
+    ]
 
 
 def _resource_security_summary(payload: dict[str, Any]) -> str:

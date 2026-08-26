@@ -16,10 +16,12 @@ from _atlasclaw_adapter import (  # noqa: E402
     RunContext,
     execute,
     execute_with_request,
+    list_workflow_internal,
     resolve_selected_provider_request,
     split_values,
     tool_error,
     tool_result,
+    validate_list_page_size,
 )
 from _alarm_object_actions import attach_alert_object_metadata  # noqa: E402
 from smartcmp_provider.domain.alarms import build_list_params  # noqa: E402
@@ -75,6 +77,7 @@ async def list_alerts(
     """List general alerts or exact-resource lifecycle evidence."""
 
     try:
+        size = validate_list_page_size(size)
         resource_mode = bool(
             resource_id or resource_name or resource_index is not None
         )
@@ -120,6 +123,28 @@ async def list_alerts(
                     f"association coverage is "
                     f"{result.coverage.association_status}."
                 ),
+                internal=list_workflow_internal(
+                    projected.items,
+                    fields=("id", "name"),
+                    extra={
+                        "coverage": result.coverage.model_dump(
+                            mode="json",
+                            by_alias=True,
+                        ),
+                        "query": {
+                            "resource_id": resolved_id,
+                            "resource_name": resolved_name,
+                            "resource_alert_scope": resource_alert_scope,
+                            "days": days,
+                            "size": size,
+                            "level": level,
+                            "alarm_type": alarm_type,
+                            "alarm_categories": list(
+                                split_values(alarm_category)
+                            ),
+                        },
+                    },
+                ),
                 request=request,
             )
         filters = build_list_params(
@@ -157,6 +182,18 @@ async def list_alerts(
         return tool_result(
             projected,
             summary=f"Found {result.total or len(result.items)} alerts.",
+            internal=list_workflow_internal(
+                projected.items,
+                fields=("id", "name"),
+                total=result.total,
+                extra={
+                    "pagination": {
+                        "page": page,
+                        "size": size,
+                        "filters": filters,
+                    }
+                },
+            ),
             request=request,
         )
     except (ValueError, RuntimeError) as error:

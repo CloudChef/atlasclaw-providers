@@ -46,9 +46,9 @@ class SecurityViolationListQuery(BaseModel):
     status: str = "ACTIVED"
     severities: tuple[str, ...] = ()
     query_value: str = ""
-    page: int = Field(default=1, ge=1)
-    size: int = Field(default=20, ge=1, le=100)
-    max_pages: int = Field(default=1, ge=1, le=50)
+    page: int = Field(default=1, ge=1, strict=True)
+    size: int = Field(default=20, ge=1, le=100, strict=True)
+    max_pages: int = Field(default=1, ge=1, le=50, strict=True)
 
 
 class SecurityViolationListResult(BaseModel):
@@ -135,7 +135,7 @@ class ResourceSecurityViolationQuery(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     resource_id: str = Field(min_length=1)
-    max_pages: int = Field(default=50, ge=1, le=50)
+    max_pages: int = Field(default=50, ge=1, le=50, strict=True)
 
 
 class ResourceSecurityViolationResult(BaseModel):

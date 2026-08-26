@@ -14,6 +14,7 @@ if str(_SHARED_SCRIPTS) not in sys.path:
 from _atlasclaw_adapter import (  # noqa: E402
     RunContext,
     execute_with_request,
+    list_workflow_internal,
     resolve_selected_provider_request,
     tool_error,
     tool_result,
@@ -73,6 +74,11 @@ async def list_pending(
         return tool_result(
             payload,
             summary=_format_pending_output(items, total=result.total),
+            internal=list_workflow_internal(
+                items,
+                fields=("request_id", "name", "applicant"),
+                total=result.total,
+            ),
             request=request,
         )
     except (ValueError, RuntimeError) as error:

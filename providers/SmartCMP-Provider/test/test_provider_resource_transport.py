@@ -47,6 +47,7 @@ try:
         CatalogListQuery,
         FlavorQuery,
         ImageQuery,
+        LogicalTemplateQuery,
         ResourceBundleQuery,
     )
     from smartcmp_provider.models.requests import (
@@ -75,6 +76,7 @@ try:
         list_catalogs,
         list_flavors,
         list_images,
+        list_logical_templates,
         list_resource_bundles,
     )
     from smartcmp_provider.operations.requests import (
@@ -954,6 +956,65 @@ def test_image_query_uses_cmp_cloud_family_resource_type(
     assert len(submitted_payloads) == 1
     assert submitted_payloads[0]["cloudResourceType"] == expected_resource_type
     assert result.items[0]["templateId"] == "request-template-id"
+
+
+def test_image_query_filters_and_pages_the_normalized_inventory() -> None:
+    """Return a bounded local page without exposing all upstream image rows."""
+
+    request_scope = make_request(
+        instance_name="cmp-a",
+        base_url="https://cmp.example",
+        user_id="user-a",
+        token="session-a",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "id": f"image-{index:03d}",
+                    "name": (
+                        f"Ubuntu 24 image {index:03d}"
+                        if index < 75
+                        else f"Windows image {index:03d}"
+                    ),
+                }
+                for index in range(120)
+            ],
+            request=request,
+        )
+
+    async def invoke():
+        async with SmartCmpClient(
+            request_scope,
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            return await list_images(
+                client,
+                ImageQuery(
+                    resource_bundle_id="resource-bundle-1",
+                    logic_template_id="logical-template-1",
+                    cloud_entry_type="yacmp:cloudentry:type:vsphere",
+                    query_value="ubuntu",
+                    page=2,
+                    size=50,
+                ),
+            )
+
+    result = asyncio.run(invoke())
+
+    assert result.total == 75
+    assert len(result.items) == 25
+    assert result.items[0] == {
+        "index": 1,
+        "id": "image-050",
+        "templateId": "image-050",
+        "name": "Ubuntu 24 image 050",
+    }
+    assert result.has_more is False
+    assert result.next_page is None
+    assert result.source_truncated is False
 
 
 def test_resource_bundle_list_returns_request_identity_only() -> None:
@@ -1865,6 +1926,68 @@ def test_cloud_flavor_query_returns_the_request_flavor_id() -> None:
 
     assert result.items == (
         {"id": "S6.MEDIUM2", "name": "InstanceFamily:S6 CPU:2 Memory:2"},
+    )
+
+
+def test_flavor_and_logical_template_lists_drop_large_definition_fields() -> None:
+    """Expose request choices without replaying their full SmartCMP definitions."""
+
+    request_scope = make_request(
+        instance_name="cmp-a",
+        base_url="https://cmp.example",
+        user_id="user-a",
+        token="session-a",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/flavors/provision"):
+            return httpx.Response(
+                200,
+                json={
+                    "content": [
+                        {
+                            "id": "profile-1",
+                            "name": "2C4G",
+                            "cpu": 2,
+                            "memoryMB": 4096,
+                            "properties": {"unused": "x" * 20_000},
+                        }
+                    ]
+                },
+                request=request,
+            )
+        if request.url.path.endswith("/logic-templates/search"):
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "id": "logical-1",
+                        "name": "Ubuntu 24.04",
+                        "osType": "Linux",
+                        "templateDefinition": "x" * 20_000,
+                    }
+                ],
+                request=request,
+            )
+        raise AssertionError(f"Unexpected request: {request.url}")
+
+    async def invoke():
+        async with SmartCmpClient(
+            request_scope,
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            return (
+                await list_flavors(client, FlavorQuery()),
+                await list_logical_templates(client, LogicalTemplateQuery()),
+            )
+
+    flavors, templates = asyncio.run(invoke())
+
+    assert flavors.items == (
+        {"id": "profile-1", "name": "2C4G", "cpu": 2, "memoryMB": 4096},
+    )
+    assert templates.items == (
+        {"id": "logical-1", "name": "Ubuntu 24.04", "osType": "Linux"},
     )
 
 

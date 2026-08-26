@@ -36,13 +36,43 @@ from smartcmp_provider.transport.client import SmartCmpClient
 from smartcmp_provider.transport.mutations import write_result_is_unknown
 
 OPERATE_ALERT_CAPABILITY = capability_by_id("smartcmp.alarms.operate")
+_ALARM_LIST_FIELDS = (
+    "id",
+    "name",
+    "policyName",
+    "alarmPolicyId",
+    "alarmPolicyName",
+    "description",
+    "status",
+    "level",
+    "severity",
+    "alarmType",
+    "alarmCategory",
+    "category",
+    "targetEntityId",
+    "entityInstanceId",
+    "entityInstanceName",
+    "nodeInstanceId",
+    "deploymentId",
+    "deploymentName",
+    "resourceExternalId",
+    "resourceExternalName",
+    "triggerAt",
+    "triggerTime",
+    "lastTriggerAt",
+    "resolveAt",
+    "muteAt",
+    "subject",
+    "createdDate",
+    "updatedDate",
+)
 
 
 async def list_alarms(
     client: SmartCmpClient,
     query: AlarmListQuery,
 ) -> AlarmListResult:
-    """List raw SmartCMP alert facts using existing filter semantics."""
+    """List compact SmartCMP alert facts using existing filter semantics."""
 
     encoded_filters = urlencode(dict(query.filters), doseq=True)
     path = (
@@ -51,7 +81,10 @@ async def list_alarms(
         else "/alarm-alert?query"
     )
     payload = await client.request_json("GET", path)
-    items = tuple(_attach_available_operations(item) for item in _extract_items(payload))
+    items = tuple(
+        _attach_available_operations(_project_alarm_summary(item))
+        for item in _extract_items(payload)
+    )
     return AlarmListResult(
         items=items,
         total=_extract_total(payload),
@@ -59,13 +92,23 @@ async def list_alarms(
 
 
 def _attach_available_operations(item: dict[str, Any]) -> dict[str, Any]:
-    """Attach neutral state-valid operations to one raw alert result."""
+    """Attach neutral state-valid operations to one compact alert result."""
 
     enriched = dict(item)
     enriched["available_operations"] = serialize_available_operations(
         available_alert_operations(enriched)
     )
     return enriched
+
+
+def _project_alarm_summary(item: dict[str, Any]) -> dict[str, Any]:
+    """Keep alert identity, lifecycle, target association, and display fields."""
+
+    return {
+        field: item[field]
+        for field in _ALARM_LIST_FIELDS
+        if field in item
+    }
 
 
 async def get_alarm_analysis_facts(

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
@@ -36,6 +36,8 @@ from smartcmp_provider.transport.client import SmartCmpClient  # noqa: E402
 
 
 ResultT = TypeVar("ResultT")
+ATLASCLAW_LIST_PAGE_SIZE_MAX = 50
+LIST_WORKFLOW_INTERNAL_MAX_CHARS = 10_000
 
 
 class AtlasClawAdapterError(RuntimeError):
@@ -179,11 +181,11 @@ def tool_result(
 ) -> dict[str, Any]:
     """Convert one typed Provider result into the AtlasClaw Tool result contract.
 
-    The complete structured payload is retained both as ordinary result fields
-    and compact ``_internal`` workflow metadata. The visible output intentionally
-    stays presentation-only and does not reimplement SmartCMP domain rules. When
-    supplied, ``request`` binds the internal metadata to the selected Provider
-    instance and request trace without changing the public Provider result.
+    The structured payload remains available as ordinary result fields. Callers
+    that return collections should supply compact ``_internal`` continuation
+    metadata instead of duplicating presentation details and object prompts.
+    When supplied, ``request`` binds the internal metadata to the selected
+    Provider instance and request trace without changing the public result.
     """
 
     payload = _strip_mcp_available_operations(_json_value(value))
@@ -208,6 +210,79 @@ def tool_result(
         ),
         **structured,
     }
+
+
+def list_workflow_internal(
+    items: Iterable[Mapping[str, Any]],
+    *,
+    fields: tuple[str, ...],
+    total: int | None = None,
+    extra: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build minimal trace-bound metadata for a numbered list continuation.
+
+    Args:
+        items: Compact public rows in their displayed order.
+        fields: Exact fields needed to resolve a later selection or action.
+        total: Optional upstream total for pagination context.
+        extra: Optional small list-level workflow metadata.
+
+    Returns:
+        JSON-compatible metadata without presentation actions or large evidence.
+    """
+
+    projected_items: list[dict[str, Any]] = []
+    for displayed_index, item in enumerate(items, start=1):
+        projected = {
+            field: item[field]
+            for field in fields
+            if field in item
+        }
+        projected.setdefault("index", displayed_index)
+        projected_items.append(projected)
+    internal: dict[str, Any] = {"items": projected_items}
+    if total is not None:
+        internal["total"] = total
+    if extra:
+        internal.update(dict(extra))
+    serialized = json.dumps(
+        internal,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    if len(serialized) > LIST_WORKFLOW_INTERNAL_MAX_CHARS:
+        raise AtlasClawAdapterError(
+            "List workflow metadata is too large for reliable follow-up selection; "
+            "use a smaller page size or a narrower query."
+        )
+    return internal
+
+
+def validate_list_page_size(
+    value: Any,
+    *,
+    maximum: int = ATLASCLAW_LIST_PAGE_SIZE_MAX,
+) -> int:
+    """Validate one AtlasClaw list page size against its workflow budget.
+
+    Args:
+        value: Page-size value received at the Tool boundary.
+        maximum: Maximum rows whose continuation metadata is supported.
+
+    Returns:
+        The validated integer page size.
+
+    Raises:
+        AtlasClawAdapterError: If the value is not an integer within bounds.
+    """
+
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise AtlasClawAdapterError("List page size must be an integer.")
+    if not 1 <= value <= maximum:
+        raise AtlasClawAdapterError(
+            f"List page size must be between 1 and {maximum}."
+        )
+    return value
 
 
 def workflow_identity(request: ResolvedSmartCmpRequest) -> dict[str, str]:

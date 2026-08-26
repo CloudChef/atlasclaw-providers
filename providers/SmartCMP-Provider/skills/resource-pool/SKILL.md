@@ -43,6 +43,19 @@ tool_list_parameters: |
       "query_value": {
         "type": "string",
         "description": "Optional keyword used to filter resource pools. Omit or pass an empty string to list all resource pools."
+      },
+      "page": {
+        "type": "integer",
+        "description": "Page number. Default: 1.",
+        "default": 1,
+        "minimum": 1
+      },
+      "size": {
+        "type": "integer",
+        "description": "Page size. Default: 50.",
+        "default": 50,
+        "minimum": 1,
+        "maximum": 50
       }
     }
   }
@@ -58,7 +71,7 @@ by the CMP UI.
 Provide a precise, read-only skill for direct resource-pool browsing.
 
 - Query `/resource-bundles`
-- Default to listing all resource pools
+- Default to the first 50 resource pools and use `page` for further results
 - Support optional keyword filtering with `query_value`
 - Return a numbered list for the user and a machine-readable metadata block for follow-up actions
 

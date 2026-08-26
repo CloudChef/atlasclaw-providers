@@ -73,6 +73,19 @@ tool_list_all_business_groups_parameters: |
       "query_value": {
         "type": "string",
         "description": "Optional keyword used to filter business groups. Omit or pass an empty string to list all business groups."
+      },
+      "page": {
+        "type": "integer",
+        "description": "Page number. Default: 1.",
+        "default": 1,
+        "minimum": 1
+      },
+      "size": {
+        "type": "integer",
+        "description": "Page size. Default: 50.",
+        "default": 50,
+        "minimum": 1,
+        "maximum": 50
       }
     }
   }
@@ -165,7 +178,7 @@ tool_query_logical_templates_parameters: |
     }
   }
 tool_query_images_name: "smartcmp_query_images"
-tool_query_images_description: "Query SmartCMP image options for a selected resource pool, logical template, and cloud entry type. A selected image id is a templateId, never a physicalTemplateId."
+tool_query_images_description: "Query one bounded page of SmartCMP image options for a selected resource pool, logical template, and cloud entry type. Use query to narrow large inventories and page to continue. A selected image id is a templateId, never a physicalTemplateId."
 tool_query_images_entrypoint: "scripts/adapter.py:list_images"
 tool_query_images_groups:
   - cmp
@@ -194,6 +207,23 @@ tool_query_images_parameters: |
       "cloud_entry_type": {
         "type": "string",
         "description": "REQUIRED. Full cloudEntryTypeId from the selected resource pool, for example yacmp:cloudentry:type:vsphere."
+      },
+      "query": {
+        "type": "string",
+        "description": "Optional case-insensitive image ID or name filter."
+      },
+      "page": {
+        "type": "integer",
+        "description": "One-based image page. Default: 1.",
+        "default": 1,
+        "minimum": 1
+      },
+      "size": {
+        "type": "integer",
+        "description": "Image page size. Default: 50.",
+        "default": 50,
+        "minimum": 1,
+        "maximum": 50
       }
     },
     "required": ["resource_bundle_id", "logic_template_id", "cloud_entry_type"]

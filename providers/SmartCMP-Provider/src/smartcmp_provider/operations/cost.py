@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from collections.abc import Callable
+from time import monotonic
 from typing import Any
 from urllib.parse import quote
 
@@ -33,6 +35,12 @@ from smartcmp_provider.transport.mutations import write_result_is_unknown
 EXECUTE_COST_OPTIMIZATION_CAPABILITY = capability_by_id(
     "smartcmp.cost.execute"
 )
+CURRENCY_EVIDENCE_CACHE_TTL_SECONDS = 300.0
+CURRENCY_EVIDENCE_CACHE_MAX_ENTRIES = 128
+_CURRENCY_EVIDENCE_CACHE: OrderedDict[
+    tuple[str, str, str, str],
+    tuple[float, CurrencyEvidenceResult],
+] = OrderedDict()
 
 
 async def list_cost_violations(
@@ -271,7 +279,17 @@ async def get_cost_violation_facts(
 async def get_currency_evidence(
     client: SmartCmpClient,
 ) -> CurrencyEvidenceResult:
-    """Load verified tenant currency code and symbol without guessing."""
+    """Load and briefly cache verified tenant currency facts without guessing.
+
+    The cache stores only the final code, symbol, and source. Entries are
+    isolated by SmartCMP endpoint, tenant assertion, principal, and actor type;
+    credentials and raw tenant settings are never retained.
+    """
+
+    cache_key = _currency_cache_key(client)
+    cached = _cached_currency_evidence(cache_key)
+    if cached is not None:
+        return cached
 
     setting = await client.request_json("GET", "/tenants/current/setting")
     code = (
@@ -292,12 +310,49 @@ async def get_currency_evidence(
             continue
         symbol = str(unit.get("symbol") or "").strip()
         if symbol:
-            return CurrencyEvidenceResult(
+            evidence = CurrencyEvidenceResult(
                 symbol=symbol,
                 code=code,
                 source="smartcmp_tenant_settings",
             )
+            _store_currency_evidence(cache_key, evidence)
+            return evidence
     return CurrencyEvidenceResult()
+
+
+def _currency_cache_key(client: SmartCmpClient) -> tuple[str, str, str, str]:
+    context = client.request.context
+    principal = context.principal
+    return (
+        str(context.instance.base_url).rstrip("/"),
+        str(principal.tenant_id or ""),
+        str(principal.subject),
+        str(principal.actor_type),
+    )
+
+
+def _cached_currency_evidence(
+    key: tuple[str, str, str, str],
+) -> CurrencyEvidenceResult | None:
+    cached = _CURRENCY_EVIDENCE_CACHE.get(key)
+    if cached is None:
+        return None
+    cached_at, evidence = cached
+    if monotonic() - cached_at >= CURRENCY_EVIDENCE_CACHE_TTL_SECONDS:
+        _CURRENCY_EVIDENCE_CACHE.pop(key, None)
+        return None
+    _CURRENCY_EVIDENCE_CACHE.move_to_end(key)
+    return evidence
+
+
+def _store_currency_evidence(
+    key: tuple[str, str, str, str],
+    evidence: CurrencyEvidenceResult,
+) -> None:
+    _CURRENCY_EVIDENCE_CACHE[key] = (monotonic(), evidence)
+    _CURRENCY_EVIDENCE_CACHE.move_to_end(key)
+    while len(_CURRENCY_EVIDENCE_CACHE) > CURRENCY_EVIDENCE_CACHE_MAX_ENTRIES:
+        _CURRENCY_EVIDENCE_CACHE.popitem(last=False)
 
 
 async def execute_cost_optimization(

@@ -14,8 +14,10 @@ if str(_SHARED_SCRIPTS) not in sys.path:
 from _atlasclaw_adapter import (  # noqa: E402
     RunContext,
     execute_with_request,
+    list_workflow_internal,
     tool_error,
     tool_result,
+    validate_list_page_size,
 )
 from smartcmp_provider.models.directory import DirectorySearchQuery  # noqa: E402
 from smartcmp_provider.operations.directory import (  # noqa: E402
@@ -26,18 +28,37 @@ from smartcmp_provider.operations.directory import (  # noqa: E402
 async def list_resource_pools(
     ctx: RunContext[Any],
     query_value: str | None = None,
+    page: int = 1,
+    size: int = 50,
 ) -> dict[str, Any]:
     """List standalone resource pools visible to the current principal."""
 
     try:
+        size = validate_list_page_size(size)
         result, request = await execute_with_request(
             ctx,
             list_resource_pool_directory,
-            DirectorySearchQuery(query_value=query_value or ""),
+            DirectorySearchQuery(
+                query_value=query_value or "",
+                page=page,
+                size=size,
+            ),
         )
         return tool_result(
             result,
             summary=f"Found {result.total or len(result.items)} resource pools.",
+            internal=list_workflow_internal(
+                result.items,
+                fields=("id", "name"),
+                total=result.total,
+                extra={
+                    "pagination": {
+                        "page": page,
+                        "size": size,
+                        "query_value": query_value or "",
+                    }
+                },
+            ),
             request=request,
         )
     except (ValueError, RuntimeError) as error:

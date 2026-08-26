@@ -329,6 +329,19 @@ tool_flavors_parameters: |
       "node_template_name": {
         "type": "string",
         "description": "Optional literal resourceSpecs[].node, for example Compute; never pass resourceSpecs[].type."
+      },
+      "page": {
+        "type": "integer",
+        "description": "One-based flavor page. Default: 1.",
+        "default": 1,
+        "minimum": 1
+      },
+      "size": {
+        "type": "integer",
+        "description": "Flavor page size. Default: 50.",
+        "default": 50,
+        "minimum": 1,
+        "maximum": 50
       }
     }
   }
@@ -417,7 +430,7 @@ tool_physical_templates_parameters: |
 tool_images_name: "smartcmp_list_images"
 tool_images_read_only: true
 tool_images_auto_select_single_option: true
-tool_images_description: "List cloud images for a SmartCMP request. Call after resource-pool and logical-template selection only when generated Markdown declares templateId. Use the selected image id as templateId, never as physicalTemplateId. If multiple results exist without an explicit user selection, present image names and ask the user to identify the image field and selected number."
+tool_images_description: "List one bounded page of cloud images for a SmartCMP request. Call after resource-pool and logical-template selection only when generated Markdown declares templateId. Use query to narrow large inventories and page to continue. Use the selected image id as templateId, never as physicalTemplateId. If multiple results exist without an explicit user selection, present image names and ask the user to identify the image field and selected number."
 tool_images_entrypoint: "../datasource/scripts/adapter.py:list_images"
 tool_images_groups:
   - cmp
@@ -448,6 +461,23 @@ tool_images_parameters: |
       "cloud_entry_type": {
         "type": "string",
         "description": "REQUIRED. Selected resource pool cloudEntryTypeId."
+      },
+      "query": {
+        "type": "string",
+        "description": "Optional case-insensitive image ID or name filter."
+      },
+      "page": {
+        "type": "integer",
+        "description": "One-based image page. Default: 1.",
+        "default": 1,
+        "minimum": 1
+      },
+      "size": {
+        "type": "integer",
+        "description": "Image page size. Default: 50.",
+        "default": 50,
+        "minimum": 1,
+        "maximum": 50
       }
     },
     "required": ["resource_bundle_id", "logic_template_id", "cloud_entry_type"]

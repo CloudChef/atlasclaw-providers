@@ -14,9 +14,11 @@ if str(_SHARED_SCRIPTS) not in sys.path:
 from _atlasclaw_adapter import (  # noqa: E402
     RunContext,
     execute_with_request,
+    list_workflow_internal,
     split_values,
     tool_error,
     tool_result,
+    validate_list_page_size,
 )
 from _security_object_actions import (  # noqa: E402
     attach_security_violation_object_metadata,
@@ -97,7 +99,7 @@ async def list_security_violations(
         query_value: Optional CMP free-text filter.
         page: One-based first page requested from CMP.
         size: Number of rows per page.
-        max_pages: Maximum pages to scan, from 1 through 50.
+        max_pages: Must be 1. Use ``page`` to request subsequent bounded pages.
 
     Returns:
         A paginated AtlasClaw Tool result whose rows expose only the required
@@ -105,6 +107,12 @@ async def list_security_violations(
     """
 
     try:
+        size = validate_list_page_size(size)
+        if isinstance(max_pages, bool) or max_pages != 1:
+            raise ValueError(
+                "Security violation lists support one page per Tool call; "
+                "use page to continue browsing."
+            )
         normalized_status = str(status or "").strip().upper()
         if normalized_status == "ALL":
             normalized_status = ""
@@ -136,10 +144,51 @@ async def list_security_violations(
             summary=(
                 f"Found {visible_total} SmartCMP Security violations."
             ),
+            internal=list_workflow_internal(
+                _security_list_workflow_items(payload["items"]),
+                fields=("id",),
+                total=total if isinstance(total, int) else None,
+                extra={
+                    "pagination": {
+                        "page": payload.get("page", page),
+                        "size": payload.get("size", size),
+                        "status": normalized_status,
+                        "severities": list(split_values(severities)),
+                        "query_value": str(query_value or "").strip(),
+                        "max_pages": max_pages,
+                    },
+                    "coverage_context": {
+                        key: payload.get(key)
+                        for key in (
+                            "scanned_pages",
+                            "has_more",
+                            "next_page",
+                            "coverage",
+                            "truncated",
+                            "errors",
+                        )
+                    },
+                },
+            ),
             request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
+
+
+def _security_list_workflow_items(
+    items: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    """Normalize violation aliases to the exact ID used by follow-up analysis."""
+
+    return [
+        {
+            "id": str(
+                item.get("id") or item.get("violationId") or ""
+            ).strip()
+        }
+        for item in items
+    ]
 
 
 async def analyze_security_violation(

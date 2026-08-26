@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import quote
 
@@ -47,7 +48,7 @@ async def list_business_group_directory(
         "GET",
         build_business_group_directory_path(query),
     )
-    return _directory_result(payload)
+    return _directory_result(payload, projector=_project_business_group)
 
 
 async def list_resource_pool_directory(
@@ -60,7 +61,7 @@ async def list_resource_pool_directory(
         "GET",
         build_resource_pool_directory_path(query),
     )
-    return _directory_result(payload)
+    return _directory_result(payload, projector=_project_resource_pool)
 
 
 async def list_applications(
@@ -80,7 +81,7 @@ async def list_applications(
         "/groups",
         params={"businessGroupIds": business_group_id},
     )
-    return _directory_result(payload)
+    return _directory_result(payload, projector=_project_application)
 
 
 async def list_components(
@@ -100,13 +101,27 @@ async def list_components(
         "/components",
         params={"resourceType": source_key},
     )
-    return _directory_result(payload)
+    if _is_component_record(payload):
+        return DirectoryItemsResult(
+            items=(_project_component(payload),),
+            total=1,
+        )
+    return _directory_result(
+        payload,
+        projector=_project_component,
+    )
 
 
-def _directory_result(payload: Any) -> DirectoryItemsResult:
+def _directory_result(
+    payload: Any,
+    *,
+    projector: Callable[[dict[str, Any]], dict[str, Any]],
+) -> DirectoryItemsResult:
+    """Build a compact directory result from an endpoint-specific response."""
+
     items = _extract_items(payload)
     return DirectoryItemsResult(
-        items=tuple(items),
+        items=tuple(projector(item) for item in items),
         total=_extract_total(payload, len(items)),
     )
 
@@ -124,6 +139,97 @@ def _extract_items(payload: Any) -> list[dict[str, Any]]:
         if nested:
             return nested
     return []
+
+
+def _is_component_record(payload: Any) -> bool:
+    """Recognize the component endpoint's direct object response."""
+
+    return isinstance(payload, dict) and any(
+        str(payload.get(field) or "").strip()
+        for field in ("id", "key", "sourceKey", "resourceType")
+    )
+
+
+def _project_business_group(item: dict[str, Any]) -> dict[str, Any]:
+    """Keep business-group identity and hierarchy used for discovery."""
+
+    return _project_fields(
+        item,
+        (
+            "id",
+            "name",
+            "code",
+            "description",
+            "parentBusinessGroupId",
+            "level",
+            "rootLevel",
+            "disabled",
+        ),
+    )
+
+
+def _project_resource_pool(item: dict[str, Any]) -> dict[str, Any]:
+    """Keep standalone resource-pool identity and platform type."""
+
+    return _project_fields(
+        item,
+        (
+            "id",
+            "name",
+            "description",
+            "status",
+            "cloudEntryId",
+            "cloudEntryTypeId",
+        ),
+    )
+
+
+def _project_application(item: dict[str, Any]) -> dict[str, Any]:
+    """Keep application identity and its selected business-group scope."""
+
+    return _project_fields(
+        item,
+        (
+            "id",
+            "name",
+            "description",
+            "status",
+            "businessGroupId",
+        ),
+    )
+
+
+def _project_component(item: dict[str, Any]) -> dict[str, Any]:
+    """Keep component discovery metadata without blueprint definitions."""
+
+    return _project_fields(
+        item,
+        (
+            "id",
+            "key",
+            "sourceKey",
+            "name",
+            "nameZh",
+            "description",
+            "descriptionZh",
+            "resourceType",
+            "componentType",
+            "version",
+            "status",
+            "published",
+            "systemComponent",
+            "enableMonitoring",
+        ),
+    )
+
+
+def _project_fields(
+    item: dict[str, Any],
+    fields: tuple[str, ...],
+) -> dict[str, Any]:
+    """Copy only declared list fields while preserving false and zero values."""
+
+    return {field: item[field] for field in fields if field in item}
 
 
 def _extract_total(payload: Any, fallback: int) -> int:

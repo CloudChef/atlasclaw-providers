@@ -79,6 +79,7 @@ def shared_capabilities() -> tuple[CapabilitySpec, ...]:
         CatalogListResult,
         FacetQuery,
         FlavorQuery,
+        ImageListResult,
         ImageQuery,
         LogicalTemplateQuery,
         PhysicalTemplateQuery,
@@ -254,7 +255,7 @@ def shared_capabilities() -> tuple[CapabilitySpec, ...]:
             "smartcmp.catalogs.images",
             "smartcmp_list_images",
             ImageQuery,
-            CatalogItemsResult,
+            ImageListResult,
         ),
         read(
             "smartcmp.catalogs.facets",

@@ -6,15 +6,22 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+DIRECTORY_LIST_PAGE_SIZE_MAX = 100
+
 
 class DirectorySearchQuery(BaseModel):
-    """Describe one standalone directory keyword query."""
+    """Describe one bounded standalone directory keyword query."""
 
     model_config = ConfigDict(frozen=True)
 
     query_value: str = ""
-    page: int = Field(default=1, ge=1)
-    size: int = Field(default=65_535, ge=1)
+    page: int = Field(default=1, ge=1, strict=True)
+    size: int = Field(
+        default=50,
+        ge=1,
+        le=DIRECTORY_LIST_PAGE_SIZE_MAX,
+        strict=True,
+    )
 
 
 class ApplicationListQuery(BaseModel):
@@ -34,7 +41,7 @@ class ComponentListQuery(BaseModel):
 
 
 class DirectoryItemsResult(BaseModel):
-    """Return raw directory rows and an optional upstream total."""
+    """Return compact directory rows and an optional upstream total."""
 
     model_config = ConfigDict(frozen=True)
 

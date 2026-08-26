@@ -376,7 +376,12 @@ Call `smartcmp_list_pending` with optional `days`.
 
 **Output Format:**
 - Human-readable: Markdown table sorted by latest SmartCMP update first
+- Public structured rows: request ID, name, catalog, applicant, approval step,
+  current approver, and other compact approval evidence used to render the table
 - Machine-readable: `_internal.items` in the Tool result, retained by AtlasClaw workflow context
+
+The hidden continuation metadata is intentionally smaller than each public row;
+it retains only the fields listed below.
 
 **`_internal.items` fields:**
 | Field | Description |
@@ -384,10 +389,7 @@ Call `smartcmp_list_pending` with optional `days`.
 | `index` | Display index (1, 2, 3...) — for user selection only |
 | `request_id` | **Exact SmartCMP user-facing Request ID / request number** — use this opaque value for approve/reject tool input |
 | `name` | Request name |
-| `catalog_name` | Service catalog type |
 | `applicant` | Requester name |
-| `approval_step` | Current approval step |
-| `current_approver` | Current approver display name |
 
 ---
 
@@ -441,10 +443,7 @@ rejection. Call the tool again with the reason after the user provides it.
   "index": 1,
   "request_id": "RES20260505000010",
   "name": "Test Request",
-  "catalog_name": "Issue Ticket",
-  "applicant": "TestUser",
-  "approval_step": "Level 1 Approval",
-  "current_approver": "Pending"
+  "applicant": "TestUser"
 }
 ```
 

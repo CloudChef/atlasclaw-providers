@@ -21,11 +21,13 @@ from smartcmp_provider.models.alarms import AlarmListResult
 from smartcmp_provider.models.approvals import (
     ApprovalDecisionItem,
     ApprovalDecisionResult,
+    ApprovalQueueResult,
 )
 from smartcmp_provider.models.catalogs import (
     CatalogDetailResult,
     CatalogItemsResult,
     CatalogListResult,
+    ImageListResult,
 )
 from smartcmp_provider.models.cost import CostRecommendationListResult
 from smartcmp_provider.models.forms import FormDesignResult, FormReadResult
@@ -33,7 +35,10 @@ from smartcmp_provider.models.requests import (
     RequestSubmissionItem,
     RequestSubmissionResult,
 )
-from smartcmp_provider.models.resources import RecycledResourceListResult
+from smartcmp_provider.models.resources import (
+    RecycledResourceListResult,
+    ResourceListResult,
+)
 from smartcmp_provider.services.security_compliance import (
     _project_security_violation,
 )
@@ -172,6 +177,42 @@ def test_every_registered_tool_uses_a_schema_compatible_callable() -> None:
                 f"{entrypoint} requires unregistered fields "
                 f"{sorted(required_handler_parameters - properties)}"
             )
+
+
+def test_atlasclaw_list_schemas_match_the_workflow_payload_budget() -> None:
+    """Keep exposed page sizes within the shared continuation-metadata limit."""
+
+    for skill_name, schema_key in (
+        ("alarm", "tool_list_parameters"),
+        ("cost-optimization", "tool_list_parameters"),
+        ("datasource", "tool_list_all_business_groups_parameters"),
+        ("resource", "tool_list_parameters"),
+        ("resource-pool", "tool_list_parameters"),
+        ("security-compliance", "tool_list_parameters"),
+    ):
+        metadata = _frontmatter(SKILLS_ROOT / skill_name / "SKILL.md")
+        raw_schema = metadata[schema_key]
+        schema = json.loads(raw_schema) if isinstance(raw_schema, str) else raw_schema
+        assert schema["properties"]["size"]["maximum"] == 50
+
+    security = _frontmatter(
+        SKILLS_ROOT / "security-compliance" / "SKILL.md"
+    )
+    security_schema = json.loads(security["tool_list_parameters"])
+    assert security_schema["properties"]["max_pages"]["maximum"] == 1
+
+    datasource = _frontmatter(SKILLS_ROOT / "datasource" / "SKILL.md")
+    datasource_images = json.loads(datasource["tool_query_images_parameters"])
+    assert datasource_images["properties"]["size"]["maximum"] == 50
+
+    request = _frontmatter(SKILLS_ROOT / "request" / "SKILL.md")
+    for schema_key in ("tool_flavors_parameters", "tool_images_parameters"):
+        schema = json.loads(request[schema_key])
+        assert schema["properties"]["size"]["maximum"] == 50
+
+    resource = _frontmatter(SKILLS_ROOT / "resource" / "SKILL.md")
+    recycle_schema = resource["tool_recycle_list_parameters"]
+    assert recycle_schema["properties"]["size"]["maximum"] == 20
 
 
 def test_multi_tool_skills_use_one_adapter_entrypoint_module() -> None:
@@ -378,7 +419,19 @@ def test_resource_recycle_adapters_bind_public_locators_to_dedicated_operations(
     assert listed == {
         "success": True,
         "output": "Found 0 recycled resource rows.",
-        "internal": {"items": [], "total": 0, "page": 1, "size": 20},
+        "internal": {
+            "items": [],
+            "total": 0,
+            "pagination": {
+                "resource_id": "",
+                "resource_name": "vm-a",
+                "deployment_id": "",
+                "deployment_name": "",
+                "page": 1,
+                "size": 20,
+            },
+            "deployment_scopes": {},
+        },
     }
     assert removed == {
         "success": True,
@@ -432,6 +485,10 @@ def test_resource_recycle_list_exposes_dedicated_operation_to_agent(
                         "status": "stopped",
                         "deployment_id": "deployment-1",
                         "deployment_name": "application-a",
+                        "affected_scope": {
+                            "deployment_id": "deployment-1",
+                            "resource_ids": ["resource-1"],
+                        },
                         "properties": {"large_payload": "x" * 20_000},
                         "owning_deployment": {
                             "id": "deployment-1",
@@ -485,33 +542,139 @@ def test_resource_recycle_list_exposes_dedicated_operation_to_agent(
     assert len(result["_internal"]) < 12_000
     assert internal["items"] == [
         {
-            "resource_id": "resource-1",
-            "resource_name": "vm-a",
-            "resource_type": "cloud_host",
-            "status": "stopped",
-            "deployment_id": "deployment-1",
-            "deployment_name": "application-a",
-            "operations": [
-                {
-                    "index": 1,
-                    "id": "permanently_delete_deployment",
-                    "name": "Permanently Delete Deployment",
-                    "name_zh": "从回收站删除",
-                    "display_name": "从回收站删除",
-                }
-            ],
-            "owning_deployment": {
-                "id": "deployment-1",
-                "name": "application-a",
-                "state": "SHUT_DOWN",
-                "deleted": False,
-                "recycled": True,
-                "recycle_delete_time": 0,
-            },
+            "id": "resource-1",
+            "name": "vm-a",
+            "scope_ref": "1",
+            "index": 1,
         }
     ]
+    assert internal["deployment_scopes"] == {
+        "1": {
+            "deployment_id": "deployment-1",
+            "resource_ids": ["resource-1"],
+            "action_id": "permanently_delete_deployment",
+        }
+    }
     assert "large_payload" not in result["_internal"]
-    assert result["items"][0]["properties"]["large_payload"] == "x" * 20_000
+    assert "properties" not in result["items"][0]
+
+
+def test_resource_recycle_max_page_retains_each_scope_within_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep a full AtlasClaw recycle page safe for destructive continuation."""
+
+    adapter = _load(
+        SKILLS_ROOT / "resource" / "scripts" / "adapter.py",
+        "test_resource_recycle_max_page_budget",
+    )
+    rows: list[dict[str, Any]] = []
+    for deployment_index in range(20):
+        deployment_id = f"deployment-{deployment_index:02d}-1234567890abcdef"
+        resource_ids = [
+            f"resource-{deployment_index:02d}-{resource_index}-1234567890abcdef"
+            for resource_index in range(2)
+        ]
+        for resource_index, resource_id in enumerate(resource_ids):
+            rows.append(
+                {
+                    "resource_id": resource_id,
+                    "resource_name": f"vm-{deployment_index:02d}-{resource_index}",
+                    "deployment_id": deployment_id,
+                    "deployment_name": f"application-{deployment_index:02d}",
+                    "affected_scope": {
+                        "deployment_id": deployment_id,
+                        "resource_ids": resource_ids,
+                    },
+                    "available_operations": [
+                        {"operation_id": "permanently_delete_deployment"}
+                    ],
+                }
+            )
+
+    async def fake_execute_with_request(_ctx, _operation, _operation_input):
+        return (
+            RecycledResourceListResult(
+                items=tuple(rows),
+                total=20,
+                page=1,
+                size=20,
+            ),
+            _resolved_request("trace-recycle-max-page"),
+        )
+
+    monkeypatch.setattr(adapter, "execute_with_request", fake_execute_with_request)
+    result = asyncio.run(adapter.list_recycled_resources(object(), size=20))
+    internal = json.loads(result["_internal"])
+
+    assert len(internal["items"]) == 40
+    assert len(internal["deployment_scopes"]) == 20
+    assert internal["deployment_scopes"]["1"]["resource_ids"] == [
+        "resource-00-0-1234567890abcdef",
+        "resource-00-1-1234567890abcdef",
+    ]
+    assert len(result["_internal"]) < 10_500
+
+
+def test_image_list_max_page_is_compact_and_continuable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retain only one 50-image page plus exact next-page search context."""
+
+    adapter = _load(
+        SKILLS_ROOT / "datasource" / "scripts" / "adapter.py",
+        "test_image_list_max_page_budget",
+    )
+
+    async def fake_execute_with_request(_ctx, _operation, operation_input):
+        assert operation_input.page == 3
+        assert operation_input.size == 50
+        assert operation_input.query_value == "ubuntu"
+        return (
+            ImageListResult(
+                items=tuple(
+                    {
+                        "index": index + 1,
+                        "id": f"image-{index:03d}",
+                        "templateId": f"image-{index:03d}",
+                        "name": f"Ubuntu image {index:03d}",
+                    }
+                    for index in range(50)
+                ),
+                total=500,
+                page=3,
+                size=50,
+                has_more=True,
+                next_page=4,
+                source_truncated=True,
+            ),
+            _resolved_request("trace-image-page"),
+        )
+
+    monkeypatch.setattr(adapter, "execute_with_request", fake_execute_with_request)
+    result = asyncio.run(
+        adapter.list_images(
+            object(),
+            "bundle-1",
+            "logic-1",
+            "yacmp:cloudentry:type:vsphere",
+            query="ubuntu",
+            page=3,
+            size=50,
+        )
+    )
+    internal = json.loads(result["_internal"])
+
+    assert len(result["items"]) == 50
+    assert internal["pagination"] == {
+        "page": 3,
+        "size": 50,
+        "query": "ubuntu",
+        "has_more": True,
+        "next_page": 4,
+        "source_truncated": True,
+    }
+    assert len(result["_internal"]) < 10_500
 
 
 def test_embedded_object_uses_server_owned_turn_context() -> None:
@@ -770,8 +933,14 @@ def test_cost_list_result_preserves_workflow_identity(monkeypatch) -> None:
                         "status": "ACTIVED",
                         "fixType": "DAY2",
                     },
+                    {
+                        "id": "cost-2",
+                        "category": "COST-OPTIMIZATION.MACHINE",
+                        "status": "ACTIVED",
+                        "taskInstanceId": "task-2",
+                    },
                 ),
-                total=1,
+                total=2,
             ),
             _resolved_request("trace-cost-list"),
         )
@@ -786,9 +955,197 @@ def test_cost_list_result_preserves_workflow_identity(monkeypatch) -> None:
     internal = json.loads(result["_internal"])
     assert internal["internal_request_trace_id"] == "trace-cost-list"
     assert internal["provider_instance_ref"] == "smartcmp.cmp"
+    assert internal["items"][0] == {
+        "index": 1,
+        "id": "cost-1",
+        "action_ids": ["view_detail", "remediate"],
+    }
+    assert internal["items"][1] == {
+        "index": 2,
+        "id": "cost-2",
+        "action_ids": ["view_detail", "track"],
+    }
+    assert "object_actions" not in internal["items"][0]
+
+
+def test_resource_list_keeps_actions_with_a_bounded_tool_payload(monkeypatch) -> None:
+    """Keep row actions executable without duplicating their prompts internally."""
+
+    adapter = _load(
+        SKILLS_ROOT / "resource" / "scripts" / "adapter.py",
+        "test_resource_list_payload_budget",
+    )
+
+    async def fake_execute_with_request(_ctx, _operation, _operation_input):
+        return (
+            ResourceListResult(
+                items=tuple(
+                    {
+                        "id": f"resource-{index}",
+                        "name": f"vm-{index}",
+                        "resourceType": "resource.iaas.machine",
+                        "componentType": "machine",
+                        "status": "started",
+                    }
+                    for index in range(50)
+                ),
+                total=97,
+            ),
+            _resolved_request("trace-resource-list"),
+        )
+
+    monkeypatch.setattr(adapter, "execute_with_request", fake_execute_with_request)
+    result = asyncio.run(
+        adapter.list_all_resource(
+            object(),
+            scope="virtual_machines",
+            query_value="production",
+            page=2,
+            size=50,
+        )
+    )
+    internal = json.loads(result["_internal"])
+
     assert [
-        action["action_id"] for action in internal["items"][0]["object_actions"]
-    ] == ["view_detail", "remediate"]
+        action["action_id"] for action in result["items"][0]["object_actions"]
+    ] == ["view_detail", "open_detail", "analyze", "list_operations"]
+    assert "object_actions" not in internal["items"][0]
+    assert internal["category"] == "virtual-machines"
+    assert internal["pagination"] == {
+        "page": 2,
+        "size": 50,
+        "scope": "virtual_machines",
+        "query_value": "production",
+    }
+    assert len(result["_internal"]) < 10_500
+    assert len(json.dumps(result, ensure_ascii=False).encode()) < 170_000
+
+
+def test_alarm_and_cost_lists_stay_within_response_budgets(monkeypatch) -> None:
+    """Bound maximum AtlasClaw pages while preserving exact identities and actions."""
+
+    alarm_adapter = _load(
+        SKILLS_ROOT / "alarm" / "scripts" / "adapter.py",
+        "test_alarm_list_payload_budget",
+    )
+    cost_adapter = _load(
+        SKILLS_ROOT / "cost-optimization" / "scripts" / "adapter.py",
+        "test_cost_list_payload_budget",
+    )
+
+    async def fake_alarm_execute(_ctx, _operation, _operation_input):
+        return (
+            AlarmListResult(
+                items=tuple(
+                    {
+                        "id": f"alert-{index}",
+                        "alarmPolicyName": "CPU high",
+                        "status": "ALERT_FIRING",
+                        "targetEntityId": f"resource-{index}",
+                    }
+                    for index in range(50)
+                ),
+                total=64,
+            ),
+            _resolved_request("trace-alarm-list"),
+        )
+
+    async def fake_cost_execute(_ctx, _operation, _operation_input):
+        return (
+            CostRecommendationListResult(
+                items=tuple(
+                    {
+                        "violationId": f"cost-{index}",
+                        "policyName": "Idle VM",
+                        "resourceId": f"resource-{index}",
+                        "resourceName": f"vm-{index}",
+                        "category": "COST-OPTIMIZATION.MACHINE",
+                        "status": "ACTIVED",
+                        "fixType": "DAY2",
+                    }
+                    for index in range(50)
+                ),
+                total=69,
+                currency_symbol="$",
+                currency_code="USD",
+            ),
+            _resolved_request("trace-cost-list-budget"),
+        )
+
+    monkeypatch.setattr(
+        alarm_adapter,
+        "execute_with_request",
+        fake_alarm_execute,
+    )
+    monkeypatch.setattr(
+        cost_adapter,
+        "execute_with_request",
+        fake_cost_execute,
+    )
+    alarm_result = asyncio.run(
+        alarm_adapter.list_alerts(
+            object(),
+            status="ALERT_FIRING",
+            query="cpu",
+            page=2,
+            size=50,
+        )
+    )
+    cost_result = asyncio.run(
+        cost_adapter.list_recommendations(
+            object(),
+            query="idle",
+            page=3,
+            size=50,
+            with_related_policies=True,
+        )
+    )
+
+    alarm_internal = json.loads(alarm_result["_internal"])
+    cost_internal = json.loads(cost_result["_internal"])
+    assert "object_actions" not in alarm_internal["items"][0]
+    assert "object_actions" not in cost_internal["items"][0]
+    assert cost_internal["items"][0]["action_ids"] == [
+        "view_detail",
+        "remediate",
+    ]
+    assert alarm_internal["pagination"]["page"] == 2
+    assert alarm_internal["pagination"]["size"] == 50
+    assert alarm_internal["pagination"]["filters"]["query"] == "cpu"
+    assert cost_internal["pagination"] == {
+        "page": 3,
+        "size": 50,
+        "filters": {
+            "queryValue": "idle",
+            "sort": "lastExecuteDate,desc",
+            "status": "ACTIVED",
+            "category": "COST-OPTIMIZATION",
+        },
+        "with_related_policies": True,
+    }
+    assert len(alarm_result["_internal"]) < 10_500
+    assert len(cost_result["_internal"]) < 10_500
+    assert len(json.dumps(alarm_result, ensure_ascii=False).encode()) < 90_000
+    assert len(json.dumps(cost_result, ensure_ascii=False).encode()) < 155_000
+
+
+def test_atlasclaw_list_helpers_enforce_page_and_metadata_budgets() -> None:
+    """Fail explicitly before Core silently discards oversized list context."""
+
+    runtime = _load(
+        SKILLS_ROOT / "shared" / "scripts" / "_atlasclaw_adapter.py",
+        "test_atlasclaw_adapter_list_budgets",
+    )
+
+    assert runtime.validate_list_page_size(50) == 50
+    for invalid in (True, 50.5, "50", 51):
+        with pytest.raises(runtime.AtlasClawAdapterError):
+            runtime.validate_list_page_size(invalid)
+    with pytest.raises(runtime.AtlasClawAdapterError, match="too large"):
+        runtime.list_workflow_internal(
+            ({"id": "item-1", "name": "x" * 10_500},),
+            fields=("id", "name"),
+        )
 
 
 def test_atlasclaw_split_values_accepts_omitted_optional_value() -> None:
@@ -891,7 +1248,14 @@ def test_security_violation_list_uses_row_count_when_total_is_unknown(
             return {
                 "items": [{"id": "violation-1", "status": "ACTIVED"}],
                 "total": None,
+                "page": 1,
+                "size": 20,
+                "scanned_pages": 1,
+                "has_more": True,
+                "next_page": 2,
                 "coverage": "complete",
+                "truncated": False,
+                "errors": ["one compact warning"],
             }
 
     async def fake_execute_with_request(_ctx, _operation, _operation_input):
@@ -909,6 +1273,59 @@ def test_security_violation_list_uses_row_count_when_total_is_unknown(
     assert [action["action_id"] for action in result["items"][0]["object_actions"]] == [
         "analyze"
     ]
+    internal = json.loads(result["_internal"])
+    assert internal["items"] == [{"id": "violation-1", "index": 1}]
+    assert "object_actions" not in result["_internal"]
+    assert internal["coverage_context"] == {
+        "scanned_pages": 1,
+        "has_more": True,
+        "next_page": 2,
+        "coverage": "complete",
+        "truncated": False,
+        "errors": ["one compact warning"],
+    }
+
+
+def test_approval_pending_list_keeps_only_follow_up_identity_internally(
+    monkeypatch,
+) -> None:
+    """Avoid duplicating approval evidence and row action prompts in workflow state."""
+
+    adapter = _load(
+        SKILLS_ROOT / "approval" / "scripts" / "adapter.py",
+        "test_approval_list_compact_internal",
+    )
+
+    async def fake_execute_with_request(_ctx, _operation, _operation_input):
+        return (
+            ApprovalQueueResult(
+                items=(
+                    {
+                        "requestId": "SR-2026/000019",
+                        "name": "Production VM",
+                        "applicant": {"name": "Alice"},
+                        "description": "x" * 20_000,
+                    },
+                ),
+                total=1,
+            ),
+            _resolved_request("trace-approval-list"),
+        )
+
+    monkeypatch.setattr(adapter, "execute_with_request", fake_execute_with_request)
+    result = asyncio.run(adapter.list_pending(object()))
+    internal = json.loads(result["_internal"])
+
+    assert internal["items"] == [
+        {
+            "request_id": "SR-2026/000019",
+            "name": "Production VM",
+            "applicant": "Alice",
+            "index": 1,
+        }
+    ]
+    assert "description" not in result["_internal"]
+    assert "object_actions" not in result["_internal"]
 
 
 def test_security_analysis_uses_nested_authoritative_violation_for_actions(

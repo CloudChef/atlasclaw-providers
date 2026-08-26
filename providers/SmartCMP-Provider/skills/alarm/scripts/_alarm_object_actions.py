@@ -91,6 +91,7 @@ def attach_alert_object_metadata(
     alert_name = str(
         alert.get("name")
         or alert.get("policyName")
+        or alert.get("alarmPolicyName")
         or projection.get("name")
         or alert_id
     ).strip()

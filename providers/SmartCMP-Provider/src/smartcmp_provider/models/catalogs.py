@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 type PlacementFieldName = str
+CATALOG_LIST_PAGE_SIZE_MAX = 100
 
 
 class CatalogListQuery(BaseModel):
@@ -16,8 +17,13 @@ class CatalogListQuery(BaseModel):
 
     keyword: str = ""
     catalog_id: str = ""
-    page: int = Field(default=1, ge=1)
-    size: int = Field(default=50, ge=1)
+    page: int = Field(default=1, ge=1, strict=True)
+    size: int = Field(
+        default=50,
+        ge=1,
+        le=CATALOG_LIST_PAGE_SIZE_MAX,
+        strict=True,
+    )
 
 
 class CatalogListResult(BaseModel):
@@ -113,8 +119,13 @@ class FlavorQuery(BaseModel):
     compute_profile_id: str = ""
     catalog_id: str = ""
     node_template_name: str = ""
-    page: int = Field(default=1, ge=1)
-    size: int = Field(default=100, ge=1)
+    page: int = Field(default=1, ge=1, strict=True)
+    size: int = Field(
+        default=100,
+        ge=1,
+        le=CATALOG_LIST_PAGE_SIZE_MAX,
+        strict=True,
+    )
 
 
 class LogicalTemplateQuery(BaseModel):
@@ -139,13 +150,35 @@ class PhysicalTemplateQuery(BaseModel):
 
 
 class ImageQuery(BaseModel):
-    """Select images from one resource pool and logical-template context."""
+    """Select one bounded image page from a provisioning context."""
 
     model_config = ConfigDict(frozen=True)
 
     resource_bundle_id: str
     logic_template_id: str
     cloud_entry_type: str
+    query_value: str = ""
+    page: int = Field(default=1, ge=1, strict=True)
+    size: int = Field(
+        default=50,
+        ge=1,
+        le=CATALOG_LIST_PAGE_SIZE_MAX,
+        strict=True,
+    )
+
+
+class ImageListResult(BaseModel):
+    """Return a bounded image page and local pagination over CMP choices."""
+
+    model_config = ConfigDict(frozen=True)
+
+    items: tuple[dict[str, Any], ...] = ()
+    total: int = Field(ge=0)
+    page: int = Field(ge=1)
+    size: int = Field(ge=1)
+    has_more: bool = False
+    next_page: int | None = None
+    source_truncated: bool = False
 
 
 class CatalogItemsResult(BaseModel):

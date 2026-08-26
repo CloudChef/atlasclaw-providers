@@ -15,8 +15,10 @@ if str(_SHARED_SCRIPTS) not in sys.path:
 from _atlasclaw_adapter import (  # noqa: E402
     RunContext,
     execute_with_request,
+    list_workflow_internal,
     tool_error,
     tool_result,
+    validate_list_page_size,
 )
 from _request_object_actions import (  # noqa: E402
     attach_catalog_object_metadata,
@@ -141,16 +143,12 @@ async def list_services(
         return tool_result(
             result,
             summary=f"Found {result.total} request catalogs.",
-            internal={
-                "catalogs": [
-                    {
-                        key: item.get(key)
-                        for key in ("index", "id", "name", "status")
-                        if item.get(key) not in (None, "")
-                    }
-                    for item in result.catalogs
-                ],
-            },
+            internal=list_workflow_internal(
+                result.catalogs,
+                fields=("id", "name", "status"),
+                total=result.total,
+                extra={"query": {"keyword": keyword or ""}},
+            ),
             request=request,
         )
     except (ValueError, RuntimeError) as error:
@@ -290,6 +288,16 @@ async def list_facets(
         return tool_result(
             result,
             summary=f"Found {len(result.items)} request facets.",
+            internal=list_workflow_internal(
+                result.items,
+                fields=("key", "label", "options"),
+                extra={
+                    "query": {
+                        "business_group_id": business_group_id,
+                        "node_type": node_type,
+                    }
+                },
+            ),
             request=request,
         )
     except (ValueError, RuntimeError) as error:
@@ -404,6 +412,10 @@ async def list_available_bgs(
         return tool_result(
             result,
             summary=f"Found {len(result.items)} available business groups.",
+            internal=list_workflow_internal(
+                result.items,
+                fields=("id", "name"),
+            ),
             request=request,
         )
     except (ValueError, RuntimeError) as error:
@@ -417,10 +429,13 @@ async def list_flavors(
     compute_profile_id: str | None = None,
     catalog_id: str | None = None,
     node_template_name: str | None = None,
+    page: int = 1,
+    size: int = 50,
 ) -> dict[str, Any]:
     """List compute flavors after normalizing omitted AtlasClaw fields."""
 
     try:
+        size = validate_list_page_size(size)
         result, request = await execute_with_request(
             ctx,
             list_flavors_operation,
@@ -430,11 +445,28 @@ async def list_flavors(
                 compute_profile_id=compute_profile_id or "",
                 catalog_id=catalog_id or "",
                 node_template_name=node_template_name or "",
+                page=page,
+                size=size,
             ),
         )
         return tool_result(
             result,
             summary=f"Found {len(result.items)} compute flavors.",
+            internal=list_workflow_internal(
+                result.items,
+                fields=("id", "name"),
+                extra={
+                    "pagination": {
+                        "page": page,
+                        "size": size,
+                        "query": query or "",
+                        "resource_bundle_id": resource_bundle_id or "",
+                        "compute_profile_id": compute_profile_id or "",
+                        "catalog_id": catalog_id or "",
+                        "node_template_name": node_template_name or "",
+                    }
+                },
+            ),
             request=request,
         )
     except (ValueError, RuntimeError) as error:
@@ -460,6 +492,10 @@ async def list_physical_templates(
         return tool_result(
             result,
             summary=f"Found {len(result.items)} physical templates.",
+            internal=list_workflow_internal(
+                result.items,
+                fields=("id", "name"),
+            ),
             request=request,
         )
     except (ValueError, RuntimeError) as error:

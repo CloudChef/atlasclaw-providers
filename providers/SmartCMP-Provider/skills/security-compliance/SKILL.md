@@ -68,7 +68,7 @@ tool_overview_parameters: |
   }
 
 tool_list_name: "smartcmp_list_security_violations"
-tool_list_description: "List SmartCMP Security compliance violations. Always query the root category SECURITY so SECURITY subcategories are included; never send SECURITY.*. Requests use one-based pages. Preserve total, scanned_pages, has_more, next_page, coverage, and truncated, and retain each real violation ID in hidden object metadata. List rows expose Analyze only; they must not expose Mark Fixed before a fresh single-violation analysis."
+tool_list_description: "List one bounded page of SmartCMP Security compliance violations. Always query the root category SECURITY so SECURITY subcategories are included; never send SECURITY.*. Requests use one-based pages. Preserve total, scanned_pages, has_more, next_page, coverage, and truncated, and retain each real violation ID in hidden object metadata. Use page to continue browsing. List rows expose Analyze only; they must not expose Mark Fixed before a fresh single-violation analysis."
 tool_list_entrypoint: "scripts/adapter.py:list_security_violations"
 tool_list_groups:
   - cmp
@@ -108,14 +108,14 @@ tool_list_parameters: |
         "description": "Page size. Default: 20.",
         "default": 20,
         "minimum": 1,
-        "maximum": 100
+        "maximum": 50
       },
       "max_pages": {
         "type": "integer",
-        "description": "Maximum pages to scan. Default: 1.",
+        "description": "Exactly one page is returned per Tool call; use page to continue browsing.",
         "default": 1,
         "minimum": 1,
-        "maximum": 50
+        "maximum": 1
       }
     }
   }

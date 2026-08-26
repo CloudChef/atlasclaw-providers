@@ -30,6 +30,12 @@ from smartcmp_provider.models.alarms import (  # noqa: E402
     AlarmListQuery,
     ResourceAlertListQuery,
 )
+from smartcmp_provider.models.approvals import ApprovalListQuery  # noqa: E402
+from smartcmp_provider.models.catalogs import (  # noqa: E402
+    CatalogListQuery,
+    FlavorQuery,
+    ImageQuery,
+)
 from smartcmp_provider.models.cost import (  # noqa: E402
     CostExecutionStatusQuery,
     CostListQuery,
@@ -41,11 +47,21 @@ from smartcmp_provider.models.directory import (  # noqa: E402
     ComponentListQuery,
     DirectorySearchQuery,
 )
+from smartcmp_provider.models.resources import (  # noqa: E402
+    RecycledResourceQuery,
+    ResourceListQuery,
+)
+from smartcmp_provider.models.security_compliance import (  # noqa: E402
+    ResourceSecurityViolationQuery,
+    SecurityViolationListQuery,
+)
 from smartcmp_provider.operations.alarms import (  # noqa: E402
     get_alarm_analysis_facts,
     list_alarms,
 )
 from smartcmp_provider.operations.cost import (  # noqa: E402
+    _CURRENCY_EVIDENCE_CACHE,
+    get_currency_evidence,
     get_cost_recommendation_facts,
     list_cost_violations,
 )
@@ -127,12 +143,12 @@ def test_directory_operations_preserve_explicit_paths_and_filters():
             "GET",
             "https://cmp.example.com/platform-api/business-groups/"
             "has-update-permission?query&sort=updatedDate%2Cdesc&page=1"
-            "&size=65535&queryValue=prod%20group",
+            "&size=50&queryValue=prod%20group",
         ),
         (
             "GET",
             "https://cmp.example.com/platform-api/resource-bundles?"
-            "query&sort=createdDate%2Cdesc&page=1&size=65535"
+            "query&sort=createdDate%2Cdesc&page=1&size=50"
             "&queryValue=pool%2Fa",
         ),
         (
@@ -145,6 +161,232 @@ def test_directory_operations_preserve_explicit_paths_and_filters():
             "resourceType=resource.vm",
         ),
     ]
+
+
+def test_component_singleton_is_compact_instead_of_becoming_an_empty_list():
+    """Accept the component endpoint's direct object without returning blueprints."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.params.get("resourceType") == "resource.empty":
+            return httpx.Response(
+                200,
+                json={"content": [], "totalElements": 0},
+                request=request,
+            )
+        return httpx.Response(
+            200,
+            json={
+                "id": "component-1",
+                "key": "resource.vm",
+                "name": "Virtual machine",
+                "resourceType": "resource.vm",
+                "published": True,
+                "blueprintFiles": [{"content": "x" * 100_000}],
+                "lifecycles": [{"script": "x" * 10_000}],
+                "properties": [{"schema": "x" * 10_000}],
+            },
+            request=request,
+        )
+
+    async def invoke():
+        async with SmartCmpClient(
+            make_request(),
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            return (
+                await list_components(
+                    client,
+                    ComponentListQuery(source_key="resource.vm"),
+                ),
+                await list_components(
+                    client,
+                    ComponentListQuery(source_key="resource.empty"),
+                ),
+            )
+
+    result, empty = asyncio.run(invoke())
+
+    assert result.total == 1
+    assert result.items == (
+        {
+            "id": "component-1",
+            "key": "resource.vm",
+            "name": "Virtual machine",
+            "resourceType": "resource.vm",
+            "published": True,
+        },
+    )
+    assert empty.total == 0
+    assert empty.items == ()
+
+
+def test_alarm_list_omits_rule_and_monitoring_payloads():
+    """Retain list identity and association fields without analysis evidence."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "content": [
+                    {
+                        "id": "alert-1",
+                        "alarmPolicyName": "CPU high",
+                        "status": "ALERT_FIRING",
+                        "targetEntityId": "resource-1",
+                        "triggerAt": 1_700_000_000_000,
+                        "queryExpression": "x" * 20_000,
+                        "ruleExpression": "x" * 20_000,
+                        "policy": {"description": "x" * 20_000},
+                    }
+                ],
+                "totalElements": 1,
+            },
+            request=request,
+        )
+
+    async def invoke():
+        async with SmartCmpClient(
+            make_request(),
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            return await list_alarms(client, AlarmListQuery())
+
+    result = asyncio.run(invoke())
+
+    assert result.items[0]["targetEntityId"] == "resource-1"
+    assert result.items[0]["alarmPolicyName"] == "CPU high"
+    assert "queryExpression" not in result.items[0]
+    assert "ruleExpression" not in result.items[0]
+    assert "policy" not in result.items[0]
+
+
+def test_currency_evidence_cache_is_principal_scoped_and_payload_free():
+    """Reuse only compact verified currency facts for the same principal."""
+
+    _CURRENCY_EVIDENCE_CACHE.clear()
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        if request.url.path.endswith("/tenants/current/setting"):
+            return httpx.Response(
+                200,
+                json={
+                    "currencyUnitType": "USD",
+                    "unusedTenantSettings": "x" * 50_000,
+                },
+                request=request,
+            )
+        if request.url.path.endswith("/tenants/currencyUnits"):
+            return httpx.Response(
+                200,
+                json=[
+                    {"code": "USD", "symbol": "$", "unused": "x" * 10_000}
+                ],
+                request=request,
+            )
+        raise AssertionError(f"Unexpected request: {request.url}")
+
+    async def invoke():
+        async with SmartCmpClient(
+            make_request(),
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            first = await get_currency_evidence(client)
+            second = await get_currency_evidence(client)
+        other_request = resolve_provided_request(
+            instance_name="cmp-test",
+            base_url="https://cmp.example.com",
+            subject="user-2",
+            auth_type="cookie",
+            credential_value="other-session-secret",
+            trace_id="run-read-analysis-other-user",
+        )
+        async with SmartCmpClient(
+            other_request,
+            transport=httpx.MockTransport(handler),
+        ) as other_client:
+            other = await get_currency_evidence(other_client)
+        return first, second, other
+
+    first, second, other = asyncio.run(invoke())
+
+    assert first == second
+    assert first == other
+    assert first.model_dump() == {
+        "symbol": "$",
+        "code": "USD",
+        "source": "smartcmp_tenant_settings",
+    }
+    assert len(seen) == 4
+    assert all("unused" not in repr(value) for value in _CURRENCY_EVIDENCE_CACHE.values())
+    _CURRENCY_EVIDENCE_CACHE.clear()
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [
+        lambda: DirectorySearchQuery(size=101),
+        lambda: ResourceListQuery(size=101),
+        lambda: AlarmListQuery(filters={"size": 101}),
+        lambda: CostListQuery(size=101),
+        lambda: CatalogListQuery(size=101),
+        lambda: FlavorQuery(size=101),
+        lambda: ApprovalListQuery(page_size=101),
+    ],
+)
+def test_list_models_reject_page_sizes_over_one_hundred(factory):
+    """Prevent every user-facing list family from requesting oversized pages."""
+
+    with pytest.raises(ValueError):
+        factory()
+
+
+@pytest.mark.parametrize("size", [True, 100.9, "20"])
+def test_alarm_list_rejects_non_integer_page_sizes(size):
+    """Do not accept values that only become valid after implicit coercion."""
+
+    with pytest.raises(ValueError, match="must be an integer"):
+        AlarmListQuery(filters={"size": size})
+
+
+@pytest.mark.parametrize("value", [True, 20.5, "20"])
+@pytest.mark.parametrize(
+    "factory",
+    [
+        lambda value: DirectorySearchQuery(page=value),
+        lambda value: DirectorySearchQuery(size=value),
+        lambda value: ResourceListQuery(page=value),
+        lambda value: ResourceListQuery(size=value),
+        lambda value: RecycledResourceQuery(page=value),
+        lambda value: RecycledResourceQuery(size=value),
+        lambda value: AlarmListQuery(filters={"page": value}),
+        lambda value: CostListQuery(page=value),
+        lambda value: CostListQuery(size=value),
+        lambda value: CostListQuery(max_pages=value),
+        lambda value: CatalogListQuery(page=value),
+        lambda value: FlavorQuery(size=value),
+        lambda value: ImageQuery(
+            resource_bundle_id="bundle-1",
+            logic_template_id="logic-1",
+            cloud_entry_type="yacmp:cloudentry:type:vsphere",
+            page=value,
+        ),
+        lambda value: ApprovalListQuery(page_size=value),
+        lambda value: ApprovalListQuery(max_pages=value),
+        lambda value: SecurityViolationListQuery(page=value),
+        lambda value: SecurityViolationListQuery(max_pages=value),
+        lambda value: ResourceSecurityViolationQuery(
+            resource_id="resource-1",
+            max_pages=value,
+        ),
+    ],
+)
+def test_list_models_reject_coercible_pagination_values(factory, value):
+    """Require actual integers at every Provider pagination boundary."""
+
+    with pytest.raises(ValueError):
+        factory(value)
 
 
 def test_alarm_list_rejects_malformed_success_payload():

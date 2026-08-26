@@ -15,8 +15,10 @@ from _atlasclaw_adapter import (  # noqa: E402
     RunContext,
     execute,
     execute_with_request,
+    list_workflow_internal,
     tool_error,
     tool_result,
+    validate_list_page_size,
 )
 from _cost_object_actions import attach_cost_object_metadata  # noqa: E402
 from smartcmp_provider.domain.resource_resolution import (  # noqa: E402
@@ -70,6 +72,7 @@ async def list_recommendations(
     if category:
         filters["category"] = category
     try:
+        size = validate_list_page_size(size)
         result, request = await execute_with_request(
             ctx,
             list_cost_recommendations_operation,
@@ -98,10 +101,44 @@ async def list_recommendations(
                 f"Found {result.total or len(result.items)} "
                 "cost recommendations."
             ),
+            internal=list_workflow_internal(
+                _cost_list_workflow_items(projected.items),
+                fields=("id", "action_ids"),
+                total=result.total,
+                extra={
+                    "pagination": {
+                        "page": page,
+                        "size": size,
+                        "filters": filters,
+                        "with_related_policies": with_related_policies,
+                    }
+                },
+            ),
             request=request,
         )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
+
+
+def _cost_list_workflow_items(
+    items: tuple[dict[str, Any], ...],
+) -> list[dict[str, Any]]:
+    """Retain exact recommendation IDs and currently available continuations."""
+
+    workflow_items: list[dict[str, Any]] = []
+    for item in items:
+        violation_id = str(
+            item.get("violationId") or item.get("id") or ""
+        ).strip()
+        action_ids = [
+            str(action["action_id"])
+            for action in item.get("object_actions", [])
+            if isinstance(action, dict) and action.get("action_id")
+        ]
+        workflow_items.append(
+            {"id": violation_id, "action_ids": action_ids}
+        )
+    return workflow_items
 
 
 async def analyze_recommendation(

@@ -658,43 +658,51 @@ def _project_deployment_rows(
                 "expected_resource_ids": resource_ids,
             }
         )
-        row = dict(resource)
-        row.update(
-            {
-                "resource_id": resource_id,
-                "resource_name": str(resource.get("name") or "").strip(),
+        row = {
+            "resource_id": resource_id,
+            "resource_name": str(resource.get("name") or "").strip(),
+            "resource_type": str(
+                resource.get("resourceType")
+                or resource.get("resource_type")
+                or ""
+            ).strip(),
+            "component_type": str(
+                resource.get("componentType")
+                or resource.get("component_type")
+                or ""
+            ).strip(),
+            "status": str(
+                resource.get("status") or resource.get("state") or ""
+            ).strip(),
+            "deployment_id": deployment_id,
+            "deployment_name": deployment_name,
+            "owning_deployment": {
+                "id": deployment_id,
+                "name": deployment_name,
+                "state": deployment_state,
+                "deleted": deployment_deleted,
+                "recycled": deployment_recycled,
+                "recycle_delete_time": deployment.get("recycleDeleteTime"),
+            },
+            "affected_scope": {
                 "deployment_id": deployment_id,
-                "deployment_name": deployment_name,
-                "owning_deployment": {
-                    "id": deployment_id,
-                    "name": deployment_name,
-                    "state": deployment_state,
-                    "deleted": deployment_deleted,
-                    "recycled": deployment_recycled,
-                    "recycle_delete_time": deployment.get(
-                        "recycleDeleteTime"
-                    ),
-                },
-                "affected_scope": {
-                    "deployment_id": deployment_id,
-                    "resource_ids": resource_ids,
-                },
-                "available_operations": (
-                    serialize_available_operations(
-                        (
-                            available_operation(
-                                PERMANENT_DELETE_ACTION,
-                                "smartcmp.resources.recycle_bin.permanently_remove",
-                                arguments=locator_arguments,
-                                required_inputs=("confirmed",),
-                            ),
-                        )
+                "resource_ids": resource_ids,
+            },
+            "available_operations": (
+                serialize_available_operations(
+                    (
+                        available_operation(
+                            PERMANENT_DELETE_ACTION,
+                            "smartcmp.resources.recycle_bin.permanently_remove",
+                            arguments=locator_arguments,
+                            required_inputs=("confirmed",),
+                        ),
                     )
-                    if permanent_operation is not None
-                    else []
-                ),
-            }
-        )
+                )
+                if permanent_operation is not None
+                else []
+            ),
+        }
         rows.append(row)
     return rows
 

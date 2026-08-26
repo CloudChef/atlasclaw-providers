@@ -106,7 +106,6 @@ def _localized_text(default: str, translated: str) -> dict[str, object] | None:
     return build_core_localized_text(
         default,
         {
-            "en-US": default,
             "zh-CN": translated,
         },
     )

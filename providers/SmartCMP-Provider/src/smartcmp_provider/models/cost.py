@@ -8,6 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from smartcmp_provider.models.object_operations import AvailableOperation
 
+COST_LIST_PAGE_SIZE_MAX = 100
+COST_LIST_MAX_PAGES = 100
+
 
 class CostListQuery(BaseModel):
     """Describe one bounded paginated cost-domain list query."""
@@ -15,9 +18,19 @@ class CostListQuery(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     filters: dict[str, Any] = Field(default_factory=dict)
-    page: int = Field(default=0, ge=0)
-    size: int = Field(default=20, ge=1)
-    max_pages: int = Field(default=1, ge=1, le=1_000)
+    page: int = Field(default=0, ge=0, strict=True)
+    size: int = Field(
+        default=20,
+        ge=1,
+        le=COST_LIST_PAGE_SIZE_MAX,
+        strict=True,
+    )
+    max_pages: int = Field(
+        default=1,
+        ge=1,
+        le=COST_LIST_MAX_PAGES,
+        strict=True,
+    )
 
 
 class CostItemsResult(BaseModel):

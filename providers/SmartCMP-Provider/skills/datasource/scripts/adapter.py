@@ -14,8 +14,10 @@ if str(_SHARED_SCRIPTS) not in sys.path:
 from _atlasclaw_adapter import (  # noqa: E402
     RunContext,
     execute_with_request,
+    list_workflow_internal,
     tool_error,
     tool_result,
+    validate_list_page_size,
 )
 from smartcmp_provider.models.catalogs import (  # noqa: E402
     ImageQuery,
@@ -41,11 +43,12 @@ async def list_all_business_groups(
     ctx: RunContext[Any],
     query_value: str | None = None,
     page: int = 1,
-    size: int = 65_535,
+    size: int = 50,
 ) -> dict[str, Any]:
     """List business groups visible to the selected SmartCMP principal."""
 
     try:
+        size = validate_list_page_size(size)
         result, request = await execute_with_request(
             ctx,
             list_business_group_directory,
@@ -58,6 +61,18 @@ async def list_all_business_groups(
         return tool_result(
             result,
             summary=f"Found {result.total or len(result.items)} business groups.",
+            internal=list_workflow_internal(
+                result.items,
+                fields=("id", "name"),
+                total=result.total,
+                extra={
+                    "pagination": {
+                        "page": page,
+                        "size": size,
+                        "query_value": query_value or "",
+                    }
+                },
+            ),
             request=request,
         )
     except (ValueError, RuntimeError) as error:
@@ -79,6 +94,11 @@ async def list_applications(
         return tool_result(
             result,
             summary=f"Found {result.total or len(result.items)} applications.",
+            internal=list_workflow_internal(
+                result.items,
+                fields=("id", "name"),
+                total=result.total,
+            ),
             request=request,
         )
     except (ValueError, RuntimeError) as error:
@@ -100,6 +120,11 @@ async def list_components(
         return tool_result(
             result,
             summary=f"Found {result.total or len(result.items)} components.",
+            internal=list_workflow_internal(
+                result.items,
+                fields=("id", "key", "name"),
+                total=result.total,
+            ),
             request=request,
         )
     except (ValueError, RuntimeError) as error:
@@ -131,6 +156,10 @@ async def list_logical_templates(
         return tool_result(
             result,
             summary=f"Found {len(result.items)} logical templates.",
+            internal=list_workflow_internal(
+                result.items,
+                fields=("id", "name"),
+            ),
             request=request,
         )
     except (ValueError, RuntimeError) as error:
@@ -142,10 +171,14 @@ async def list_images(
     resource_bundle_id: str,
     logic_template_id: str,
     cloud_entry_type: str,
+    query: str = "",
+    page: int = 1,
+    size: int = 50,
 ) -> dict[str, Any]:
     """List images for one resource-pool and logical-template selection."""
 
     try:
+        size = validate_list_page_size(size)
         result, request = await execute_with_request(
             ctx,
             list_images_operation,
@@ -153,12 +186,21 @@ async def list_images(
                 resource_bundle_id=resource_bundle_id,
                 logic_template_id=logic_template_id,
                 cloud_entry_type=cloud_entry_type,
+                query_value=query,
+                page=page,
+                size=size,
             ),
         )
         if not result.items:
             return tool_result(
                 result,
                 summary="No cloud images are available.",
+                internal=list_workflow_internal(
+                    (),
+                    fields=("id", "name"),
+                    total=result.total,
+                    extra=_image_pagination_context(result, query=query),
+                ),
                 request=request,
             )
 
@@ -171,8 +213,38 @@ async def list_images(
                 )
             image_lines.append(f"{index}. {name}")
 
-        summary = "Available cloud images:\n" + "\n".join(image_lines)
+        summary = (
+            f"Available cloud images ({len(result.items)} of {result.total}):\n"
+            + "\n".join(image_lines)
+        )
+        if result.has_more:
+            summary += f"\nMore images are available on page {result.next_page}."
         summary += "\nReply with the cloud image number to select it."
-        return tool_result(result, summary=summary, request=request)
+        return tool_result(
+            result,
+            summary=summary,
+            internal=list_workflow_internal(
+                result.items,
+                fields=("id", "name"),
+                total=result.total,
+                extra=_image_pagination_context(result, query=query),
+            ),
+            request=request,
+        )
     except (ValueError, RuntimeError) as error:
         return tool_error(error)
+
+
+def _image_pagination_context(result: Any, *, query: str) -> dict[str, Any]:
+    """Return exact image search state required to request the next page."""
+
+    return {
+        "pagination": {
+            "page": result.page,
+            "size": result.size,
+            "query": query,
+            "has_more": result.has_more,
+            "next_page": result.next_page,
+            "source_truncated": result.source_truncated,
+        }
+    }

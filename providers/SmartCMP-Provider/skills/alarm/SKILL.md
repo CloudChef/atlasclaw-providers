@@ -149,7 +149,8 @@ tool_list_parameters: |
         "type": "integer",
         "description": "Page size. Default: 20.",
         "default": 20,
-        "minimum": 1
+        "minimum": 1,
+        "maximum": 50
       }
     }
   }

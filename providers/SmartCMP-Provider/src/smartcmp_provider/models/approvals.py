@@ -6,6 +6,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+APPROVAL_LIST_PAGE_SIZE_MAX = 100
+APPROVAL_LIST_MAX_PAGES = 50
+
 ApprovalDecision = Literal["approve", "reject"]
 ApprovalDecisionOutcome = Literal["succeeded", "failed", "unknown"]
 
@@ -16,8 +19,18 @@ class ApprovalListQuery(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     days: int | None = Field(default=None, ge=1)
-    page_size: int = Field(default=50, ge=1)
-    max_pages: int = Field(default=1, ge=1)
+    page_size: int = Field(
+        default=50,
+        ge=1,
+        le=APPROVAL_LIST_PAGE_SIZE_MAX,
+        strict=True,
+    )
+    max_pages: int = Field(
+        default=1,
+        ge=1,
+        le=APPROVAL_LIST_MAX_PAGES,
+        strict=True,
+    )
 
 
 class ApprovalListResult(BaseModel):
@@ -68,7 +81,7 @@ class ApprovalDecisionInput(BaseModel):
     decision: ApprovalDecision
     request_ids: tuple[str, ...] = Field(min_length=1)
     reason: str = ""
-    max_pages: int = Field(default=5, ge=1)
+    max_pages: int = Field(default=5, ge=1, strict=True)
 
 
 class ApprovalDecisionItem(BaseModel):
