@@ -181,6 +181,7 @@ async def list_recycled_resources(
         return tool_result(
             projection,
             summary=f"Found {len(result.items)} recycled resource rows.",
+            internal=_recycled_resource_workflow_projection(projection),
             request=request,
         )
     except (ValueError, RuntimeError) as error:
@@ -208,6 +209,58 @@ def _recycled_resource_agent_projection(result: Any) -> dict[str, Any]:
             )
         item["operations"] = operations
     return projection
+
+
+def _recycled_resource_workflow_projection(
+    projection: dict[str, Any],
+) -> dict[str, Any]:
+    """Retain exact permanent-removal scope without replaying full resource payloads.
+
+    Recycle-bin rows can contain large cloud properties that exceed Core's
+    trace-bound workflow-context budget.  The follow-up write only needs the
+    deployment identity, complete resource identity set, current state, and
+    authoritative permanent-removal operation shown to the user.
+    """
+
+    workflow_items: list[dict[str, Any]] = []
+    for item in projection.get("items", []) or []:
+        if not isinstance(item, dict):
+            continue
+        workflow_item = {
+            key: item[key]
+            for key in (
+                "resource_id",
+                "resource_name",
+                "resource_type",
+                "status",
+                "deployment_id",
+                "deployment_name",
+                "operations",
+            )
+            if key in item
+        }
+        owning_deployment = item.get("owning_deployment")
+        if isinstance(owning_deployment, dict):
+            workflow_item["owning_deployment"] = {
+                key: owning_deployment[key]
+                for key in (
+                    "id",
+                    "name",
+                    "state",
+                    "deleted",
+                    "recycled",
+                    "recycle_delete_time",
+                )
+                if key in owning_deployment
+            }
+        workflow_items.append(workflow_item)
+
+    return {
+        "items": workflow_items,
+        "total": projection.get("total", 0),
+        "page": projection.get("page", 1),
+        "size": projection.get("size", 20),
+    }
 
 
 async def permanently_remove_recycled_resource(
@@ -332,8 +385,19 @@ async def list_resource_security_violations(
             ),
         )
         payload = result.model_dump(mode="json")
+        provider_instance_name = str(
+            getattr(
+                getattr(getattr(request, "context", None), "instance", None),
+                "name",
+                "",
+            )
+            or ""
+        ).strip()
         payload["items"] = [
-            attach_security_violation_object_metadata(item)
+            attach_security_violation_object_metadata(
+                item,
+                provider_instance_name=provider_instance_name,
+            )
             for item in payload.get("items", [])
         ]
         return tool_result(

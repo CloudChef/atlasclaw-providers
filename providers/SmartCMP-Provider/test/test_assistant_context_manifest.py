@@ -77,6 +77,11 @@ def test_routes_match_context_to_existing_skills_with_one_provider_resolver() ->
             "smartcmp:security-compliance",
         ),
         (
+            "security-compliance-policy-edit",
+            "/main/resource-management/policy/edit/{policy_id}",
+            "smartcmp:security-compliance",
+        ),
+        (
             "pending-approval-detail",
             "/main/new-application/pendingApproval/{approval_type}/{approval_id}",
             "smartcmp:approval",

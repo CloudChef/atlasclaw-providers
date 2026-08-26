@@ -110,7 +110,7 @@ class SecurityViolationMarkFixedInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     violation_id: str = Field(min_length=1)
-    confirmed: bool = False
+    confirmed: bool
 
 
 class SecurityViolationMarkFixedResult(BaseModel):

@@ -70,6 +70,7 @@ try:
         list_resources,
     )
     from smartcmp_provider.operations.catalogs import (
+        _resolve_option_selection,
         get_catalog_detail,
         list_catalogs,
         list_flavors,
@@ -124,6 +125,41 @@ def make_request(
     )
 
 
+@pytest.mark.parametrize(
+    ("field_type", "option_id", "expected_value"),
+    [
+        ("boolean", "false", False),
+        ("integer", "7", 7),
+        ("array", "security-group-1", ["security-group-1"]),
+    ],
+)
+def test_sole_option_auto_selection_preserves_field_type(
+    field_type: str,
+    option_id: str,
+    expected_value: Any,
+) -> None:
+    """A sole returned ID follows the same type conversion as user input."""
+
+    field = {
+        "visible": True,
+        "editable": True,
+        "ask": True,
+        "type": field_type,
+        "value": None,
+        "options": [{"id": option_id}],
+    }
+    selected_values: dict[str, Any] = {}
+
+    pending = _resolve_option_selection(
+        field,
+        explicitly_selected=False,
+        selected_values=selected_values,
+        field_names=("field",),
+    )
+
+    assert pending is False
+    assert field["value"] == expected_value
+    assert selected_values["field"] == expected_value
 
 
 def test_integration_resolver_owns_configured_and_oauth_credentials():
@@ -1086,7 +1122,7 @@ resource_specs:
 
 
 def test_resource_bundle_resolves_declared_placement_fields() -> None:
-    """Resolve one resource-pool lookup and report remaining required fields."""
+    """Auto-select a sole lookup option and report remaining required fields."""
 
     request_scope = make_request(
         instance_name="cmp-a",
@@ -1176,6 +1212,7 @@ def test_resource_bundle_resolves_declared_placement_fields() -> None:
                                     },
                                     "vpc_id": {
                                         "type": "string",
+                                        "defaultValue": "stale-vpc",
                                         "required": {"inRequest": {"value": True}},
                                         "dependencies": {
                                             "account_id": "accountId",
@@ -1340,16 +1377,11 @@ def test_resource_bundle_resolves_declared_placement_fields() -> None:
     assert fields["account_id"]["value"] == "account-1"
     assert fields["vpc_id"]["dependsOn"] == ["account_id"]
     assert fields["vpc_id"]["options"][0]["id"] == 0
-    assert set(pending.items[0]["missingRequiredFields"]) == {
-        "vpc_id",
-        "group_description",
-    }
-    assert set(pending.items[0]["missingSelectionFields"]) == {
-        "vpc_id",
-        "group_description",
-    }
-    assert pending.selection_field["key"] == "vpc_id"
-    assert pending.selection_candidates == ({"id": 0, "name": "VPC A"},)
+    assert fields["vpc_id"]["value"] == 0
+    assert pending.items[0]["missingRequiredFields"] == ["group_description"]
+    assert pending.items[0]["missingSelectionFields"] == ["group_description"]
+    assert pending.selection_field == {}
+    assert pending.selection_candidates == ()
     assert complete.selection_candidates == ()
     assert "not selectable" in invalid_selection.items[0]["configurationErrors"][0]
     assert "no selectable options" in empty_lookup.items[0]["configurationErrors"][0]
@@ -1527,7 +1559,7 @@ def test_windows_compute_rejects_an_exhausted_ip_pool(
     available_ip_size: int,
     expected_valid: bool,
 ) -> None:
-    """Windows network selection requires capacity in an IP pool."""
+    """A default network remains selectable and requires usable IP capacity."""
 
     request_scope = make_request(
         instance_name="cmp-a",
@@ -1599,11 +1631,21 @@ def test_windows_compute_rejects_an_exhausted_ip_pool(
                             "Compute": {
                                 "network_id": {
                                     "type": "string",
+                                    "defaultValue": "network-1",
                                     "required": {"inRequest": {"value": True}},
                                     "visibility": {"inRequest": {"value": True}},
                                     "modification": {"inRequest": {"value": True}},
                                     "cloudResourceType": "generic-resource",
                                     "queryProperties": {"resourceType": "network"},
+                                },
+                                "subnet_id": {
+                                    "type": "string",
+                                    "required": {"inRequest": {"value": True}},
+                                    "visibility": {"inRequest": {"value": True}},
+                                    "modification": {"inRequest": {"value": True}},
+                                    "dependencies": {"network_id": "networkId"},
+                                    "cloudResourceType": "generic-resource",
+                                    "queryProperties": {"resourceType": "subnet"},
                                 }
                             }
                         }
@@ -1612,16 +1654,33 @@ def test_windows_compute_rejects_an_exhausted_ip_pool(
                 request=request,
             )
         if request.url.path.endswith("/cloudprovider"):
+            resource_type = json.loads(request.content)["queryProperties"][
+                "resourceType"
+            ]
+            if resource_type == "subnet":
+                return httpx.Response(
+                    200,
+                    json=[{"id": "subnet-1", "name": "Subnet 1"}],
+                    request=request,
+                )
+            assert resource_type == "network"
             return httpx.Response(
                 200,
-                json=[{
-                    "id": "network-1",
-                    "name": "Network 1",
-                    "properties": {
-                        "ipAllocationMethod": "IP_POOL",
-                        "availableIpSize": available_ip_size,
+                json=[
+                    {
+                        "id": "network-1",
+                        "name": "Network 1",
+                        "properties": {
+                            "ipAllocationMethod": "IP_POOL",
+                            "availableIpSize": available_ip_size,
+                        },
                     },
-                }],
+                    {
+                        "id": "network-2",
+                        "name": "Network 2",
+                        "properties": {"availableIpSize": 1},
+                    },
+                ],
                 request=request,
             )
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
@@ -1661,14 +1720,23 @@ def test_windows_compute_rejects_an_exhausted_ip_pool(
     automatic_fields = {
         field["key"]: field for field in automatic.items[0]["requestFields"]
     }
-    assert automatic_fields["networkId"]["options"][0]["id"] == "network-1"
+    assert automatic_fields["networkId"]["value"] is None
+    assert [
+        option["id"] for option in automatic_fields["networkId"]["options"]
+    ] == ["network-1", "network-2"]
     assert automatic.selection_field["key"] == "networkId"
     assert automatic.selection_candidates == (
         {"id": "network-1", "name": "Network 1"},
+        {"id": "network-2", "name": "Network 2"},
     )
+    assert automatic.items[0]["configurationErrors"] == []
+    assert result.selection_candidates == ()
+    assert automatic_fields["subnetId"]["options"] == []
+    assert automatic_fields["subnetId"]["value"] is None
 
     fields = {field["key"]: field for field in result.items[0]["requestFields"]}
     assert fields["networkId"]["target"] == "networkId"
+    assert fields["subnetId"]["value"] == "subnet-1"
     network_field = next(
         field
         for field in result.items[0]["requestFields"]

@@ -35,6 +35,14 @@ from smartcmp_provider.services.security_compliance import (  # noqa: E402
 )
 
 
+def _provider_instance_name(request: Any) -> str:
+    """Return the SmartCMP instance selected for this completed Tool request."""
+
+    context = getattr(request, "context", None)
+    instance = getattr(context, "instance", None)
+    return str(getattr(instance, "name", "") or "").strip()
+
+
 async def get_security_overview(
     ctx: RunContext[Any],
     start_time: int | None = None,
@@ -113,8 +121,12 @@ async def list_security_violations(
             ),
         )
         payload = result.model_dump(mode="json")
+        provider_instance_name = _provider_instance_name(request)
         payload["items"] = [
-            attach_security_violation_object_metadata(item)
+            attach_security_violation_object_metadata(
+                item,
+                provider_instance_name=provider_instance_name,
+            )
             for item in payload.get("items", [])
         ]
         total = payload.get("total")
@@ -178,6 +190,7 @@ async def analyze_security_violation(
             payload,
             violation=source,
             include_mark_fixed=True,
+            provider_instance_name=_provider_instance_name(request),
         )
         return tool_result(
             projected,
@@ -191,7 +204,7 @@ async def analyze_security_violation(
 async def mark_security_violation_fixed(
     ctx: RunContext[Any],
     violation_id: str,
-    confirmed: bool = False,
+    confirmed: bool,
 ) -> dict[str, Any]:
     """Mark one Security violation FIXED after explicit user confirmation.
 

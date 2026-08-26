@@ -175,7 +175,7 @@ tool_status_parameters: |
 tool_facets_name: "smartcmp_list_facets"
 tool_facets_read_only: true
 tool_facets_auto_select_single_option: true
-tool_facets_description: "List available resource pool tag facets from SmartCMP. REQUIRES businessGroupId — call this AFTER business group is selected and ONLY when request Markdown declares active resourceBundleTags without a default. After this tool returns, do not call datasource tools to interpret facets. Match or ask for a facet option, then build resourceBundleTags with facet key and option key (NOT display names). Never show raw facet metadata."
+tool_facets_description: "List available resource pool tag facets from SmartCMP. REQUIRES businessGroupId — call this AFTER business group is selected whenever request Markdown declares active resourceBundleTags, with or without a default. After this tool returns, do not call datasource tools to interpret facets. Match or ask for a facet option, then build resourceBundleTags with facet key and option key (NOT display names). Never show raw facet metadata."
 tool_facets_entrypoint: "scripts/adapter.py:list_facets"
 tool_facets_group: "cmp"
 tool_facets_capability_class: "provider:smartcmp"
@@ -201,7 +201,7 @@ tool_facets_parameters: |
 tool_resource_bundles_name: "smartcmp_list_resource_bundles"
 tool_resource_bundles_read_only: true
 tool_resource_bundles_auto_select_single_option: true
-tool_resource_bundles_description: "List request-flow resource pools, optionally filtered by selected resource tags, and resolve the active request fields for an exact selected or defaulted pool. Use when generated Markdown declares an active resourceBundleId, resourceBundleTags, or runtime_fields.resolver. Always pass catalog_id and node_template_name as explicit context; placement_values contains business field selections only. Pass resource_bundle_tags as exact facet.key:option.key values whenever tags were selected. With resource_bundle_id, request options through placement_fields and follow the returned requestFields, targets, dependencies, missingRequiredFields, missingSelectionFields, and configurationErrors. Requires selected business_group_id, component_type from generated Markdown catalog/component metadata, and node_type from resourceSpecs[].type. Fixed API filters: strategy=RB_POLICY_STATIC, enabled=true, readOnly=false. If resourceBundleId has ask:true and multiple results exist, present the returned names and wait for the user's selection. Ask the user to identify the resource-pool field and selected number when replying; never suggest that a bare number is sufficient."
+tool_resource_bundles_description: "List request-flow resource pools, optionally filtered by selected resource tags, and resolve active request fields for an exact selected pool. For an active resourceBundleId, omit resource_bundle_id on the initial candidate lookup even when a default exists, and preserve SmartCMP response order. Select a sole result; with multiple results, use an already-stated pool or platform intent only when it uniquely matches one returned item, otherwise show all names in order and wait. Pass the exact selected ID only for subsequent placement resolution. Use when generated Markdown declares an active resourceBundleId, resourceBundleTags, or runtime_fields.resolver. Always pass catalog_id and node_template_name as explicit context; placement_values contains business field selections only. Pass resource_bundle_tags as exact facet.key:option.key values whenever tags were selected. With resource_bundle_id, request options through placement_fields and follow the returned requestFields, targets, dependencies, missingRequiredFields, missingSelectionFields, and configurationErrors. Requires selected business_group_id, component_type from generated Markdown catalog/component metadata, and node_type from resourceSpecs[].type. Fixed API filters: strategy=RB_POLICY_STATIC, enabled=true, readOnly=false."
 tool_resource_bundles_entrypoint: "scripts/adapter.py:list_resource_bundles"
 tool_resource_bundles_group: "cmp"
 tool_resource_bundles_capability_class: "provider:smartcmp"
@@ -242,7 +242,7 @@ tool_resource_bundles_parameters: |
       },
       "resource_bundle_id": {
         "type": "string",
-        "description": "Exact selected or defaulted resource pool ID when resolving placement fields. Omit only while listing resource pools."
+        "description": "Exact selected resource pool ID for placement resolution. Omit on the initial candidate lookup, including when resourceBundleId.defaultValue exists."
       },
       "resource_bundle_tags": {
         "type": "array",
@@ -292,14 +292,14 @@ tool_bgs_parameters: |
 tool_flavors_name: "smartcmp_list_flavors"
 tool_flavors_read_only: true
 tool_flavors_auto_select_single_option: true
-tool_flavors_description: "Resolve the request flavor fields declared by generated Markdown. Without compute_profile_id, list requestable MACHINE compute profiles and use the selected id as computeProfileId. When flavorId is also active, call again with the selected compute_profile_id and resource_bundle_id unless the exact selected resource-pool item has cloudEntryTypeId equal to yacmp:cloudentry:type:vsphere. For that exact vSphere platform and only after computeProfileId is resolved, SmartCMP resolves flavorId from the compute profile: skip the cloud-flavor query and omit flavorId from preview and submit JSON. Never send an empty flavorId or copy computeProfileId into flavorId. A missing platform marker, a different platform, or an unresolved computeProfileId remains fail-closed. Pass catalog_id and node_template_name when known for the compute-profile query. Omit resource_bundle_id only for an intentional global compute-profile query; it is required for a cloud-flavor query. For any ask:true field that requires an explicit selection, show the current filtered names and ask the user to identify the pending field and selected number instead of replying with a bare number or typed specification."
+tool_flavors_description: "Resolve the request flavor fields declared by generated Markdown. Without compute_profile_id, list requestable MACHINE compute profiles and use the selected id as computeProfileId. When flavorId is also active, call again with the selected compute_profile_id and resource_bundle_id unless the exact selected resource-pool item has cloudEntryTypeId equal to yacmp:cloudentry:type:vsphere. For that exact vSphere platform and only after computeProfileId is resolved, SmartCMP resolves flavorId from the compute profile: skip the cloud-flavor query and omit flavorId from preview and submit JSON. Never send an empty flavorId or copy computeProfileId into flavorId. A missing platform marker, a different platform, or an unresolved computeProfileId remains fail-closed. Pass catalog_id and node_template_name when known for the compute-profile query. Omit resource_bundle_id only for an intentional global compute-profile query; it is required for a cloud-flavor query. For any active field with multiple candidates and no explicit user selection, show the current filtered names and ask the user to identify the pending field and selected number instead of replying with a bare number or typed specification."
 tool_flavors_entrypoint: "scripts/adapter.py:list_flavors"
 tool_flavors_group: "cmp"
 tool_flavors_capability_class: "provider:smartcmp"
 tool_flavors_priority: 108
 tool_flavors_use_when:
-  - "Generated Markdown declares an active computeProfileId without a default, after resource pool selection and before any template lookup"
-  - "Generated Markdown declares an active flavorId without a default after computeProfileId and resource pool selection, and the exact selected resource-pool item is not identified as yacmp:cloudentry:type:vsphere"
+  - "Generated Markdown declares an active computeProfileId, with or without a default, after resource pool selection and before any template lookup"
+  - "Generated Markdown declares an active flavorId, with or without a default, after computeProfileId and resource pool selection, and the exact selected resource-pool item is not identified as yacmp:cloudentry:type:vsphere"
 tool_flavors_cli_flag_overrides:
   query: "--query"
   resource_bundle_id: "--resource-bundle-id"
@@ -344,9 +344,9 @@ tool_logical_templates_capability_class: "provider:smartcmp"
 tool_logical_templates_priority: 112
 tool_logical_templates_result_mode: "llm"
 tool_logical_templates_use_when:
-  - "Generated Markdown declares an active logicTemplateId without a default, after resource pool and all explicit flavor-field selections"
+  - "Generated Markdown declares an active logicTemplateId, with or without a default, after resource pool and all explicit flavor-field selections"
 tool_logical_templates_avoid_when:
-  - "An active computeProfileId or an explicitly selectable flavorId without a default has not been selected yet"
+  - "An active computeProfileId or explicitly selectable flavorId has not been selected yet"
 tool_logical_templates_cli_positional:
   - query
 tool_logical_templates_cli_flag_overrides:
@@ -384,7 +384,7 @@ tool_logical_templates_parameters: |
 tool_physical_templates_name: "smartcmp_list_physical_templates"
 tool_physical_templates_read_only: true
 tool_physical_templates_auto_select_single_option: true
-tool_physical_templates_description: "List physical templates available to the selected SmartCMP resource pool and logical template. Use only when generated Markdown declares physicalTemplateId. Each result retains its logicTemplateId; use the selected physicalTemplateId together with logicTemplateId and omit templateId. If physicalTemplateId has ask:true and multiple results exist, present names and ask the user to identify the physical-template field and selected number."
+tool_physical_templates_description: "List physical templates available to the selected SmartCMP resource pool and logical template. Use only when generated Markdown declares physicalTemplateId. Each result retains its logicTemplateId; use the selected physicalTemplateId together with logicTemplateId and omit templateId. If multiple results exist without an explicit user selection, present names and ask the user to identify the physical-template field and selected number."
 tool_physical_templates_entrypoint: "scripts/adapter.py:list_physical_templates"
 tool_physical_templates_groups:
   - cmp
@@ -393,9 +393,9 @@ tool_physical_templates_capability_class: "provider:smartcmp"
 tool_physical_templates_priority: 114
 tool_physical_templates_result_mode: "silent_ok"
 tool_physical_templates_use_when:
-  - "Generated Markdown declares an active physicalTemplateId without a default, after resource pool and logicTemplateId selection"
+  - "Generated Markdown declares an active physicalTemplateId, with or without a default, after resource pool and logicTemplateId selection"
 tool_physical_templates_avoid_when:
-  - "An active computeProfileId, explicitly selectable flavorId, or logicTemplateId without a default has not been selected yet"
+  - "An active computeProfileId, explicitly selectable flavorId, or logicTemplateId has not been selected yet"
 tool_physical_templates_cli_positional:
   - resource_bundle_id
   - logic_template_id
@@ -417,7 +417,7 @@ tool_physical_templates_parameters: |
 tool_images_name: "smartcmp_list_images"
 tool_images_read_only: true
 tool_images_auto_select_single_option: true
-tool_images_description: "List cloud images for a SmartCMP request. Call after resource-pool and logical-template selection only when generated Markdown declares templateId. Use the selected image id as templateId, never as physicalTemplateId. If templateId has ask:true and multiple results exist, present image names and ask the user to identify the image field and selected number."
+tool_images_description: "List cloud images for a SmartCMP request. Call after resource-pool and logical-template selection only when generated Markdown declares templateId. Use the selected image id as templateId, never as physicalTemplateId. If multiple results exist without an explicit user selection, present image names and ask the user to identify the image field and selected number."
 tool_images_entrypoint: "../datasource/scripts/adapter.py:list_images"
 tool_images_groups:
   - cmp
@@ -426,9 +426,9 @@ tool_images_capability_class: "provider:smartcmp"
 tool_images_priority: 113
 tool_images_result_mode: "llm"
 tool_images_use_when:
-  - "Generated Markdown declares an active templateId without a default, after resource pool and logicTemplateId selection"
+  - "Generated Markdown declares an active templateId, with or without a default, after resource pool and logicTemplateId selection"
 tool_images_avoid_when:
-  - "An active computeProfileId, explicitly selectable flavorId, or logicTemplateId without a default has not been selected yet"
+  - "An active computeProfileId, explicitly selectable flavorId, or logicTemplateId has not been selected yet"
 tool_images_cli_positional:
   - resource_bundle_id
   - logic_template_id
@@ -573,18 +573,22 @@ Status semantics:
 5. Build the request from the selected catalog's generated Markdown metadata:
    `instructions.resourceSpecs`, `instructions.genericRequest`, and
    `instructions.topLevelFields`.
-6. Ask only for active required fields with no default, plus fields explicitly
-   marked `ask: true`. Defaults are used silently. The sole platform-resolved
-   exception is `flavorId` after `computeProfileId` is selected when the exact
-   selected resource-pool item has `cloudEntryTypeId` equal to
+6. For every active selectable field, resolve its candidates even when it has a
+   default. A default is only a suggestion in its declared or returned position:
+   use a sole candidate, but require an explicit user choice among multiple
+   candidates unless the user's existing intent uniquely identifies one. Use non-selectable defaults
+   silently, and ask for other active required or `ask: true` fields without a
+   value. The sole platform-resolved exception is `flavorId` after
+   `computeProfileId` is selected when the exact selected resource-pool item has
+   `cloudEntryTypeId` equal to
    `yacmp:cloudentry:type:vsphere`; omit that field instead of asking for it.
 7. Reuse resolved workflow lookup evidence. For every resource spec with an
    active `resourceBundleTags`, active `resourceBundleId`, or
    `runtime_fields.resolver`, resolve its resource pool and dynamic request
-   fields, then collect each active required or `ask: true` value that has no
-   default. Ticket/work-order `genericRequest` catalogs have no resource specs
-   and skip this step. Use the exact returned option ID for option-backed
-   fields. Once all declared fields have values, show a schema-exact JSON
+   fields, then collect each unresolved active required, `ask: true`, or
+   selectable value. Ticket/work-order `genericRequest` catalogs have no
+   resource specs and skip this step. Use the exact returned option ID for
+   option-backed fields. Once all declared fields have values, show a schema-exact JSON
    preview with credential secrets masked, ask for confirmation, and stop. Do
    not run a final resource-pool revalidation solely to authorize the preview.
 8. After the user confirms, call `smartcmp_submit_request` with the corresponding
@@ -624,7 +628,7 @@ question.
   active `resourceBundleTags` -> active `resourceBundleId` ->
   `computeProfileId` -> explicitly selectable `flavorId` when declared -> `logicTemplateId` ->
   `physicalTemplateId` or `templateId`. Do not call tools for two unresolved
-  `ask: true` fields in one model response. When tags are the sole pool
+  selectable fields in one model response. When tags are the sole pool
   selector, use the first filtered result in CMP response order only for
   internal dynamic-field resolution and do not submit its ID. Ticket/work-order
   `genericRequest` catalogs skip this resource-spec lookup sequence.
@@ -640,11 +644,12 @@ question.
   result. A missing or different platform marker remains fail-closed. Do not
   call any logical-template,
   physical-template, or image lookup first.
-- For each active generated field with `ask: true`, call only that field's
-  lookup. When the opted-in read-only tool returns one visible candidate, the
-  generic runtime selects it and continues. When it returns multiple choices,
-  present only those choices, ask the user to select one, and stop. Do not ask
-  for later lookup fields or user-entered fields in the same reply.
+- For each active generated selectable field, call only that field's lookup,
+  regardless of whether it has a default. When the opted-in read-only tool
+  returns one visible candidate, the generic runtime selects it and continues.
+  When it returns multiple choices without an explicit user selection, present
+  only those choices in returned order, ask the user to select one, and stop.
+  Do not ask for later lookup fields or user-entered fields in the same reply.
 - Every lookup-selection prompt must also state exactly one immediate workflow
   step that will follow the user's selection, without asking for that next step
   in the same reply. If another generated lookup remains, state that the next
@@ -658,9 +663,10 @@ question.
   above while any active lookup field remains unresolved. Once that sequence is
   complete, but before starting `resource_bundle_placement` discovery or exact
   validation, collect the already-known active non-lookup fields in their
-  declared order. A field belongs to this sequence when it is marked required
-  or `ask: true`, has satisfied dependencies, and has neither a real user value
-  nor a non-empty default. A promise to provide a value later is not a value.
+  declared order. A field belongs to this sequence when it is required,
+  `ask: true`, or selectable, has satisfied dependencies, and has neither a real
+  user value nor a usable non-selectable default. A selectable default is not a real user
+  value when multiple candidates exist. A promise to provide a value later is not a value.
   Ask for exactly the first missing field and stop. After the user supplies it,
   re-evaluate the same already-known active non-lookup fields. If another field
   still meets these conditions, ask for that field next and do not state or
@@ -677,9 +683,9 @@ question.
 - Stop after a lookup whenever the user must choose among multiple unresolved
   options. Ask at most one concise question and wait for the answer.
 - A sole visible candidate may auto-continue only when its read-only tool is
-  explicitly marked `auto_select_single_option`. Multiple candidates always
-  remain a user selection boundary. Tools without that metadata never gain
-  automatic-selection behavior.
+  explicitly marked `auto_select_single_option`. Multiple candidates remain a
+  user selection boundary unless existing user intent uniquely matches one.
+  Tools without that metadata never gain automatic-selection behavior.
 - During mandatory catalog discovery, when the initial list has one clear
   automatic match, emit `smartcmp_get_request_catalog` and
   `smartcmp_list_available_bgs` in the same tool-call batch with the selected
@@ -792,8 +798,8 @@ scope.
   top-level JSON object `params.<key>`. These are catalog form fields from
   `catalog.form_definition_id`, not resource spec fields.
 - Root `instructions.params` fields follow the same active-field rules as
-  resource fields: evaluate `when`, use defaults silently, show static
-  `options`, ask only for active required/no-default or `ask: true` fields, and
+  resource fields: evaluate `when`, follow the selectable-default rule in
+  Complete flow for static `options`, use non-selectable defaults silently, and
   omit inactive or empty optional fields.
 - Do not put root `instructions.params` fields into
   `resourceSpecs[].params`. Do not put `resourceSpecs[].params` fields into the
@@ -804,8 +810,8 @@ scope.
   `genericRequest.description`. Put fields declared under
   `instructions.genericRequest.processForm.<key>` at
   `genericRequest.processForm.<key>`. Follow the same active-field rules:
-  evaluate `when`, use defaults silently, ask only for active required/no-default
-  or `ask: true` fields, and omit inactive or empty optional fields.
+  evaluate `when`, follow the selectable-default rule in Complete flow, use
+  non-selectable defaults silently, and omit inactive or empty optional fields.
 - For each `instructions.resourceSpecs[]`, create one `resourceSpecs[]` item
   and copy `node` and `type` exactly when present.
 - Treat field schemas declared directly on `instructions.resourceSpecs[]`,
@@ -839,18 +845,16 @@ scope.
 - Do not create or consume a literal `fields` object. Direct resource spec
   fields must be declared directly on `instructions.resourceSpecs[]`.
 - Put `resourceBundleTags` at the same level as `resourceBundleId`,
-  `resourceBundleParams`, and `params` in Markdown. If it is active and has no
-  `defaultValue` / `default_value`, call `smartcmp_list_facets` after
-  business group selection with `node_type` from that spec's `type`, then ask
-  the user to choose resource tags. Retain selected values as exact
+  `resourceBundleParams`, and `params` in Markdown. If it is active, call
+  `smartcmp_list_facets` after business group selection with `node_type` from
+  that spec's `type`, whether or not it has a default. Retain selected values as exact
   `"<facet.key>:<option.key>"` filters for the resource-pool step.
 - When both `resourceBundleTags` and `resourceBundleId` are active, resolve tags
   first and pass them as `resource_bundle_tags` to
-  `smartcmp_list_resource_bundles`. Use one returned pool exactly as the
-  `resourceBundleId` selection: adopt a sole result automatically, or show
-  multiple returned pool names and wait for the user. Keep both the selected
-  tags and `resourceBundleId` in the Provider Tool `json_body` so the Provider
-  can revalidate the same placement. The Provider removes
+  `smartcmp_list_resource_bundles`, then apply the authoritative
+  `resourceBundleId` selection rules below. Keep both the selected tags and
+  `resourceBundleId` in the Provider Tool `json_body` so the Provider can
+  revalidate the same placement. The Provider removes
   `resourceBundleTags` before submitting to SmartCMP, so the upstream request
   contains only `resourceBundleId`.
 - When only `resourceBundleTags` is active, pass the selected tags to
@@ -860,17 +864,24 @@ scope.
   verifies and submits the same pool ID from `resource_bundle_selections`. An
   empty filtered result is an error and must not be retried without the selected
   tags.
-- If `resourceBundleId.defaultValue` exists, filter with any selected tags and
-  require that exact pool to remain available, then put that value at
-  `resourceSpecs[].resourceBundleId`.
-- If a spec uses a defaulted `resourceBundleId` but declares a request-time
-  placement field without a default, call `smartcmp_list_resource_bundles` and
-  pass that default as `resource_bundle_id`. This lookup supplies the selectable
-  resources; it does not reopen resource-pool selection.
-- If an active `resourceBundleId` has no default, call
-  `smartcmp_list_resource_bundles` after business group and tag selection. Adopt
-  a sole result automatically; with multiple results, ask the user to choose
-  one. Use the selected bundle `id` at `resourceSpecs[].resourceBundleId`.
+- The `resourceBundleId` rules here apply the generic selectable-default rule
+  and override optional-field, preview-readiness, and submit-readiness rules
+  elsewhere in this skill.
+- For every active `resourceBundleId`—required, `ask: true`, or optional; with
+  or without a default—call `smartcmp_list_resource_bundles` after business
+  group and tag selection without `resource_bundle_id`. A default is only a
+  suggestion, never a usable selection. Preserve the
+  complete SmartCMP response order and never reorder candidates.
+- Select a sole returned pool automatically. With multiple pools, an
+  already-stated pool or platform intent is an existing user selection only
+  when it uniquely matches one returned item; otherwise show every returned
+  name in order and wait. Never silently select the default from multiple
+  results.
+- After resource-pool selection is complete, use the selected bundle `id` at
+  `resourceSpecs[].resourceBundleId`. Call `smartcmp_list_resource_bundles`
+  again with that exact `resource_bundle_id` only when placement fields must be
+  discovered or resolved for the selected pool. Until selection completes,
+  preview and submit are not ready.
 - If no pool selector is active but `runtime_fields.resolver` requires a pool,
   call `smartcmp_list_resource_bundles` without tags or a pool ID. The Provider
   returns only its internally selected first CMP-sorted pool for downstream
@@ -911,13 +922,13 @@ scope.
   infer field names, dependencies, or request locations from a cloud platform
   or from another catalog.
 - Put `params.<key>` values under `resourceSpecs[].params.<key>`.
-- Collect every active field marked required or `ask: true`, except the
+- Collect every active required, `ask: true`, or selectable field, except the
   platform-resolved vSphere `flavorId` defined above. After the final dynamic
   value is selected, proceed directly to the request preview when all declared
-  active fields have a real value or non-empty default. Do not call the pool
-  resolver again before the preview.
+  active fields have a real value or a usable non-selectable default. Do not
+  call the pool resolver again before the preview.
 - `logicTemplateId` is the independent logical OS-template field. When it is
-  active without a default, query logical templates with the selected
+  active, query logical templates with the selected
   `resourceBundleId` plus catalog/node/OS filters and serialize the selected
   logical-template `id` as `resourceSpecs[].logicTemplateId`.
 - `physicalTemplateId` and `templateId` are alternative concrete-template
@@ -934,19 +945,18 @@ scope.
   `templateId` is also active. When only `physicalTemplateId` is active and no
   physical template exists, stop and report the catalog/resource-pool
   configuration issue.
-- Use `defaultValue` / `default_value` silently. Do not ask the user whether to
-  modify a default.
-- When an active field has static `options`, always show the option labels and
-  ids as user-facing help when collecting remaining fields or showing the
-  preview summary. This applies even when the field has a default. Do not ask a
-  blocking question only for that defaulted field, but make alternatives clear
-  so the user can override the default before confirmation.
-- Format defaulted static options like:
-  `地址类型: 默认 internet（公网）；可选：internet=公网，intranet=私网`.
-- Ask only when an active required field has no default, or when a field has
-  `ask: true`. Resolve declared no-default `resourceBundleParams` from the exact
+- Use `defaultValue` / `default_value` silently only for fields without a
+  candidate set. For every active field with static options or live lookup
+  candidates, preserve the declared or returned order: use a sole candidate,
+  but require an explicit user choice among multiple candidates unless existing
+  user intent uniquely matches one. Keep a default as a suggestion in its
+  declared or returned position; never move it ahead of other candidates.
+- Ask for an active required field with no usable value, a field marked
+  `ask: true`, or a selectable field with multiple candidates and no explicit
+  user selection. Resolve declared `resourceBundleParams` from the exact
   selected resource pool; omit only inactive or unmarked optional fields.
-- Optional fields without a user value or non-empty default are omitted.
+- Optional non-selectable fields without a user value or non-empty default are
+  omitted.
 - Never serialize metadata keys such as `type`, `required`, `defaultValue`,
   `default_value`, `when`, `source`, `label`, `ask`, or `options`.
 
@@ -975,7 +985,7 @@ scope.
     {
       "node": "<from instructions.resourceSpecs[].node>",
       "type": "<from instructions.resourceSpecs[].type>",
-      "resourceBundleId": "<from resourceBundleId default or selected resource pool id>",
+      "resourceBundleId": "<selected resource pool id>",
       "resourceBundleParams": {
         "<key>": "<active value>"
       },
@@ -1037,8 +1047,8 @@ Omit `genericRequest.processForm` when no form fields are declared or active.
 
 Generated Markdown determines which lookup fields are active; Tool sequencing
 determines their order. Call only the lookup for the current active field with
-no usable default, use its selected returned ID only for that declared field,
-and keep display names user-facing.
+or without a default, use its selected returned ID only for that declared
+field, and keep display names user-facing.
 
 - For `resourceBundleTags`, use `smartcmp_list_facets` with the spec node type.
   Pass selected `"<facet.key>:<option.key>"` values to the resource-pool lookup;
@@ -1152,9 +1162,10 @@ after collecting `name` and description:
 
 Before submit:
 
-1. Verify that every active required or `ask: true` field declared by generated
-   instructions or resolved dynamic field metadata has a real value or
-   non-empty default. Do not perform a final resource-pool revalidation.
+1. Verify that every active required, `ask: true`, or selectable field declared
+   by generated instructions or resolved dynamic field metadata has a real
+   value or usable non-selectable default. Do not perform a final resource-pool
+   revalidation.
 2. Show a short summary in the user's language.
 3. Show `JSON 预览` / `JSON Preview` with a fenced JSON block. This block is a
    presentation-only copy, not the `json_body` passed to the submit tool.

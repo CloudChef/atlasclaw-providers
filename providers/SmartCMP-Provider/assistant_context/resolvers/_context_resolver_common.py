@@ -33,6 +33,7 @@ from smartcmp_provider.operations.context_objects import (
     read_resource,
     read_script_definition,
 )
+from smartcmp_provider.operations.security_compliance import get_security_policy_facts
 from smartcmp_provider.transport.client import SmartCmpClient
 
 
@@ -55,6 +56,9 @@ class ContextReader(Protocol):
 
     async def read_optimization_policy(self, object_id: str) -> dict[str, Any]:
         """Read one exact optimization policy."""
+
+    async def read_security_policy(self, object_id: str) -> dict[str, Any]:
+        """Read one exact security compliance policy."""
 
     async def read_component_definition(self, object_id: str) -> dict[str, Any]:
         """Read one exact blueprint component."""
@@ -150,6 +154,11 @@ class SmartCmpProviderContextReader:
         """Read one exact optimization policy through SmartCMP Provider."""
 
         return await read_optimization_policy(self._require_client(), object_id)
+
+    async def read_security_policy(self, object_id: str) -> dict[str, Any]:
+        """Read one exact security policy through SmartCMP Provider."""
+
+        return await get_security_policy_facts(self._require_client(), object_id)
 
     async def read_component_definition(self, object_id: str) -> dict[str, Any]:
         """Read one exact component definition through SmartCMP Provider."""

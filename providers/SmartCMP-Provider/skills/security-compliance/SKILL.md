@@ -166,8 +166,7 @@ tool_mark_fixed_parameters: |
       },
       "confirmed": {
         "type": "boolean",
-        "description": "True only after the user explicitly confirms this status-only change.",
-        "default": false
+        "description": "True only after the user explicitly confirms this status-only change. This argument must be supplied explicitly and has no default."
       }
     },
     "required": ["violation_id", "confirmed"]

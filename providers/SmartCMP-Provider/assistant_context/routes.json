@@ -102,6 +102,18 @@
       }
     },
     {
+      "id": "security-compliance-policy-edit",
+      "priority": 500,
+      "match": {
+        "path_template": "/main/resource-management/policy/edit/{policy_id}"
+      },
+      "result": {
+        "page_type": "security-compliance-policy-edit",
+        "object_type": "security_compliance_policy",
+        "skill_ref": "smartcmp:security-compliance"
+      }
+    },
+    {
       "id": "pending-approval-detail",
       "priority": 400,
       "match": {

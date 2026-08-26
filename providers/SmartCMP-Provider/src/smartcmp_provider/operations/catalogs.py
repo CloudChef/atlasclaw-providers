@@ -795,6 +795,15 @@ async def _resolve_resource_bundle_request_fields(
                 options_resolved = True
                 if auto_query_options:
                     auto_lookup_pending = False
+            selection_pending = _resolve_option_selection(
+                field,
+                explicitly_selected=any(
+                    not _is_missing(selected_values.get(key))
+                    for key in (field_name, source_field_name)
+                ),
+                selected_values=effective_values,
+                field_names=(field_name, source_field_name),
+            )
             if explicitly_requested and not dependencies_resolved:
                 configuration_errors.append(
                     f"Lookup field '{field_name}' cannot be validated until "
@@ -807,7 +816,7 @@ async def _resolve_resource_bundle_request_fields(
                     options=field["options"],
                     configuration_errors=configuration_errors,
                 )
-            if field["ask"] and _is_missing(field.get("value")):
+            if selection_pending:
                 missing_selection_fields.append(field_name)
             if field["required"] and _is_missing(field.get("value")):
                 if field.get("ask"):
@@ -828,6 +837,7 @@ async def _resolve_resource_bundle_request_fields(
             component_id=component_id,
             requested_fields=requested_fields,
             selected_values=effective_values,
+            explicitly_selected_values=selected_values,
             resolved_fields=resolved_fields,
             missing_required_fields=missing_required_fields,
             missing_selection_fields=missing_selection_fields,
@@ -853,6 +863,7 @@ async def _append_compute_related_resource_fields(
     component_id: str,
     requested_fields: tuple[str, ...],
     selected_values: dict[str, Any],
+    explicitly_selected_values: dict[str, Any],
     resolved_fields: list[dict[str, Any]],
     missing_required_fields: list[str],
     missing_selection_fields: list[str],
@@ -962,6 +973,14 @@ async def _append_compute_related_resource_fields(
             options_resolved = True
             if auto_query_options:
                 auto_lookup_pending = False
+        selection_pending = _resolve_option_selection(
+            field,
+            explicitly_selected=not _is_missing(
+                explicitly_selected_values.get(direct_key)
+            ),
+            selected_values=selected_values,
+            field_names=(direct_key,),
+        )
         if explicitly_requested and not dependencies_resolved:
             configuration_errors.append(
                 f"Lookup field '{direct_key}' cannot be validated until "
@@ -974,7 +993,7 @@ async def _append_compute_related_resource_fields(
                 options=field["options"],
                 configuration_errors=configuration_errors,
             )
-        if field["ask"] and _is_missing(field.get("value")):
+        if selection_pending:
             missing_selection_fields.append(direct_key)
         if field["required"] and _is_missing(field.get("value")):
             if field["ask"]:
@@ -990,6 +1009,7 @@ async def _append_compute_related_resource_fields(
             resource_bundle=resource_bundle,
             requested_fields=requested_fields,
             selected_values=selected_values,
+            explicitly_selected_values=explicitly_selected_values,
             resolved_fields=resolved_fields,
             missing_selection_fields=missing_selection_fields,
             configuration_errors=configuration_errors,
@@ -1002,6 +1022,7 @@ def _append_compute_subnet_field(
     resource_bundle: dict[str, Any],
     requested_fields: tuple[str, ...],
     selected_values: dict[str, Any],
+    explicitly_selected_values: dict[str, Any],
     resolved_fields: list[dict[str, Any]],
     missing_selection_fields: list[str],
     configuration_errors: list[str],
@@ -1063,6 +1084,14 @@ def _append_compute_subnet_field(
             if (option := _normalize_option(item)) is not None
         ]
     field["options"] = options
+    selection_pending = _resolve_option_selection(
+        field,
+        explicitly_selected=not _is_missing(
+            explicitly_selected_values.get("subnetId")
+        ),
+        selected_values=selected_values,
+        field_names=("subnetId",),
+    )
     if explicitly_requested and not dependencies_resolved:
         configuration_errors.append(
             "Lookup field 'subnetId' cannot be validated until its dependencies are selected."
@@ -1074,7 +1103,7 @@ def _append_compute_subnet_field(
             options=options,
             configuration_errors=configuration_errors,
         )
-    if field["ask"]:
+    if selection_pending:
         missing_selection_fields.append("subnetId")
     resolved_fields.append(field)
 
@@ -1410,6 +1439,46 @@ def _request_field(
         "options": static_options,
         "validation": _field_validation(schema),
     }
+
+
+def _resolve_option_selection(
+    field: dict[str, Any],
+    *,
+    explicitly_selected: bool,
+    selected_values: dict[str, Any],
+    field_names: tuple[str, ...],
+) -> bool:
+    """Resolve one option field and update values used by dependent fields."""
+
+    options = field.get("options") or []
+    can_select = field.get("visible") is True and field.get("editable") is True
+    if not explicitly_selected and can_select and len(options) == 1:
+        option_id = options[0].get("id")
+        option_value = _selected_field_value(
+            option_id,
+            {"type": field.get("type")},
+        )
+        field["value"] = (
+            [option_value] if field.get("type") == "array" else option_value
+        )
+        field["ask"] = False
+    else:
+        default_needs_confirmation = (
+            not explicitly_selected
+            and can_select
+            and not _is_missing(field.get("value"))
+            and len(options) > 1
+        )
+        if default_needs_confirmation:
+            field["value"] = None
+            field["ask"] = True
+    value = field.get("value")
+    for field_name in field_names:
+        if _is_missing(value):
+            selected_values.pop(field_name, None)
+        else:
+            selected_values[field_name] = value
+    return field["ask"] and _is_missing(value)
 
 
 def _request_flag(

@@ -31,6 +31,7 @@ RECOMMENDATION_ID = "7c6196b1-5623-4d85-896d-e74b4f9042cd"
 FORM_ID = "0897c154-3c46-414e-906e-2a7277f8def2"
 SCRIPT_ID = "3e045633-6ed6-4988-bddf-c7136d54e7de"
 POLICY_ID = "e3085cba-e8b9-4e6c-a65d-36331cdbe47d"
+SECURITY_POLICY_ID = "policy.security.machine.metadata_service_hardened"
 COMPONENT_ID = "010c8da0-9866-4b32-bbff-72f3d49efb4e"
 
 
@@ -69,6 +70,9 @@ class _Reader:
         return self._read(f"/scripts/{object_id}")
 
     async def read_optimization_policy(self, object_id: str) -> dict[str, Any]:
+        return self._read(f"/compliance-policies/{object_id}")
+
+    async def read_security_policy(self, object_id: str) -> dict[str, Any]:
         return self._read(f"/compliance-policies/{object_id}")
 
     async def read_component_definition(self, object_id: str) -> dict[str, Any]:
@@ -524,6 +528,77 @@ def test_security_collection_context_lists_violations_without_provider_io(
     ]
     prompt = result["object_actions"][0]["agent_prompt"]["default"]
     assert "smartcmp_list_security_violations" in prompt
+
+
+def test_security_policy_edit_context_binds_security_skill_to_exact_policy(
+    monkeypatch,
+) -> None:
+    """The Security policy editor resolves its dotted policy ID for action turns."""
+
+    module = _load(monkeypatch)
+
+    def fake_get(url, **_kwargs):
+        assert url.endswith(f"/compliance-policies/{SECURITY_POLICY_ID}")
+        return _Response(
+            {
+                "id": SECURITY_POLICY_ID,
+                "name": "Harden metadata service",
+                "category": "SECURITY.MACHINE",
+                "severity": "HIGH",
+                "type": "COMPLIANCE",
+                "status": "ENABLED",
+            }
+        )
+
+    result = _resolve_page_context(
+        module,
+        "security-compliance-policy-edit",
+        f"/main/resource-management/policy/edit/{SECURITY_POLICY_ID}",
+        {"policy_id": SECURITY_POLICY_ID},
+        "security-compliance-policy-edit",
+        "security_compliance_policy",
+        reader=_Reader(fake_get),
+    )
+
+    assert result["success"] is True
+    assert result["object"] == {
+        "type": "security_compliance_policy",
+        "id": SECURITY_POLICY_ID,
+        "name": "Harden metadata service",
+        "state": "enabled",
+        "attributes": {
+            "category": "SECURITY.MACHINE",
+            "severity": "HIGH",
+            "policy_type": "COMPLIANCE",
+        },
+    }
+    assert result["object_actions"] == []
+
+
+def test_security_policy_edit_context_requires_explicit_security_category(
+    monkeypatch,
+) -> None:
+    """A policy without Security category evidence must not bind the page Skill."""
+
+    module = _load(monkeypatch)
+    result = _resolve_page_context(
+        module,
+        "security-compliance-policy-edit",
+        f"/main/resource-management/policy/edit/{SECURITY_POLICY_ID}",
+        {"policy_id": SECURITY_POLICY_ID},
+        "security-compliance-policy-edit",
+        "security_compliance_policy",
+        reader=_Reader(
+            lambda *_args, **_kwargs: _Response(
+                {
+                    "id": SECURITY_POLICY_ID,
+                    "name": "Missing category",
+                }
+            )
+        ),
+    )
+
+    assert result == {"success": False, "reason": "policy_category_mismatch"}
 
 
 def test_edit_pages_resolve_minimal_current_objects_without_business_content(

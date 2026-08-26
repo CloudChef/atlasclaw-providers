@@ -6,6 +6,7 @@ import asyncio
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from smartcmp_provider.auth.resolver import resolve_provided_request
 from smartcmp_provider.errors import (
@@ -628,6 +629,9 @@ def test_overview_defaults_to_thirty_days_and_aggregates_inventory():
 
 def test_mark_fixed_requires_confirmation_and_verifies_without_resource_change():
     """Mark FIXED must re-read status and must never imply resource remediation."""
+
+    with pytest.raises(ValidationError, match="confirmed"):
+        SecurityViolationMarkFixedInput(violation_id="security-1")
 
     seen_paths: list[str] = []
     detail_reads = 0

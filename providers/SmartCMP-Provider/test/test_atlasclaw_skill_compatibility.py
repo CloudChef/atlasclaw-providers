@@ -169,6 +169,16 @@ def test_skill_metadata_keeps_expected_tool_contract() -> None:
     assert set(tool_names) == EXPECTED_TOOL_NAMES
 
 
+def test_security_mark_fixed_metadata_requires_explicit_confirmation() -> None:
+    """Keep the status-write confirmation required without a false default."""
+
+    metadata = _frontmatter(SKILLS_ROOT / "security-compliance" / "SKILL.md")
+    parameters = yaml.safe_load(metadata["tool_mark_fixed_parameters"])
+
+    assert "confirmed" in parameters["required"]
+    assert "default" not in parameters["properties"]["confirmed"]
+
+
 def test_security_and_resource_natural_language_routing_metadata_is_distinct() -> None:
     """Declare deterministic ownership for representative Security prompts.
 

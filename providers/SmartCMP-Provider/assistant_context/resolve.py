@@ -102,6 +102,9 @@ try:
     from _alarm_object_actions import build_alert_object_actions  # noqa: E402
     from _cost_object_actions import build_cost_object_actions  # noqa: E402
     from smartcmp_provider.domain.cost import is_cost_category  # noqa: E402
+    from smartcmp_provider.operations.security_compliance import (  # noqa: E402
+        is_security_category,
+    )
     from _security_object_actions import (  # noqa: E402
         build_security_violation_collection_actions,
     )
@@ -116,6 +119,7 @@ finally:
 
 _APPLICATION_TYPE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 _APPROVAL_TYPE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+_SECURITY_POLICY_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$")
 _OBJECT_PARAMETER_NAMES: dict[str, frozenset[str]] = {
     "alarm_alert": frozenset(("alert_id",)),
     "blueprint_component": frozenset(("component_id",)),
@@ -127,6 +131,7 @@ _OBJECT_PARAMETER_NAMES: dict[str, frozenset[str]] = {
     "request": frozenset(("application_type", "request_id")),
     "resource": frozenset(("resource_id",)),
     "script_definition": frozenset(("script_id",)),
+    "security_compliance_policy": frozenset(("policy_id",)),
     "security_compliance_violation_collection": frozenset(),
     "virtual_machine": frozenset(("resource_id",)),
 }
@@ -145,6 +150,37 @@ def _resolve_security_violation_collection() -> dict[str, Any]:
         state="",
         attributes={"category": "SECURITY"},
         object_actions=build_security_violation_collection_actions(),
+    )
+
+
+async def _resolve_security_policy(
+    route_parameters: dict[str, Any], *, reader: ContextReader
+) -> dict[str, Any]:
+    """Resolve one Security policy editor page to its exact policy."""
+
+    policy_id = str(route_parameters.get("policy_id") or "").strip()
+    if not _SECURITY_POLICY_ID.fullmatch(policy_id):
+        return _failure("invalid_policy_reference")
+    try:
+        policy = await reader.read_security_policy(policy_id)
+    except (SmartCmpError, TypeError, ValueError):
+        return _failure("provider_unavailable")
+    if not isinstance(policy, dict) or text(policy.get("id")) != policy_id:
+        return _failure("policy_id_mismatch")
+    category = text(policy.get("category")).upper()
+    if not is_security_category(category):
+        return _failure("policy_category_mismatch")
+    return success_object(
+        object_type="security_compliance_policy",
+        object_id=policy_id,
+        name=text(policy.get("nameZh") or policy.get("name")) or policy_id,
+        state=text(policy.get("status")).lower(),
+        attributes={
+            "category": category,
+            "severity": text(policy.get("severity")),
+            "policy_type": text(policy.get("type")),
+        },
+        object_actions=[],
     )
 
 
@@ -719,6 +755,8 @@ async def resolve_page_context(
         return await _resolve_alert(route_parameters, reader=reader)
     if normalized_object_type == "cost_optimization_recommendation":
         return await _resolve_cost_recommendation(route_parameters, reader=reader)
+    if normalized_object_type == "security_compliance_policy":
+        return await _resolve_security_policy(route_parameters, reader=reader)
     if normalized_object_type == "security_compliance_violation_collection":
         return _resolve_security_violation_collection()
     return await _resolve_resource(
