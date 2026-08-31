@@ -13,6 +13,11 @@ def test_markdown_vault_provider_package_layout() -> None:
     assert (PROVIDER_ROOT / "PROVIDER.md").is_file()
     assert (PROVIDER_ROOT / "README.md").is_file()
     assert (PROVIDER_ROOT / "provider.schema.json").is_file()
+    assert (PROVIDER_ROOT / "runtime-api.json").is_file()
+    assert (PROVIDER_ROOT / "http_runtime.py").is_file()
+    assert (PROVIDER_ROOT / "knowledge_runtime.py").is_file()
+    assert (PROVIDER_ROOT / "knowledge_attachment_converter.py").is_file()
+    assert (PROVIDER_ROOT / "pdf_extraction_worker.py").is_file()
     assert (PROVIDER_ROOT / "assets" / "icon.svg").is_file()
     assert (PROVIDER_ROOT / "skills" / "markdown-vault-query" / "SKILL.md").is_file()
 
@@ -40,6 +45,11 @@ def test_markdown_vault_manifest_declares_config_contract() -> None:
 
     assert manifest["schema_version"] == 1
     assert manifest["provider_type"] == "markdown-vault"
+    assert manifest["runtime_capabilities"] == [
+        "knowledge_read",
+        "knowledge_write",
+        "knowledge_query",
+    ]
     assert manifest["catalog"]["icon_path"] == "assets/icon.svg"
     assert manifest["config_schema"]["default_auth_type"] == "app_credentials"
     assert manifest["config_schema"]["auth_modes"]["app_credentials"]["required_fields"] == []
@@ -53,6 +63,10 @@ def test_markdown_vault_manifest_declares_config_contract() -> None:
     assert fields["max_chunk_chars"]["default"] >= 200
     assert fields["max_context_chars"]["default"] == 24576
     assert fields["max_result_chars"]["default"] == 3072
+    assert fields["max_attachments"]["default"] > 0
+    assert fields["max_attachment_bytes"]["default"] > 0
+    assert fields["max_total_attachment_bytes"]["default"] > 0
+    assert fields["conversion_timeout_seconds"]["default"] > 0
 
 
 def test_markdown_vault_manifest_stays_with_supported_runtime_contract() -> None:
@@ -64,6 +78,27 @@ def test_markdown_vault_manifest_stays_with_supported_runtime_contract() -> None
     assert "auto_select" not in json.dumps(manifest)
     assert "tool_graph_name" not in json.dumps(manifest)
     assert "smartcmp" not in json.dumps(manifest).lower()
+
+
+def test_markdown_vault_runtime_api_declares_provider_owned_knowledge_routes() -> None:
+    """Verify Core can register the provider API without Markdown Vault route code."""
+    manifest = json.loads((PROVIDER_ROOT / "runtime-api.json").read_text(encoding="utf-8"))
+    routes = {
+        (route["method"], route["path"]): route
+        for route in manifest["routes"]
+    }
+
+    assert manifest["schema_version"] == 1
+    assert set(routes) == {
+        ("POST", "knowledge/documents"),
+        ("GET", "knowledge/documents/{knowledge_id}"),
+        ("PUT", "knowledge/documents/{knowledge_id}"),
+        ("DELETE", "knowledge/documents/{knowledge_id}"),
+        ("PUT", "knowledge/documents/{knowledge_id}/unpublish"),
+        ("POST", "knowledge/query"),
+    }
+    assert routes[("POST", "knowledge/documents")]["access"] == "admin"
+    assert routes[("GET", "knowledge/documents/{knowledge_id}")]["access"] == "provider_user"
 
 
 def test_markdown_vault_skill_registers_only_read_runtime_tools() -> None:

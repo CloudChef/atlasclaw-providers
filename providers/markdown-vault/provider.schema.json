@@ -1,9 +1,10 @@
 {
   "schema_version": 1,
   "provider_type": "markdown-vault",
+  "runtime_capabilities": ["knowledge_read", "knowledge_write", "knowledge_query"],
   "catalog": {
     "display_name": "Markdown Vault",
-    "description": "Configured Markdown vault provider for direct read-only knowledge-base search and cited document retrieval.",
+    "description": "Markdown vault search plus administrator REST CRUD for complete Knowledge aggregates and attachments.",
     "badge": "KB",
     "icon": "MD",
     "icon_path": "assets/icon.svg",
@@ -30,6 +31,15 @@
         "scope": "instance",
         "label": "Vault Path",
         "placeholder": "/Users/shared/knowledge-vault"
+      },
+      {
+        "name": "tenant_id",
+        "type": "text",
+        "required": true,
+        "scope": "instance",
+        "default": "-1",
+        "label": "Tenant ID",
+        "placeholder": "-1"
       },
       {
         "name": "include_globs",
@@ -84,6 +94,69 @@
         "default": 3072,
         "label": "Max Result Characters",
         "placeholder": "3072"
+      },
+      {
+        "name": "max_attachments",
+        "type": "number",
+        "required": false,
+        "scope": "instance",
+        "default": 20,
+        "label": "Max Attachments",
+        "placeholder": "20"
+      },
+      {
+        "name": "max_attachment_bytes",
+        "type": "number",
+        "required": false,
+        "scope": "instance",
+        "default": 26214400,
+        "label": "Max Attachment Bytes",
+        "placeholder": "26214400"
+      },
+      {
+        "name": "max_total_attachment_bytes",
+        "type": "number",
+        "required": false,
+        "scope": "instance",
+        "default": 104857600,
+        "label": "Max Total Attachment Bytes",
+        "placeholder": "104857600"
+      },
+      {
+        "name": "conversion_timeout_seconds",
+        "type": "number",
+        "required": false,
+        "scope": "instance",
+        "default": 180,
+        "label": "Attachment Conversion Timeout Seconds",
+        "placeholder": "180"
+      },
+      {
+        "name": "max_document_pages",
+        "type": "number",
+        "required": false,
+        "scope": "instance",
+        "default": 200,
+        "label": "Max Document Pages",
+        "placeholder": "200"
+      },
+      {
+        "name": "max_conversion_output_chars",
+        "type": "number",
+        "required": false,
+        "scope": "instance",
+        "default": 1000000,
+        "label": "Max Converted Markdown Characters",
+        "placeholder": "1000000"
+      },
+      {
+        "name": "max_rendered_page_bytes",
+        "type": "number",
+        "required": false,
+        "scope": "instance",
+        "default": 20971520,
+        "label": "Max Rendered Page Bytes",
+        "placeholder": "20971520"
       }
     ]
   },

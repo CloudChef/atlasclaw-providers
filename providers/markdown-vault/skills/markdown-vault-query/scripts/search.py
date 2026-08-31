@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 import sys
 from typing import Any
 
-from _config import MarkdownVaultConfigError, load_provider_config_from_env
-from _direct_search import search_direct
-from _parser import iter_markdown_files
+PROVIDER_ROOT = Path(__file__).resolve().parents[3]
+if str(PROVIDER_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROVIDER_ROOT))
+
+from vault_runtime.config import MarkdownVaultConfigError, load_provider_config_from_env  # noqa: E402
+from vault_runtime.direct_search import search_direct  # noqa: E402
+from vault_runtime.parser import iter_markdown_files  # noqa: E402
+from vault_runtime.vault_io import vault_read_lock  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -27,14 +33,15 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         config = load_provider_config_from_env()
-        payload = search_direct(
-            config,
-            args.query,
-            keywords=[*args.keywords, *args.keyword, *_keywords_from_json(args.keywords_json)],
-            limit=max(1, min(args.limit, 50)),
-            path_filter=_runtime_path_filter(args.path_filter, config) or None,
-            tag_filter=args.tag_filter or None,
-        )
+        with vault_read_lock(config.vault_path):
+            payload = search_direct(
+                config,
+                args.query,
+                keywords=[*args.keywords, *args.keyword, *_keywords_from_json(args.keywords_json)],
+                limit=max(1, min(args.limit, 50)),
+                path_filter=_runtime_path_filter(args.path_filter, config) or None,
+                tag_filter=args.tag_filter or None,
+            )
         _emit(payload)
         return 0
     except MarkdownVaultConfigError as exc:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
 import hashlib
-from pathlib import Path
+from pathlib import Path, PurePath
 import re
 from typing import Any
 
@@ -14,7 +14,8 @@ try:
 except ImportError:  # pragma: no cover - AtlasClaw runtime includes PyYAML.
     yaml = None
 
-from _config import MarkdownVaultConfig
+from .config import MarkdownVaultConfig
+from .vault_io import INTERNAL_PROVIDER_DIRS
 
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
@@ -84,6 +85,8 @@ def iter_markdown_files(config: MarkdownVaultConfig) -> list[Path]:
                 size_bytes = candidate.stat().st_size
             except (OSError, ValueError):
                 continue
+            if _is_internal_path(relative):
+                continue
             if _is_excluded(relative, config.exclude_globs):
                 continue
             if size_bytes > config.max_file_bytes:
@@ -145,9 +148,11 @@ def resolve_vault_markdown_path(vault_path: Path, user_path: str) -> Path:
     candidate = (vault_path / raw_path).resolve()
     vault_root = vault_path.resolve()
     try:
-        candidate.relative_to(vault_root)
+        relative = candidate.relative_to(vault_root)
     except ValueError as exc:
         raise VaultPathError("Path traversal outside the vault is not allowed.") from exc
+    if relative.parts and relative.parts[0] in INTERNAL_PROVIDER_DIRS:
+        raise VaultPathError("Provider transaction or unpublished files cannot be read.")
     if candidate.suffix.lower() != ".md":
         raise VaultPathError("Only Markdown .md files can be read.")
     if not candidate.is_file():
@@ -451,8 +456,16 @@ def _is_excluded(relative_path: str, patterns: list[str]) -> bool:
     return any(_matches_glob(relative_path, pattern) for pattern in patterns)
 
 
+def _is_internal_path(relative_path: str) -> bool:
+    """Keep provider transaction and unpublished state outside search."""
+    parts = PurePath(relative_path).parts
+    return bool(parts) and parts[0] in INTERNAL_PROVIDER_DIRS
+
+
 def _assert_markdown_file_policy(config: MarkdownVaultConfig, file_path: Path) -> None:
     relative_path = _relative_posix(config.vault_path, file_path)
+    if _is_internal_path(relative_path):
+        raise VaultPathError("Provider transaction or unpublished files cannot be read.")
     if not any(_matches_glob(relative_path, pattern) for pattern in config.include_globs):
         raise VaultPathError(f"Markdown file is not included in this vault scan: {relative_path}")
     if _is_excluded(relative_path, config.exclude_globs):

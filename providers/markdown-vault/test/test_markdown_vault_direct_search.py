@@ -9,12 +9,13 @@ import sys
 import pytest
 
 
-SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "skills" / "markdown-vault-query" / "scripts"
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
+PROVIDER_ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS_DIR = PROVIDER_ROOT / "skills" / "markdown-vault-query" / "scripts"
+if str(PROVIDER_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROVIDER_ROOT))
 
-from _config import build_markdown_vault_config
-from _direct_search import search_direct
+from vault_runtime.config import build_markdown_vault_config
+from vault_runtime.direct_search import search_direct
 
 
 def _config(tmp_path: Path, **overrides):

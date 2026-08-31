@@ -6,8 +6,8 @@ from dataclasses import dataclass
 import re
 from typing import Any
 
-from _config import MarkdownVaultConfig
-from _parser import VaultChunk, VaultDocument, normalize_terms, parse_vault, searchable_markdown_text
+from .config import MarkdownVaultConfig
+from .parser import VaultChunk, VaultDocument, normalize_terms, parse_vault, searchable_markdown_text
 
 
 SNIPPET_CHARS = 360
@@ -95,6 +95,7 @@ def search_direct(
     limit: int,
     path_filter: str | None,
     tag_filter: str | None,
+    allowed_path_prefixes: list[str] | None = None,
 ) -> dict[str, Any]:
     """Scan Markdown files directly and return bounded evidence chunks for LLM analysis."""
 
@@ -102,10 +103,22 @@ def search_direct(
     needles = _build_needles(query, keywords)
     requested_tags = _parse_tag_filter(tag_filter)
     path_filter_normalized = (path_filter or "").strip().lower()
+    allowed_prefixes = tuple(
+        item.strip("/").lower()
+        for item in (allowed_path_prefixes or [])
+        if str(item).strip("/")
+    )
 
     search_items: list[SearchItem] = []
     scanned_chunks = 0
     for document in documents:
+        normalized_document_path = document.path.strip("/").lower()
+        if allowed_prefixes and not any(
+            normalized_document_path == prefix
+            or normalized_document_path.startswith(prefix + "/")
+            for prefix in allowed_prefixes
+        ):
+            continue
         if path_filter_normalized and path_filter_normalized not in document.path.lower():
             continue
         if requested_tags and not requested_tags.intersection({tag.lower() for tag in document.tags}):
@@ -175,6 +188,14 @@ def _build_needles(query: str, keywords: list[str]) -> list[SearchNeedle]:
             )
         )
     return needles
+
+
+def count_search_work_units(query: str, keywords: list[str]) -> int:
+    """Count phrase and token scans performed per Vault chunk for one request."""
+    return sum(
+        len(needle.tokens) + int(bool(needle.phrase and len(needle.phrase) >= 2))
+        for needle in _build_needles(query, keywords)
+    )
 
 
 def _search_fields(document: VaultDocument, chunk: VaultChunk) -> SearchFields:

@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 import sys
 from typing import Any
 
-from _config import MarkdownVaultConfigError, load_provider_config_from_env
-from _parser import VaultPathError, read_markdown_lines
+PROVIDER_ROOT = Path(__file__).resolve().parents[3]
+if str(PROVIDER_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROVIDER_ROOT))
+
+from vault_runtime.config import MarkdownVaultConfigError, load_provider_config_from_env  # noqa: E402
+from vault_runtime.parser import VaultPathError, read_markdown_lines  # noqa: E402
+from vault_runtime.vault_io import vault_read_lock  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -22,12 +28,13 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         config = load_provider_config_from_env()
-        payload = read_markdown_lines(
-            config,
-            args.path,
-            start_line=args.start_line,
-            end_line=args.end_line,
-        )
+        with vault_read_lock(config.vault_path):
+            payload = read_markdown_lines(
+                config,
+                args.path,
+                start_line=args.start_line,
+                end_line=args.end_line,
+            )
         payload.update({"success": True})
         _emit(payload)
         return 0

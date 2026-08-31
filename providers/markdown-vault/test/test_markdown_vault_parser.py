@@ -6,12 +6,12 @@ import sys
 import pytest
 
 
-SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "skills" / "markdown-vault-query" / "scripts"
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
+PROVIDER_ROOT = Path(__file__).resolve().parents[1]
+if str(PROVIDER_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROVIDER_ROOT))
 
-from _config import build_markdown_vault_config
-from _parser import (  # noqa: E402
+from vault_runtime.config import build_markdown_vault_config
+from vault_runtime.parser import (  # noqa: E402
     VaultPathError,
     iter_markdown_files,
     normalize_terms,
