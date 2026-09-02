@@ -14,7 +14,6 @@ from pathlib import Path, PurePosixPath
 import re
 import shutil
 from typing import Any
-import xml.etree.ElementTree as ElementTree
 import zipfile
 from uuid import uuid4
 
@@ -38,7 +37,7 @@ from .vault_runtime.vault_io import (
 PROVIDER_TYPE = "markdown-vault"
 RUNTIME_CAPABILITIES = frozenset({"knowledge_read", "knowledge_write", "knowledge_query"})
 _SHA256 = re.compile(r"^(?:sha256:)?([0-9a-fA-F]{64})$")
-_ATTACHMENT_CONVERSION_VERSION = 1
+_ATTACHMENT_CONVERSION_VERSION = 2
 _MAX_SEARCH_WORK_UNITS = 256
 _VAULT_LOCKS: dict[Path, asyncio.Lock] = {}
 logger = logging.getLogger(__name__)
@@ -671,35 +670,8 @@ def _validate_office_archive(data: bytes, kind: str, file_name: str) -> None:
                         "unsafe_office_content",
                         f"Macros and embedded objects are not accepted: {file_name}",
                     )
-                if lowered_name.endswith(".rels"):
-                    if member.file_size > 1024 * 1024:
-                        raise KnowledgeRuntimeError(
-                            422,
-                            "unsafe_office_content",
-                            f"Office relationship metadata is too large: {file_name}",
-                        )
-                    _validate_office_relationships(archive.read(member), file_name)
     except zipfile.BadZipFile as exc:
         raise KnowledgeRuntimeError(422, "invalid_office_file", f"Invalid Office content for {file_name}") from exc
-
-
-def _validate_office_relationships(data: bytes, file_name: str) -> None:
-    """Reject OOXML links that would allow conversion to contact external resources."""
-    try:
-        root = ElementTree.fromstring(data)
-    except ElementTree.ParseError as exc:
-        raise KnowledgeRuntimeError(
-            422,
-            "invalid_office_file",
-            f"Invalid Office relationships for {file_name}",
-        ) from exc
-    for relationship in root.iter():
-        if str(relationship.attrib.get("TargetMode") or "").strip().lower() == "external":
-            raise KnowledgeRuntimeError(
-                422,
-                "unsafe_office_content",
-                f"External Office relationships are not accepted: {file_name}",
-            )
 
 
 def _matches_image_magic(extension: str, data: bytes) -> bool:
@@ -945,17 +917,11 @@ async def _write_snapshot(
     attachment_links: list[str] = []
     manifest_attachments: list[dict[str, Any]] = []
     converted_characters = 0
-    generated_asset_count = 0
     generated_asset_bytes = 0
     max_converted_characters = _positive_int(
         config.get("max_conversion_output_chars"),
         1_000_000,
         "max_conversion_output_chars",
-    )
-    max_generated_assets = _positive_int(
-        config.get("max_document_pages"),
-        200,
-        "max_document_pages",
     )
     max_generated_asset_bytes = _positive_int(
         config.get("max_total_attachment_bytes"),
@@ -1009,14 +975,13 @@ async def _write_snapshot(
                 "assets": asset_manifest,
             }
             converted_length = len(converted)
-            asset_count = len(converted_assets)
             asset_bytes = sum(
                 len(asset.get("data"))
                 for asset in converted_assets
                 if isinstance(asset, dict) and isinstance(asset.get("data"), bytes)
             )
         else:
-            manifest_attachment, converted_length, asset_count, asset_bytes = reused
+            manifest_attachment, converted_length, asset_bytes = reused
 
         converted_characters += converted_length
         if converted_characters > max_converted_characters:
@@ -1025,14 +990,7 @@ async def _write_snapshot(
                 "attachment_markdown_too_large",
                 "Aggregate converted attachment Markdown exceeds the configured size limit",
             )
-        generated_asset_count += asset_count
         generated_asset_bytes += asset_bytes
-        if generated_asset_count > max_generated_assets:
-            raise KnowledgeRuntimeError(
-                413,
-                "too_many_generated_assets",
-                "Aggregate generated asset count exceeds the configured page limit",
-            )
         if generated_asset_bytes > max_generated_asset_bytes:
             raise KnowledgeRuntimeError(
                 413,
@@ -1095,7 +1053,7 @@ def _reuse_attachment(
     attachment: dict[str, Any],
     attachment_dir: Path,
     asset_dir: Path,
-) -> tuple[dict[str, Any], int, int, int] | None:
+) -> tuple[dict[str, Any], int, int] | None:
     """Copy a checksum-identical conversion instead of invoking the attachment converter."""
     if reuse_source is None or previous is None:
         return None
@@ -1142,7 +1100,7 @@ def _reuse_attachment(
         "assetsPath": f"assets/{file_id}/",
         "assets": assets,
     }
-    return manifest_attachment, converted_length, len(assets), asset_bytes
+    return manifest_attachment, converted_length, asset_bytes
 
 
 async def _convert_attachment(
@@ -1214,14 +1172,13 @@ def _write_conversion_assets(
     file_id: str,
     config: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """Persist validated visual pages returned by the Core converter."""
-    max_assets = _positive_int(config.get("max_document_pages"), 200, "max_document_pages") + 1
-    if len(assets) > max_assets:
+    """Persist the validated direct-image asset returned by the Core converter."""
+    if len(assets) > 1:
         raise KnowledgeRuntimeError(413, "too_many_generated_assets", "Generated asset count exceeds limit")
     max_asset_bytes = _positive_int(
-        config.get("max_rendered_page_bytes"),
-        20 * 1024 * 1024,
-        "max_rendered_page_bytes",
+        config.get("max_attachment_bytes"),
+        25 * 1024 * 1024,
+        "max_attachment_bytes",
     )
     total_limit = _positive_int(
         config.get("max_total_attachment_bytes"),

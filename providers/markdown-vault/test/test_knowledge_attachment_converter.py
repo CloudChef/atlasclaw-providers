@@ -1,4 +1,4 @@
-"""Critical local-extraction and visual-OCR tests for Knowledge attachments."""
+"""Critical local-text and visual-image tests for Knowledge attachments."""
 
 from __future__ import annotations
 
@@ -9,9 +9,13 @@ import sys
 from types import ModuleType
 from typing import Any
 
+from docx import Document
+from openpyxl import Workbook
 import pytest
 from pypdf import PdfWriter
-from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject, NumberObject
+from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+from pptx import Presentation
+from pptx.util import Inches
 
 
 PROVIDER_ROOT = Path(__file__).resolve().parents[1]
@@ -44,9 +48,9 @@ class _FakeVisualRuntime:
         self.calls: list[dict[str, Any]] = []
 
     async def run_visual(self, **kwargs: Any) -> str:
-        """Record one visual request and return OCR-shaped Markdown."""
+        """Record one visual request and return image-shaped Markdown."""
         self.calls.append(kwargs)
-        return "OCR_VISUAL_MARKER_8834"
+        return "IMAGE_MARKDOWN_MARKER_8834"
 
 
 def _text_pdf(marker: str) -> bytes:
@@ -71,44 +75,8 @@ def _text_pdf(marker: str) -> bytes:
     return output.getvalue()
 
 
-def _blank_pdf() -> bytes:
-    """Build a one-page PDF without text or raster images."""
-    writer = PdfWriter()
-    writer.add_blank_page(width=612, height=792)
-    output = BytesIO()
-    writer.write(output)
-    return output.getvalue()
-
-
-def _raster_image_pdf() -> bytes:
-    """Build a textless PDF page containing one explicit raster image."""
-    writer = PdfWriter()
-    page = writer.add_blank_page(width=612, height=792)
-    image = DecodedStreamObject()
-    image.set_data(bytes([255, 255, 255]))
-    image.update(
-        {
-            NameObject("/Type"): NameObject("/XObject"),
-            NameObject("/Subtype"): NameObject("/Image"),
-            NameObject("/Width"): NumberObject(1),
-            NameObject("/Height"): NumberObject(1),
-            NameObject("/ColorSpace"): NameObject("/DeviceRGB"),
-            NameObject("/BitsPerComponent"): NumberObject(8),
-        }
-    )
-    page[NameObject("/Resources")] = DictionaryObject(
-        {NameObject("/XObject"): DictionaryObject({NameObject("/Im1"): image})}
-    )
-    content = DecodedStreamObject()
-    content.set_data(b"q 100 0 0 100 72 600 cm /Im1 Do Q")
-    page[NameObject("/Contents")] = content
-    output = BytesIO()
-    writer.write(output)
-    return output.getvalue()
-
-
-def _multipage_pdf(page_count: int) -> bytes:
-    """Build a PDF with the requested page count for resource-boundary tests."""
+def _blank_pdf(page_count: int = 1) -> bytes:
+    """Build a PDF without an extractable text layer."""
     writer = PdfWriter()
     for _ in range(page_count):
         writer.add_blank_page(width=612, height=792)
@@ -117,58 +85,114 @@ def _multipage_pdf(page_count: int) -> bytes:
     return output.getvalue()
 
 
-@pytest.mark.asyncio
-async def test_text_pdf_is_extracted_locally_without_llm() -> None:
-    """Verify even a short PDF text layer is extracted without a visual-model request."""
+def _docx(marker: str) -> bytes:
+    """Build a Word document containing a heading, paragraph, and table."""
+    document = Document()
+    document.add_heading("Word title", level=1)
+    document.add_paragraph(marker)
+    table = document.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "Key"
+    table.cell(0, 1).text = "Value"
+    table.cell(1, 0).text = "Certification"
+    table.cell(1, 1).text = "ISO 27001"
+    output = BytesIO()
+    document.save(output)
+    return output.getvalue()
+
+
+def _pptx(marker: str) -> bytes:
+    """Build a PowerPoint document containing searchable slide text."""
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[5])
+    slide.shapes.title.text = "Slide title"
+    textbox = slide.shapes.add_textbox(Inches(1), Inches(2), Inches(8), Inches(1))
+    textbox.text = marker
+    output = BytesIO()
+    presentation.save(output)
+    return output.getvalue()
+
+
+def _xlsx(marker: str) -> bytes:
+    """Build an Excel workbook containing a bounded table."""
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Assessment"
+    worksheet.append(["Organization", "Result"])
+    worksheet.append([marker, "Leader"])
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()
+
+
+async def _convert_document(
+    file_name: str, content_type: str, data: bytes
+) -> tuple[dict[str, Any], _FakeVisualRuntime]:
+    """Convert one local-text document through the public converter entrypoint."""
     runtime = _FakeVisualRuntime()
     converter = converter_module.KnowledgeAttachmentLlmConverter(runtime, timeout_seconds=30)
-
     result = await converter.convert(
         {
-            "fileId": "pdf-1",
-            "fileName": "evidence.pdf",
-            "contentType": "application/pdf",
-            "data": _text_pdf("TITLE"),
+            "fileId": "document-1",
+            "fileName": file_name,
+            "contentType": content_type,
+            "data": data,
         },
         {"knowledgeId": "knowledge-1"},
+    )
+    return result, runtime
+
+
+@pytest.mark.asyncio
+async def test_pdf_text_layer_is_extracted_locally_without_visual_model() -> None:
+    """Verify PDF extraction uses only the existing text layer."""
+    result, runtime = await _convert_document(
+        "evidence.pdf", "application/pdf", _text_pdf("PDF_MARKER_1042")
     )
 
     assert "## Page 1" in result["markdown"]
-    assert "TITLE" in result["markdown"]
+    assert "PDF_MARKER_1042" in result["markdown"]
     assert result["assets"] == []
     assert runtime.calls == []
 
 
 @pytest.mark.asyncio
-async def test_office_uses_local_pdf_text_extraction_without_llm(monkeypatch) -> None:
-    """Verify Office rendering feeds local PDF extraction when a text layer exists."""
-    runtime = _FakeVisualRuntime()
-    converter = converter_module.KnowledgeAttachmentLlmConverter(runtime, timeout_seconds=30)
-    monkeypatch.setattr(
-        converter,
-        "_office_to_pdf",
-        lambda file_name, data, timeout_seconds: _text_pdf("LOCAL_SLIDE_MARKER_5628"),
-    )
+@pytest.mark.parametrize(
+    ("file_name", "content_type", "data", "marker"),
+    [
+        (
+            "guide.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            _docx("DOCX_MARKER_2043"),
+            "DOCX_MARKER_2043",
+        ),
+        (
+            "slides.pptx",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            _pptx("PPTX_MARKER_3044"),
+            "PPTX_MARKER_3044",
+        ),
+        (
+            "assessment.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            _xlsx("XLSX_MARKER_4045"),
+            "XLSX_MARKER_4045",
+        ),
+    ],
+)
+async def test_office_text_is_extracted_locally(
+    file_name: str, content_type: str, data: bytes, marker: str
+) -> None:
+    """Verify supported Office containers become Markdown without rendering or a model."""
+    result, runtime = await _convert_document(file_name, content_type, data)
 
-    result = await converter.convert(
-        {
-            "fileId": "pptx-1",
-            "fileName": "slides.pptx",
-            "contentType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            "data": b"office-container",
-        },
-        {"knowledgeId": "knowledge-1"},
-    )
-
-    assert "## Slide 1" in result["markdown"]
-    assert "LOCAL_SLIDE_MARKER_5628" in result["markdown"]
+    assert marker in result["markdown"]
     assert result["assets"] == []
     assert runtime.calls == []
 
 
 @pytest.mark.asyncio
-async def test_image_is_delegated_to_visual_llm() -> None:
-    """Verify image OCR is delegated through Core's visual-model bridge."""
+async def test_image_is_delegated_to_visual_model() -> None:
+    """Verify a direct image attachment uses Core's visual-model bridge."""
     runtime = _FakeVisualRuntime()
     converter = converter_module.KnowledgeAttachmentLlmConverter(runtime, timeout_seconds=30)
 
@@ -183,70 +207,37 @@ async def test_image_is_delegated_to_visual_llm() -> None:
     )
 
     assert "## Image" in result["markdown"]
-    assert "OCR_VISUAL_MARKER_8834" in result["markdown"]
+    assert "IMAGE_MARKDOWN_MARKER_8834" in result["markdown"]
     assert result["assets"][0]["fileName"] == "image.png"
     assert runtime.calls[0]["media_type"] == "image/png"
-    assert runtime.calls[0]["data"].startswith(b"\x89PNG")
 
 
 @pytest.mark.asyncio
-async def test_textless_pdf_page_is_rendered_for_visual_ocr(monkeypatch) -> None:
-    """Verify a textless PDF raster-image page is sent to the visual model."""
+async def test_textless_pdf_is_rejected_without_visual_processing() -> None:
+    """Verify scanned or blank PDFs do not silently enter image-model processing."""
     runtime = _FakeVisualRuntime()
     converter = converter_module.KnowledgeAttachmentLlmConverter(runtime, timeout_seconds=30)
-    monkeypatch.setattr(
-        converter,
-        "_render_pdf_page",
-        lambda pdf_data, page_number, timeout_seconds: b"\x89PNG\r\n\x1a\nrendered-page",
-    )
 
-    result = await converter.convert(
-        {
-            "fileId": "scan-1",
-            "fileName": "scan.pdf",
-            "contentType": "application/pdf",
-            "data": _raster_image_pdf(),
-        },
-        {"knowledgeId": "knowledge-1"},
-    )
+    with pytest.raises(
+        converter_module.KnowledgeAttachmentConversionError,
+        match="PDF attachment contains no extractable text",
+    ):
+        await converter.convert(
+            {
+                "fileId": "scan-1",
+                "fileName": "scan.pdf",
+                "contentType": "application/pdf",
+                "data": _blank_pdf(),
+            },
+            {"knowledgeId": "knowledge-1"},
+        )
 
-    assert "## Page 1" in result["markdown"]
-    assert "OCR_VISUAL_MARKER_8834" in result["markdown"]
-    assert result["assets"][0]["fileName"] == "page-1.png"
-    assert runtime.calls[0]["media_type"] == "image/png"
-
-
-@pytest.mark.asyncio
-async def test_blank_pdf_page_does_not_trigger_visual_ocr(monkeypatch) -> None:
-    """Verify a textless page without raster images remains local and does not use a model."""
-    runtime = _FakeVisualRuntime()
-    converter = converter_module.KnowledgeAttachmentLlmConverter(runtime, timeout_seconds=30)
-    rendered_pages: list[int] = []
-    monkeypatch.setattr(
-        converter,
-        "_render_pdf_page",
-        lambda pdf_data, page_number, timeout_seconds: rendered_pages.append(page_number),
-    )
-
-    result = await converter.convert(
-        {
-            "fileId": "blank-1",
-            "fileName": "blank.pdf",
-            "contentType": "application/pdf",
-            "data": _blank_pdf(),
-        },
-        {"knowledgeId": "knowledge-1"},
-    )
-
-    assert "## Page 1" in result["markdown"]
-    assert result["assets"] == []
-    assert rendered_pages == []
     assert runtime.calls == []
 
 
 @pytest.mark.asyncio
-async def test_text_only_deepseek_rejects_visual_ocr() -> None:
-    """Verify DeepSeek text models fail explicitly instead of accepting image input."""
+async def test_text_only_deepseek_rejects_direct_image() -> None:
+    """Verify a text-only DeepSeek model is not used for image attachments."""
     runtime = _FakeVisualRuntime(model_name="deepseek-chat")
     converter = converter_module.KnowledgeAttachmentLlmConverter(runtime, timeout_seconds=30)
 
@@ -268,8 +259,8 @@ async def test_text_only_deepseek_rejects_visual_ocr() -> None:
 
 
 @pytest.mark.asyncio
-async def test_pdf_page_limit_is_enforced_before_visual_conversion() -> None:
-    """Verify a large page count cannot trigger unbounded rendering or model calls."""
+async def test_pdf_page_limit_is_enforced_before_extraction() -> None:
+    """Verify PDF page limits remain enforced without rendering or model calls."""
     runtime = _FakeVisualRuntime()
     converter = converter_module.KnowledgeAttachmentLlmConverter(
         runtime,
@@ -283,7 +274,7 @@ async def test_pdf_page_limit_is_enforced_before_visual_conversion() -> None:
                 "fileId": "pdf-many",
                 "fileName": "many-pages.pdf",
                 "contentType": "application/pdf",
-                "data": _multipage_pdf(2),
+                "data": _blank_pdf(2),
             },
             {"knowledgeId": "knowledge-1"},
         )
@@ -294,17 +285,11 @@ async def test_pdf_page_limit_is_enforced_before_visual_conversion() -> None:
 
 
 @pytest.mark.asyncio
-async def test_legacy_office_is_not_sent_to_libreoffice(monkeypatch) -> None:
-    """Verify legacy OLE Office formats remain outside the M1 extraction boundary."""
+async def test_legacy_office_format_remains_unsupported() -> None:
+    """Verify legacy OLE Office formats stay outside the local extraction boundary."""
     converter = converter_module.KnowledgeAttachmentLlmConverter(
         _FakeVisualRuntime(available=False),
         timeout_seconds=30,
-    )
-    office_calls: list[str] = []
-    monkeypatch.setattr(
-        converter,
-        "_office_to_pdf",
-        lambda file_name, data, timeout_seconds: office_calls.append(file_name),
     )
 
     with pytest.raises(
@@ -320,67 +305,3 @@ async def test_legacy_office_is_not_sent_to_libreoffice(monkeypatch) -> None:
             },
             {"knowledgeId": "knowledge-1"},
         )
-
-    assert office_calls == []
-
-
-@pytest.mark.asyncio
-async def test_scanned_pdf_stops_before_visual_calls_exceed_asset_budget(monkeypatch) -> None:
-    """Verify one scanned attachment cannot accumulate page assets beyond its byte budget."""
-    runtime = _FakeVisualRuntime()
-    converter = converter_module.KnowledgeAttachmentLlmConverter(
-        runtime,
-        timeout_seconds=30,
-        max_rendered_page_bytes=8,
-        max_rendered_document_bytes=10,
-    )
-    monkeypatch.setattr(
-        converter,
-        "_extract_pdf_pages",
-        lambda pdf_data, timeout_seconds: [
-            {
-                "pageNumber": 1,
-                "text": "",
-                "width": 100,
-                "height": 100,
-                "hasRasterImage": True,
-            },
-            {
-                "pageNumber": 2,
-                "text": "",
-                "width": 100,
-                "height": 100,
-                "hasRasterImage": True,
-            },
-            {
-                "pageNumber": 3,
-                "text": "",
-                "width": 100,
-                "height": 100,
-                "hasRasterImage": True,
-            },
-        ],
-    )
-    rendered_pages: list[int] = []
-
-    def render_page(pdf_data: bytes, page_number: int, timeout_seconds: float) -> bytes:
-        rendered_pages.append(page_number)
-        return b"123456"
-
-    monkeypatch.setattr(converter, "_render_pdf_page", render_page)
-
-    with pytest.raises(converter_module.KnowledgeAttachmentConversionError) as error:
-        await converter.convert(
-            {
-                "fileId": "scan-budget",
-                "fileName": "scan.pdf",
-                "contentType": "application/pdf",
-                "data": b"%PDF-budget",
-            },
-            {"knowledgeId": "knowledge-1"},
-        )
-
-    assert error.value.status_code == 413
-    assert error.value.code == "generated_assets_too_large"
-    assert rendered_pages == [1, 2]
-    assert len(runtime.calls) == 1

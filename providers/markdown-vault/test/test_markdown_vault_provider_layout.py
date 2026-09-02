@@ -17,7 +17,7 @@ def test_markdown_vault_provider_package_layout() -> None:
     assert (PROVIDER_ROOT / "http_runtime.py").is_file()
     assert (PROVIDER_ROOT / "knowledge_runtime.py").is_file()
     assert (PROVIDER_ROOT / "knowledge_attachment_converter.py").is_file()
-    assert (PROVIDER_ROOT / "pdf_extraction_worker.py").is_file()
+    assert (PROVIDER_ROOT / "document_text_extraction_worker.py").is_file()
     assert (PROVIDER_ROOT / "assets" / "icon.svg").is_file()
     assert (PROVIDER_ROOT / "skills" / "markdown-vault-query" / "SKILL.md").is_file()
 

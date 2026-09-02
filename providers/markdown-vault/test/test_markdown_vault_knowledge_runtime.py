@@ -29,7 +29,7 @@ _ONE_PIXEL_PNG = base64.b64decode(
 
 
 class FakeAttachmentConverter:
-    """Stand in for the provider's local-text and visual-OCR attachment converter."""
+    """Stand in for the provider's local-text and visual-image attachment converter."""
 
     def __init__(self) -> None:
         self.file_names: list[str] = []
@@ -126,22 +126,6 @@ def _pptx_bytes(text: str) -> bytes:
     output = BytesIO()
     with zipfile.ZipFile(output, "w") as archive:
         archive.writestr("ppt/slides/slide1.xml", f"<slide>{text}</slide>")
-    return output.getvalue()
-
-
-def _docx_with_external_relationship() -> bytes:
-    """Build OOXML that attempts to reference an external resource."""
-    output = BytesIO()
-    with zipfile.ZipFile(output, "w") as archive:
-        archive.writestr("word/document.xml", "<document>unsafe</document>")
-        archive.writestr(
-            "word/_rels/document.xml.rels",
-            (
-                '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-                '<Relationship Id="rId1" Type="image" Target="https://example.invalid/pixel" '
-                'TargetMode="External"/></Relationships>'
-            ),
-        )
     return output.getvalue()
 
 
@@ -659,34 +643,8 @@ async def test_get_rejects_symlinked_index_file(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_rejects_office_external_relationship(tmp_path: Path) -> None:
-    """Verify Office conversion cannot resolve request-controlled external links."""
-    runtime = _load_runtime()
-    vault = tmp_path / "vault"
-    vault.mkdir()
-    data = _docx_with_external_relationship()
-    manifest, part = _attachment(
-        "docx-unsafe",
-        "unsafe.docx",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        data,
-    )
-
-    with pytest.raises(runtime.KnowledgeRuntimeError) as error:
-        await runtime.create_document(
-            {"vault_path": str(vault), "instance_name": "testVaultMD"},
-            _snapshot([manifest], fingerprint="sha256:external"),
-            b"SAFE_BODY",
-            [part],
-            FakeAttachmentConverter(),
-        )
-
-    assert error.value.code == "unsafe_office_content"
-
-
-@pytest.mark.asyncio
 async def test_create_rejects_legacy_office_without_os_sandbox(tmp_path: Path) -> None:
-    """Verify legacy OLE Office files are rejected before LibreOffice can inspect active content."""
+    """Verify legacy OLE Office files are rejected before local extraction is attempted."""
     runtime = _load_runtime()
     vault = tmp_path / "vault"
     vault.mkdir()

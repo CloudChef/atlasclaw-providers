@@ -137,7 +137,7 @@
         "required": false,
         "scope": "instance",
         "default": 200,
-        "label": "Max Document Pages",
+        "label": "Max PDF Pages / PPTX Slides / XLSX Sheets",
         "placeholder": "200"
       },
       {
@@ -148,15 +148,6 @@
         "default": 1000000,
         "label": "Max Converted Markdown Characters",
         "placeholder": "1000000"
-      },
-      {
-        "name": "max_rendered_page_bytes",
-        "type": "number",
-        "required": false,
-        "scope": "instance",
-        "default": 20971520,
-        "label": "Max Rendered Page Bytes",
-        "placeholder": "20971520"
       }
     ]
   },

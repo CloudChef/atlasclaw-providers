@@ -23,8 +23,7 @@ Minimum instance:
   "max_total_attachment_bytes": 104857600,
   "conversion_timeout_seconds": 180,
   "max_document_pages": 200,
-  "max_conversion_output_chars": 1000000,
-  "max_rendered_page_bytes": 20971520
+  "max_conversion_output_chars": 1000000
 }
 ```
 
@@ -63,9 +62,9 @@ Vault chunk so repeated terms across different keywords cannot amplify CPU work.
 - Unpublish moves the aggregate into provider-owned hidden state, so Chat and REST query cannot retrieve it. Updating the same Knowledge publishes it again and reuses attachment Markdown/assets when `fileId`, checksum, and conversion version are unchanged. Delete permanently removes either published or unpublished state.
 - Update is a complete snapshot replacement and cannot implicitly move an existing aggregate.
 - Each aggregate stores `index.md`, `manifest.json`, original binaries, attachment Markdown, and asset directories. The temporary snapshot replaces the live directory only after every attachment succeeds.
-- PDF and validated DOCX/PPTX/XLSX text layers are extracted locally. Legacy DOC/PPT/XLS files are rejected. Images and textless scanned pages use the configured visual-capable Agent model for OCR and visual interpretation.
+- PDF text layers and validated DOCX/PPTX/XLSX text are extracted locally. Legacy DOC/PPT/XLS files are rejected. Direct image attachments use the configured visual-capable Agent model to produce searchable Markdown. Embedded Office images are not visually analyzed, and PDFs without extractable text are rejected.
 
-Local Office extraction requires LibreOffice (`soffice` or `libreoffice`), scanned-page rendering requires Poppler `pdftoppm`, and the provider runtime requires `pypdf`. Linux/macOS advisory file locking coordinates REST writes with read-only chat tools; cancelled lock waiters close their descriptors, and marker-validated transaction journals recover interrupted swaps. The deployment must provide these executables on `PATH`; image or scanned-page requests additionally require a model that accepts image input through Core's generic visual bridge.
+Local document extraction uses the provider's `python-docx`, `python-pptx`, `openpyxl`, and `pypdf` dependencies and does not require LibreOffice or Poppler. Linux/macOS advisory file locking coordinates REST writes with read-only chat tools; cancelled lock waiters close their descriptors, and marker-validated transaction journals recover interrupted swaps. Direct image attachments require a model that accepts image input through Core's generic visual bridge.
 
 ## Runtime Tools
 
