@@ -147,17 +147,23 @@ def test_query_rejects_unbounded_search_work(payload: dict[str, Any]) -> None:
 
 @pytest.mark.parametrize(
     ("owner_tenant_id", "requested_tenant_id"),
-    [("tenant-a", "tenant-a"), ("-1", "tenant-a"), ("-1", "tenant-b")],
+    [
+        ("tenant-a", "tenant-a"),
+        ("-1", "tenant-a"),
+        ("-1", "tenant-b"),
+        (None, "tenant-a"),
+    ],
 )
 def test_vault_tenant_owner_accepts_own_or_cross_tenant_requests(
-    owner_tenant_id: str,
+    owner_tenant_id: str | None,
     requested_tenant_id: str,
 ) -> None:
     """Verify Vault ownership, rather than Knowledge metadata, defines tenant scope."""
+    provider_config = {} if owner_tenant_id is None else {"tenant_id": owner_tenant_id}
     context = SimpleNamespace(
         is_admin=True,
         tenant_id="agent-admin",
-        provider_config={"tenant_id": owner_tenant_id},
+        provider_config=provider_config,
     )
 
     http_runtime._ensure_tenant_access(context, requested_tenant_id)

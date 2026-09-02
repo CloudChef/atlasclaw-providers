@@ -32,7 +32,9 @@ Minimum instance:
 
 `tenant_id` owns the complete Vault instance. A concrete CMP tenant ID limits discovery,
 Chat access, and REST publication to that tenant; `-1` makes the Vault a CMP cross-tenant
-knowledge base. Knowledge manifests do not repeat tenant ownership.
+knowledge base. An omitted value defaults to `-1`, so existing Vault instances remain
+cross-tenant without additional configuration. Knowledge manifests do not repeat tenant
+ownership.
 
 The provider has no credential fields. Access is controlled by the existing AtlasClaw provider instance and role permissions; Create, Update, Unpublish, and Delete additionally require an AtlasClaw administrator identity.
 

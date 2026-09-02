@@ -319,15 +319,12 @@ def _tenant_id_from_query(request: Any) -> str:
 def _ensure_tenant_access(context: Any, tenant_id: str) -> None:
     """Allow a Vault owner or the cross-tenant ``-1`` owner for this request."""
     requested_tenant_id = str(tenant_id or "").strip()
-    owner_tenant_id = str(context.provider_config.get("tenant_id") or "").strip()
+    configured_owner_tenant_id = context.provider_config.get("tenant_id")
+    owner_tenant_id = (
+        "-1" if configured_owner_tenant_id is None else str(configured_owner_tenant_id).strip()
+    )
     if not requested_tenant_id:
         raise KnowledgeRuntimeError(422, "tenant_required", "tenantId is required")
-    if not owner_tenant_id:
-        raise KnowledgeRuntimeError(
-            500,
-            "vault_tenant_not_configured",
-            "tenant_id is not configured for the selected Vault",
-        )
     if not context.is_admin and requested_tenant_id != str(context.tenant_id or "").strip():
         raise KnowledgeRuntimeError(403, "tenant_access_denied", "Tenant access denied")
     if owner_tenant_id not in {"-1", requested_tenant_id}:
