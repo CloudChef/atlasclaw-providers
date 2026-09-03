@@ -611,10 +611,12 @@ def _validate_file_type(file_name: str, content_type: str, data: bytes) -> str:
     extension = Path(file_name).suffix.lower()
     accepted = {
         ".pdf": ("pdf", {"application/pdf"}),
+        ".doc": ("doc", {"application/msword"}),
         ".docx": (
             "docx",
             {"application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
         ),
+        ".ppt": ("ppt", {"application/vnd.ms-powerpoint"}),
         ".pptx": (
             "pptx",
             {"application/vnd.openxmlformats-officedocument.presentationml.presentation"},
@@ -622,6 +624,7 @@ def _validate_file_type(file_name: str, content_type: str, data: bytes) -> str:
         ".md": ("text", {"text/markdown", "text/plain"}),
         ".txt": ("text", {"text/plain"}),
         ".csv": ("csv", {"text/csv", "application/csv", "text/plain"}),
+        ".xls": ("xls", {"application/vnd.ms-excel"}),
         ".xlsx": (
             "xlsx",
             {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
@@ -631,6 +634,7 @@ def _validate_file_type(file_name: str, content_type: str, data: bytes) -> str:
         ".jpeg": ("image", {"image/jpeg"}),
         ".gif": ("image", {"image/gif"}),
         ".webp": ("image", {"image/webp"}),
+        ".bmp": ("image", {"image/bmp"}),
     }
     spec = accepted.get(extension)
     if spec is None:
@@ -640,6 +644,8 @@ def _validate_file_type(file_name: str, content_type: str, data: bytes) -> str:
         raise KnowledgeRuntimeError(422, "unsupported_attachment", f"Unsupported MIME type for {file_name}")
     if kind == "pdf" and not data.startswith(b"%PDF-"):
         raise KnowledgeRuntimeError(422, "invalid_file_magic", f"Invalid PDF content for {file_name}")
+    if kind in {"doc", "ppt", "xls"} and not data.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+        raise KnowledgeRuntimeError(422, "invalid_file_magic", f"Invalid legacy Office content for {file_name}")
     if kind in {"docx", "pptx", "xlsx"}:
         _validate_office_archive(data, kind, file_name)
     if kind == "image" and not _matches_image_magic(extension, data):
@@ -684,6 +690,8 @@ def _matches_image_magic(extension: str, data: bytes) -> bool:
         return data.startswith((b"GIF87a", b"GIF89a"))
     if extension == ".webp":
         return len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP"
+    if extension == ".bmp":
+        return len(data) >= 14 and data.startswith(b"BM")
     return False
 
 

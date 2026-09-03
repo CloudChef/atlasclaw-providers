@@ -11,6 +11,7 @@ from typing import Any
 
 from docx import Document
 from openpyxl import Workbook
+from PIL import Image
 import pytest
 from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
@@ -213,6 +214,36 @@ async def test_image_is_delegated_to_visual_model() -> None:
 
 
 @pytest.mark.asyncio
+async def test_bmp_is_normalized_for_visual_model_and_preserved_as_original_asset() -> None:
+    """Verify BMP input reaches the visual model as PNG without replacing the stored asset."""
+    bmp = BytesIO()
+    Image.new("RGB", (2, 2), color="white").save(bmp, format="BMP")
+    bmp_data = bmp.getvalue()
+    runtime = _FakeVisualRuntime()
+    converter = converter_module.KnowledgeAttachmentLlmConverter(runtime, timeout_seconds=30)
+
+    result = await converter.convert(
+        {
+            "fileId": "image-bmp-1",
+            "fileName": "diagram.bmp",
+            "contentType": "image/bmp",
+            "data": bmp_data,
+        },
+        {"knowledgeId": "knowledge-1"},
+    )
+
+    assert runtime.calls[0]["media_type"] == "image/png"
+    assert runtime.calls[0]["data"].startswith(b"\x89PNG\r\n\x1a\n")
+    assert result["assets"] == [
+        {
+            "fileName": "image.bmp",
+            "contentType": "image/bmp",
+            "data": bmp_data,
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_textless_pdf_is_rejected_without_visual_processing() -> None:
     """Verify scanned or blank PDFs do not silently enter image-model processing."""
     runtime = _FakeVisualRuntime()
@@ -285,17 +316,25 @@ async def test_pdf_page_limit_is_enforced_before_extraction() -> None:
 
 
 @pytest.mark.asyncio
-async def test_legacy_office_format_remains_unsupported() -> None:
-    """Verify legacy OLE Office formats stay outside the local extraction boundary."""
+async def test_legacy_office_without_libreoffice_returns_specific_error(monkeypatch) -> None:
+    """Verify an absent optional converter produces an actionable Provider error."""
     converter = converter_module.KnowledgeAttachmentLlmConverter(
         _FakeVisualRuntime(available=False),
         timeout_seconds=30,
     )
 
-    with pytest.raises(
-        converter_module.KnowledgeAttachmentConversionError,
-        match="Unsupported attachment type",
-    ):
+    def unavailable_worker(command, **kwargs):
+        result_path = Path(command[3])
+        result_path.write_text(
+            '{"error":{"statusCode":503,"code":"office_converter_unavailable",'
+            '"detail":"LibreOffice is required to extract text from .doc, .ppt, and .xls attachments"}}',
+            encoding="utf-8",
+        )
+        return type("Completed", (), {"returncode": 0})()
+
+    monkeypatch.setattr(converter_module.subprocess, "run", unavailable_worker)
+
+    with pytest.raises(converter_module.KnowledgeAttachmentConversionError) as error:
         await converter.convert(
             {
                 "fileId": "doc-legacy",
@@ -305,3 +344,7 @@ async def test_legacy_office_format_remains_unsupported() -> None:
             },
             {"knowledgeId": "knowledge-1"},
         )
+
+    assert error.value.status_code == 503
+    assert error.value.code == "office_converter_unavailable"
+    assert "LibreOffice is required" in error.value.detail

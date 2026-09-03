@@ -8,7 +8,10 @@ import math
 from pathlib import Path
 import re
 import resource
+import shutil
+import subprocess
 import sys
+import tempfile
 from typing import Any
 
 from docx import Document
@@ -180,7 +183,12 @@ def _extract_pptx(path: Path, max_units: int, max_characters: int) -> str:
 
 def _extract_xlsx(path: Path, max_units: int, max_characters: int) -> str:
     """Extract spreadsheet cell values by sheet and row."""
-    workbook = load_workbook(filename=str(path), read_only=True, data_only=True)
+    workbook = load_workbook(
+        filename=str(path),
+        read_only=True,
+        data_only=True,
+        keep_links=False,
+    )
     try:
         _require_unit_limit("Excel", len(workbook.sheetnames), max_units, "sheet")
         parts: list[str] = []
@@ -198,9 +206,62 @@ def _extract_xlsx(path: Path, max_units: int, max_characters: int) -> str:
         workbook.close()
 
 
-def _extract(path: Path, max_units: int, max_characters: int) -> dict[str, Any]:
+def _convert_legacy_office(path: Path, timeout_seconds: float) -> Path:
+    """Convert one legacy Office binary when the optional LibreOffice command is installed."""
+    libreoffice = shutil.which("libreoffice") or shutil.which("soffice")
+    if libreoffice is None:
+        raise ExtractionFailure(
+            "LibreOffice is required to extract text from .doc, .ppt, and .xls attachments",
+            status_code=503,
+            code="office_converter_unavailable",
+        )
+    target_extension = {".doc": ".docx", ".ppt": ".pptx", ".xls": ".xlsx"}[path.suffix.lower()]
+    output_dir = path.parent / "converted"
+    output_dir.mkdir()
+    with tempfile.TemporaryDirectory(prefix="libreoffice-profile-", dir=path.parent) as profile_dir:
+        try:
+            completed = subprocess.run(
+                [
+                    libreoffice,
+                    "--headless",
+                    "--nologo",
+                    "--nodefault",
+                    "--nofirststartwizard",
+                    f"-env:UserInstallation={Path(profile_dir).as_uri()}",
+                    "--convert-to",
+                    target_extension.removeprefix("."),
+                    "--outdir",
+                    str(output_dir),
+                    str(path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=max(timeout_seconds, 1),
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ExtractionFailure(
+                f"LibreOffice conversion exceeded the request deadline: {path.name}",
+                status_code=504,
+                code="attachment_conversion_timeout",
+            ) from exc
+    converted_path = output_dir / f"{path.stem}{target_extension}"
+    if completed.returncode != 0 or not converted_path.is_file():
+        raise ExtractionFailure(f"LibreOffice could not convert attachment: {path.name}")
+    return converted_path
+
+
+def _extract(
+    path: Path,
+    max_units: int,
+    max_characters: int,
+    timeout_seconds: float,
+) -> dict[str, Any]:
     """Dispatch a supported document container to its local text extractor."""
     extension = path.suffix.lower()
+    if extension in {".doc", ".ppt", ".xls"}:
+        path = _convert_legacy_office(path, timeout_seconds)
+        extension = path.suffix.lower()
     extractors = {
         ".pdf": lambda: _extract_pdf(path, max_units, max_characters),
         ".docx": lambda: _extract_docx(path, max_characters),
@@ -226,7 +287,7 @@ def main(argv: list[str] | None = None) -> int:
         timeout_seconds = float(arguments[4])
         max_result_bytes = int(arguments[5])
         _apply_resource_limits(timeout_seconds, max_result_bytes)
-        payload = _extract(input_path, max_units, max_characters)
+        payload = _extract(input_path, max_units, max_characters, timeout_seconds)
     except ExtractionFailure as exc:
         payload = {
             "error": {

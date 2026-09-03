@@ -18,6 +18,7 @@ import threading
 import zipfile
 
 import pytest
+from PIL import Image
 
 
 PROVIDER_ROOT = Path(__file__).resolve().parents[1]
@@ -42,6 +43,7 @@ class FakeAttachmentConverter:
             "evidence.pdf": "## Page 1\n\nPDF_MARKER_7812",
             "evidence.docx": "# Word Evidence\n\nDOCX_MARKER_3491",
             "evidence.pptx": "## Slide 1\n\nPPTX_MARKER_5628",
+            "legacy.doc": "# Legacy Word\n\nLEGACY_DOC_MARKER_7351",
             "diagram.png": "## Image\n\nIMAGE_MARKER_8834",
             "stable.docx": "# Stable\n\nSTABLE_DOCX_MARKER_7219",
         }
@@ -127,6 +129,20 @@ def _pptx_bytes(text: str) -> bytes:
     with zipfile.ZipFile(output, "w") as archive:
         archive.writestr("ppt/slides/slide1.xml", f"<slide>{text}</slide>")
     return output.getvalue()
+
+
+def _bmp_bytes() -> bytes:
+    """Create a small valid BMP payload for provider boundary validation."""
+    output = BytesIO()
+    Image.new("RGB", (2, 2), color="white").save(output, format="BMP")
+    return output.getvalue()
+
+
+def test_bmp_is_accepted_at_provider_boundary() -> None:
+    """Verify BMP extension, MIME type, and signature are accepted as an image."""
+    runtime = _load_runtime()
+
+    assert runtime._validate_file_type("diagram.bmp", "image/bmp", _bmp_bytes()) == "image"
 
 
 def _attachment(file_id: str, file_name: str, content_type: str, data: bytes) -> tuple[dict, dict]:
@@ -643,24 +659,25 @@ async def test_get_rejects_symlinked_index_file(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_rejects_legacy_office_without_os_sandbox(tmp_path: Path) -> None:
-    """Verify legacy OLE Office files are rejected before local extraction is attempted."""
+async def test_create_accepts_legacy_office_for_optional_conversion(tmp_path: Path) -> None:
+    """Verify a valid legacy OLE file reaches the optional document converter."""
     runtime = _load_runtime()
     vault = tmp_path / "vault"
     vault.mkdir()
     data = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1legacy-office"
     manifest, part = _attachment("doc-legacy", "legacy.doc", "application/msword", data)
 
-    with pytest.raises(runtime.KnowledgeRuntimeError) as error:
-        await runtime.create_document(
-            {"vault_path": str(vault), "instance_name": "testVaultMD"},
-            _snapshot([manifest], fingerprint="sha256:legacy"),
-            b"SAFE_BODY",
-            [part],
-            FakeAttachmentConverter(),
-        )
+    await runtime.create_document(
+        {"vault_path": str(vault), "instance_name": "testVaultMD"},
+        _snapshot([manifest], fingerprint="sha256:legacy"),
+        b"SAFE_BODY",
+        [part],
+        FakeAttachmentConverter(),
+    )
 
-    assert error.value.code == "unsupported_attachment"
+    assert "LEGACY_DOC_MARKER_7351" in (
+        vault / "knowledge-1" / "attachments" / "doc-legacy" / "content.md"
+    ).read_text(encoding="utf-8")
 
 
 @pytest.mark.asyncio

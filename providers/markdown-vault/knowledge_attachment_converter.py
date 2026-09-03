@@ -14,8 +14,9 @@ import tempfile
 import time
 from typing import Any
 
-_OFFICE_EXTENSIONS = frozenset({".docx", ".pptx", ".xlsx"})
+_OFFICE_EXTENSIONS = frozenset({".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx"})
 _TEXT_MEDIA_TYPES = frozenset({"text/plain", "text/csv", "text/html", "text/markdown"})
+_MAX_NORMALIZED_IMAGE_BYTES = 32 * 1024 * 1024
 
 
 class KnowledgeAttachmentConversionError(RuntimeError):
@@ -139,9 +140,19 @@ class KnowledgeAttachmentLlmConverter:
             )
             return markdown, []
         if content_type.startswith("image/"):
+            visual_data = data
+            visual_media_type = content_type
+            if extension == ".bmp":
+                visual_data = await asyncio.to_thread(
+                    self._normalize_bmp_input,
+                    file_name,
+                    data,
+                    self._remaining_timeout(context),
+                )
+                visual_media_type = "image/png"
             visual = await self._convert_visual(
-                data,
-                content_type,
+                visual_data,
+                visual_media_type,
                 attachment,
                 context,
                 location="Image",
@@ -161,6 +172,52 @@ class KnowledgeAttachmentLlmConverter:
         raise KnowledgeAttachmentConversionError(
             f"Unsupported attachment type for Knowledge conversion: {content_type}"
         )
+
+    def _normalize_bmp_input(
+        self,
+        file_name: str,
+        data: bytes,
+        timeout_seconds: float,
+    ) -> bytes:
+        """Convert BMP input in a resource-limited worker while preserving the original asset."""
+        with tempfile.TemporaryDirectory(prefix="atlasclaw-kb-image-normalization-") as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / Path(file_name).name
+            output_path = temp_path / "normalized.png"
+            input_path.write_bytes(data)
+            worker_path = Path(__file__).with_name("image_normalization_worker.py")
+            try:
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        str(worker_path),
+                        str(input_path),
+                        str(output_path),
+                        str(timeout_seconds),
+                        str(_MAX_NORMALIZED_IMAGE_BYTES),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_seconds,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise KnowledgeAttachmentConversionError(
+                    f"BMP normalization exceeded the request deadline: {file_name}",
+                    status_code=504,
+                    code="attachment_conversion_timeout",
+                ) from exc
+            if completed.returncode != 0 or not output_path.is_file():
+                raise KnowledgeAttachmentConversionError(
+                    f"Unable to decode BMP attachment: {file_name}"
+                )
+            normalized = self._read_limited_file(
+                output_path,
+                _MAX_NORMALIZED_IMAGE_BYTES,
+                f"Normalized BMP attachment is too large: {file_name}",
+                "attachment_too_large",
+            )
+        return normalized
 
     async def _convert_visual(
         self,
