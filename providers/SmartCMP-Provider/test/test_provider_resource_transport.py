@@ -51,11 +51,13 @@ try:
         ResourceBundleQuery,
     )
     from smartcmp_provider.models.requests import (
+        CatalogRequestSpec,
         RequestActorIdentity,
         RequestStatusQuery,
         RequestSubmissionInput,
     )
     from smartcmp_provider.models.operations import (
+        ResourceOperationInput,
         ResourceActionInput,
         ResourceActionTarget,
     )
@@ -71,6 +73,7 @@ try:
         list_resources,
     )
     from smartcmp_provider.operations.catalogs import (
+        list_request_resource_pools,
         _resolve_option_selection,
         get_catalog_detail,
         list_catalogs,
@@ -79,11 +82,15 @@ try:
         list_logical_templates,
         list_resource_bundles,
     )
+    from smartcmp_provider.operations.deployments import get_deployment
     from smartcmp_provider.operations.requests import (
+        build_catalog_request_payload,
+        submit_catalog_request,
         get_request_status,
         submit_request,
     )
-    from smartcmp_provider.operations.resource_actions import execute_resource_action
+    from smartcmp_provider.operations.resource_actions import execute_resource_action, submit_resource_operation
+    from smartcmp_provider.operations.tasks import task_snapshot
     from smartcmp_provider.services.resources import (
         get_resource_operations_view,
     )
@@ -2831,3 +2838,119 @@ def test_resource_evidence_does_not_substitute_legacy_get_endpoints():
         asyncio.run(invoke())
 
     assert seen == [("PATCH", "/platform-api/nodes/resource-1/view")]
+
+
+def test_fixed_catalog_payload_preserves_count_and_rejects_two_spec_sources():
+    """A missing wrapper default must not replace the caller's intended quantity."""
+    body = {"catalogId": "catalog", "businessGroupId": "bg", "name": "vm", "count": 2}
+    assert build_catalog_request_payload(CatalogRequestSpec(request_body=body))["count"] == 2
+    assert build_catalog_request_payload(CatalogRequestSpec(request_body=body, count=1))["count"] == 1
+    with pytest.raises(SmartCmpValidationError):
+        build_catalog_request_payload(CatalogRequestSpec(
+            request_body={**body, "resourceSpecs": []}, resource_specs=[]))
+
+
+def test_fixed_pool_query_does_not_require_agent_instructions():
+    """A valid catalog blueprint is sufficient for non-interactive pool discovery."""
+    scope = make_request(instance_name="cmp", base_url="https://cmp.example", user_id="u", token="t")
+    def handler(request):
+        assert request.method == "GET"
+        if request.url.path.endswith("/catalogs/c"):
+            return httpx.Response(200, json={"id": "c", "instructions": None,
+                "blueprint": {"mainYaml": "node_templates:\n  Compute:\n    type: cloudchef.nodes.Compute\n"}})
+        assert request.url.params["businessGroupId"] == "bg"
+        assert request.url.params["nodeType"] == "cloudchef.nodes.Compute"
+        return httpx.Response(200, json=[{"id": "pool", "name": "FC", "password": "must-not-return"}])
+    async def invoke():
+        async with SmartCmpClient(scope, transport=httpx.MockTransport(handler)) as client:
+            return await list_request_resource_pools(client, ResourceBundleQuery(catalog_id="c",
+                node_template_name="Compute", node_type="cloudchef.nodes.Compute",
+                component_type="resource.iaas.machine.instance.abstract", business_group_id="bg"))
+    result = asyncio.run(invoke())
+    assert result.items == ({"id": "pool", "name": "FC"},)
+
+
+@pytest.mark.parametrize("unknown", [False, True])
+def test_fixed_catalog_submission_preserves_all_ids_and_never_retries(unknown):
+    """One write binds the credential owner and preserves every recoverable request."""
+    request_scope = make_request(instance_name="cmp-a", base_url="https://cmp.example",
+                                 user_id="user-a", token="session-a")
+    writes = []
+
+    def handler(request):
+        if request.method == "GET":
+            assert request.url.path.endswith("/users/current-user-details")
+            return httpx.Response(200, json={"id": "real-user", "loginId": "real-login"})
+        writes.append(json.loads(request.content))
+        if unknown:
+            raise httpx.ReadTimeout("interrupted", request=request)
+        return httpx.Response(200, json=[
+            {"id": "internal-1", "workflowId": "RES20261031000001", "state": "INITIALING"},
+            {"id": "internal-2", "workflowId": "RES20261031000002", "state": "INITIALING"},
+        ])
+
+    async def invoke():
+        async with SmartCmpClient(request_scope, transport=httpx.MockTransport(handler)) as client:
+            return await submit_catalog_request(client, CatalogRequestSpec(request_body={
+                "catalogId": "catalog", "businessGroupId": "bg", "name": "vm", "count": 2,
+                "userId": "forged", "userLoginId": "forged",
+            }))
+
+    if unknown:
+        with pytest.raises(SmartCmpUnknownOutcomeError):
+            asyncio.run(invoke())
+    else:
+        receipt = asyncio.run(invoke())
+        assert [item.request_id for item in receipt.requests] == ["internal-1", "internal-2"]
+        assert receipt.requests[0].request_number == "RES20261031000001"
+    assert len(writes) == 1
+    assert writes[0]["userId"] == "real-user"
+    assert writes[0]["userLoginId"] == "real-login"
+
+
+def test_parameterized_operation_preserves_partial_batch_receipts():
+    """A failed batch member must not erase the successful member's recoverable task."""
+    scope = make_request(instance_name="cmp-a", base_url="https://cmp.example", user_id="u", token="t")
+    writes = []
+    def handler(request):
+        if request.method == "GET":
+            return httpx.Response(200, json=[{"id": "custom", "enabled": True, "webOperation": False,
+                "supportBatchAction": True, "parametersControl": True, "inputsForm": "{}"}])
+        writes.append(json.loads(request.content))
+        return httpx.Response(200, json={"results": {"r1": {"id": "t1", "state": "STARTED"},
+                                                    "r2": {"success": False, "message": "rejected"}}})
+    async def invoke():
+        async with SmartCmpClient(scope, transport=httpx.MockTransport(handler)) as client:
+            return await submit_resource_operation(client, ResourceOperationInput(operation_id="custom",
+                targets=tuple(ResourceActionTarget(category="virtual-machines", resource_id=x) for x in ("r1", "r2")),
+                parameters={"size": 2}))
+    result = asyncio.run(invoke())
+    assert result.targets[0].task_ids == ("t1",)
+    assert result.targets[1].outcome == "failed"
+    assert len(writes) == 1
+    assert writes[0]["executeParameters"] == {"size": 2}
+    assert task_snapshot({"id": "t1", "state": "SUBMITTED"})["completed"] is False
+
+
+@pytest.mark.parametrize("permanent", [True, False])
+def test_deleted_deployment_uses_task_detail_for_permanent_proof(permanent):
+    """Task list projections omit exts; only the exact final task can prove removal."""
+    scope = make_request(instance_name="cmp", base_url="https://cmp.example", user_id="u", token="t")
+    task = {"id": "t", "state": "FINISHED", "deploymentId": "d"}
+    def handler(request):
+        assert request.method == "GET"
+        if request.url.path.endswith("/deployments/d"):
+            return httpx.Response(400, json={"message": "Deployment is deleted"})
+        if request.url.path.endswith("/deployments/deleted"):
+            assert request.url.params["deploymentId"] == "d"
+            assert request.url.params["deploymentName"] == "original-name"
+            return httpx.Response(200, json=[{"id": "d", "state": "DELETED", "deleted": True, "lastTaskId": "t"}])
+        if request.url.path.endswith("/nodes/findByDepId"):
+            return httpx.Response(200, json=[{"id": "r", "deploymentId": "d", "deploymentName": "original-name", "deleted": True}])
+        if request.url.path.endswith("/tasks/t"):
+            return httpx.Response(200, json={**task, "exts": {"permanently_delete_deployment": "d"} if permanent else {}})
+        return httpx.Response(200, json={"content": [task]})
+    async def invoke():
+        async with SmartCmpClient(scope, transport=httpx.MockTransport(handler)) as client:
+            return await get_deployment(client, "d")
+    assert asyncio.run(invoke())["permanently_deleted"] is permanent

@@ -316,6 +316,37 @@ async def list_facets(
     )
 
 
+async def list_request_resource_pools(client: SmartCmpClient, query: ResourceBundleQuery) -> CatalogItemsResult:
+    """Read pool identities for fixed configuration without Agent selection evidence.
+
+    Args:
+        client: Credential-scoped client.
+        query: Explicit catalog/node, business group and optional pool/tag filters.
+    Returns:
+        All matching pool identities; no automatic selection or placement resolution.
+    Raises:
+        SmartCmpError: If catalog context is invalid or the authoritative read fails.
+    """
+    catalog = await _load_request_catalog(client, _required(query.catalog_id, "Catalog ID", client))
+    node_type = _catalog_node_type(catalog.get("blueprint"), query.node_template_name)
+    if not node_type or node_type != query.node_type:
+        raise SmartCmpValidationError("The requested node type does not match the selected catalog blueprint.")
+    if query.placement_fields or query.placement_values:
+        raise SmartCmpValidationError("Fixed pool discovery does not resolve interactive placement fields.")
+    params = {
+        "businessGroupId": _required(query.business_group_id, "Business group ID", client),
+        "componentType": _required(query.component_type, "Component type", client),
+        "nodeType": node_type, "cloudEntryTypeId": query.cloud_entry_type_id or "",
+        "enabled": "true", "readOnly": "false", "strategy": "RB_POLICY_STATIC",
+    }
+    if query.resource_bundle_tags is not None:
+        params["facets"] = query.resource_bundle_tags
+    rows = _extract_object_list(await client.request_json("GET", "/resource-bundles", params=params))
+    if query.resource_bundle_id:
+        rows = [row for row in rows if row.get("id") == query.resource_bundle_id]
+    return CatalogItemsResult(items=tuple(_project_resource_bundle(row) for row in rows))
+
+
 async def list_resource_bundles(
     client: SmartCmpClient,
     query: ResourceBundleQuery,

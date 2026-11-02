@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import re
 from datetime import datetime
 from typing import Any
@@ -21,6 +22,11 @@ from smartcmp_provider.models.catalogs import (
     ResourceBundleQuery,
 )
 from smartcmp_provider.models.requests import (
+    CatalogRequestSpec,
+    SubmissionReceipt,
+    RequestSnapshot,
+    ProvisioningOutputs,
+    redact_request_secrets,
     RequestActorIdentity,
     RequestStatusQuery,
     RequestStatusResult,
@@ -102,6 +108,31 @@ async def submit_request(
         normalized_body,
         request_input.actor,
     )
+    records = await _submit_provision_once(client, normalized_body)
+
+    outcomes: list[RequestSubmissionItem] = []
+    overall_failed = False
+    for record in records:
+        outcome = await _build_submission_outcome(
+            client,
+            record,
+            verification_attempts=request_input.verification_attempts,
+            verification_interval_seconds=(
+                request_input.verification_interval_seconds
+            ),
+        )
+        outcomes.append(outcome)
+        if outcome.outcome in {"failed", "initialization_failed"}:
+            overall_failed = True
+    return RequestSubmissionResult(
+        normalized_body=normalized_body,
+        items=tuple(outcomes),
+        overall_failed=overall_failed,
+    )
+
+
+async def _submit_provision_once(client: SmartCmpClient, normalized_body: dict[str, Any]) -> list[dict[str, Any]]:
+    """Share the existing single-write boundary without applying adapter selection policy."""
     # Submission is intentionally single-attempt. Only read-only verification
     # may repeat after SmartCMP returns a correlatable request record.
     try:
@@ -129,25 +160,7 @@ async def submit_request(
             trace_id=client.request.context.trace_id,
         )
 
-    outcomes: list[RequestSubmissionItem] = []
-    overall_failed = False
-    for record in records:
-        outcome = await _build_submission_outcome(
-            client,
-            record,
-            verification_attempts=request_input.verification_attempts,
-            verification_interval_seconds=(
-                request_input.verification_interval_seconds
-            ),
-        )
-        outcomes.append(outcome)
-        if outcome.outcome in {"failed", "initialization_failed"}:
-            overall_failed = True
-    return RequestSubmissionResult(
-        normalized_body=normalized_body,
-        items=tuple(outcomes),
-        overall_failed=overall_failed,
-    )
+    return records
 
 
 async def _resolve_resource_bundles(
@@ -1343,3 +1356,134 @@ def _coerce_status_code(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def build_catalog_request_payload(spec: CatalogRequestSpec) -> dict[str, Any]:
+    """Map explicit fixed configuration without Agent selectors or quantity fallback.
+
+    Args:
+        spec: Wrapper fields and an optional standard CMP request body.
+    Returns:
+        An independent payload; caller identity is bound at submission.
+    Raises:
+        SmartCmpValidationError: For missing stable fields or conflicting resource specifications.
+    """
+    body = deepcopy(spec.request_body)
+    for source, target in (("catalog_id", "catalogId"), ("business_group_id", "businessGroupId"),
+                           ("name", "name"), ("project_id", "projectId"), ("params", "params")):
+        value = getattr(spec, source)
+        if value is not None:
+            body[target] = deepcopy(value)
+    for key in ("catalogId", "businessGroupId", "name"):
+        if not isinstance(body.get(key), str) or not body[key].strip():
+            raise SmartCmpValidationError(f"{key} is required.")
+    count = spec.count if spec.count is not None else body.get("count", 1)
+    if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+        raise SmartCmpValidationError("count must be a positive integer.")
+    body["count"] = count
+    if spec.description is not None:
+        generic = body.setdefault("genericRequest", {})
+        if not isinstance(generic, dict):
+            raise SmartCmpValidationError("genericRequest must be an object.")
+        generic["description"] = spec.description
+    if spec.resource_specs is not None:
+        if "resourceSpecs" in body:
+            raise SmartCmpValidationError("resource_specs and request_body.resourceSpecs are mutually exclusive.")
+        body["resourceSpecs"] = []
+        for wrapper in spec.resource_specs:
+            if not isinstance(wrapper.get("spec", {}), dict):
+                raise SmartCmpValidationError("resource_specs.spec must be an object.")
+            item = deepcopy(wrapper.get("spec", {}))
+            for source, target in (("node", "node"), ("type", "type"), ("resource_pool_id", "resourceBundleId")):
+                if source in wrapper:
+                    item[target] = wrapper[source]
+            body["resourceSpecs"].append(item)
+    if "resourceSpecs" in body:
+        if not isinstance(body["resourceSpecs"], list):
+            raise SmartCmpValidationError("resourceSpecs must be a list.")
+        for item in body["resourceSpecs"]:
+            if not isinstance(item, dict) or any(not isinstance(item.get(k), str) or not item[k].strip() for k in ("node", "type")):
+                raise SmartCmpValidationError("Each resource specification requires explicit node and type.")
+    return body
+
+
+async def submit_catalog_request(client: SmartCmpClient, spec: CatalogRequestSpec) -> SubmissionReceipt:
+    """Bind the current caller and submit fixed configuration exactly once.
+
+    Args:
+        client: Credential-scoped client.
+        spec: Fully selected catalog configuration.
+    Returns:
+        All request IDs. Missing IDs set outcome=unknown without replaying the write.
+    Raises:
+        SmartCmpError: For validation, platform rejection, or an indeterminate transport write.
+    """
+    body = build_catalog_request_payload(spec)
+    body = await _enrich_request_body(client, body, actor=None)
+    records = await _submit_provision_once(client, body)
+    requests = tuple(_request_snapshot(record) for record in records)
+    return SubmissionReceipt(requests=requests, outcome="submitted" if all(item.request_id for item in requests) else "unknown")
+
+
+def _request_snapshot(record: dict[str, Any]) -> RequestSnapshot:
+    state = _canonical_state(record.get("state"))
+    provision = _canonical_state(record.get("provisionState"))
+    failed = state in (_APPROVAL_REJECTED_STATES | {"INITIALING_FAILED", "FAILED", "CANCELED", "CANCELLED", "TIMEOUT_CLOSED"}) or _looks_failed_provision_state(provision)
+    succeeded = state == "FINISHED" and not failed
+    return RequestSnapshot(
+        request_id=_normalize_value(record.get("id")), request_number=_extract_request_id(record),
+        state=state, provision_state=provision, completed=failed or succeeded, succeeded=succeeded,
+        outcome="failed" if failed else "succeeded" if succeeded else "approval_pending" if state in _APPROVAL_PENDING_STATES else "running",
+        error=SmartCmpClient.sanitize_error_text(_normalize_value(record.get("errMsg") or record.get("errorMessage"))),
+    )
+
+
+async def get_request(client: SmartCmpClient, ref: dict[str, str]) -> RequestSnapshot:
+    """Read exactly one internal ID or display number, with no inferred identifier type.
+
+    Args:
+        client: Credential-scoped client.
+        ref: Exactly one of request_id and request_number.
+    Returns:
+        Safe request identity and execution facts.
+    Raises:
+        SmartCmpError: For invalid, inaccessible, or ambiguous references.
+    """
+    request_id, number = ref.get("request_id"), ref.get("request_number")
+    if bool(request_id) == bool(number):
+        raise SmartCmpValidationError("Provide exactly one request_id or request_number.")
+    if number:
+        detail = (await get_request_status(client, RequestStatusQuery(request_id=number))).detail
+    else:
+        detail = await client.request_json("GET", f"/generic-request/{quote(request_id, safe='')}")
+    if not isinstance(detail, dict) or not detail.get("id"):
+        raise SmartCmpUpstreamError("Request detail did not contain an internal ID.")
+    return _request_snapshot(detail)
+
+
+async def get_request_outputs(client: SmartCmpClient, request_ids: list[str]) -> ProvisioningOutputs:
+    """Read outputs per internal request ID to preserve ownership across batch submissions.
+
+    Args:
+        client: Credential-scoped client.
+        request_ids: Internal request IDs obtained from submission or detail reads.
+    Returns:
+        Per-request deployment IDs, safe resource identity/address fields and redacted outputs.
+    Raises:
+        SmartCmpError: If any read fails or the API response shape is invalid.
+    """
+    results = []
+    resource_fields = ("id", "deploymentId", "name", "componentCategoryId", "componentType",
+                       "resourceType", "externalId", "networkAddress", "status", "cloudEntryId")
+    for request_id in dict.fromkeys(request_ids):
+        if not request_id:
+            raise SmartCmpValidationError("An internal request ID is required for outputs.")
+        payload = await client.request_json("GET", "/generic-request/deploy-outputs", params={"ids": request_id})
+        if not isinstance(payload, dict):
+            raise SmartCmpUpstreamError("Request outputs returned an unexpected payload.")
+        deployment_ids = [item for item in str(payload.get("deploymentIds") or "").split(",") if item]
+        resources = [{key: resource[key] for key in resource_fields if key in resource}
+                     for resource in (payload.get("resources") or []) if isinstance(resource, dict)]
+        results.append({"request_id": request_id, "deployment_ids": deployment_ids,
+                        "resources": resources, "outputs": redact_request_secrets(payload.get("outputs") or [])})
+    return ProvisioningOutputs(requests=tuple(results))

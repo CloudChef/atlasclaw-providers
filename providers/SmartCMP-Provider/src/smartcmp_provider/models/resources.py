@@ -19,6 +19,9 @@ class ResourceListQuery(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     scope: ResourceScope = "all_resources"
+    category: str = ""
+    business_group_id: str = ""
+    resource_pool_id: str = ""
     query_value: str = ""
     page: int = Field(default=1, ge=1, strict=True)
     size: int = Field(

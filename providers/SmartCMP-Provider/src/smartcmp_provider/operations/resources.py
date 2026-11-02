@@ -56,6 +56,16 @@ def build_resource_search_path(query: ResourceListQuery) -> str:
         Provider-owned path including the existing ordered query string.
     """
 
+    if query.category or query.business_group_id or query.resource_pool_id:
+        from urllib.parse import urlencode
+        params = {"page": query.page, "size": query.size, "queryValue": query.query_value,
+                  "sort": "createdDate,desc", "relation": "AND", "fullMatch": "false",
+                  "category": query.category or ("iaas.machine.virtual_machine" if query.scope == "virtual_machines" else "-1")}
+        if query.business_group_id:
+            params["businessGroupIds"] = query.business_group_id
+        if query.resource_pool_id:
+            params["resourceBundleId"] = query.resource_pool_id
+        return "/nodes/search?" + urlencode(params)
     encoded_query = quote(query.query_value or "", safe="")
     if query.scope == "virtual_machines":
         return (

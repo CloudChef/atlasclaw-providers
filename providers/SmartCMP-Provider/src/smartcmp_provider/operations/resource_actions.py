@@ -14,10 +14,15 @@ from smartcmp_provider.errors import (
     SmartCmpValidationError,
 )
 from smartcmp_provider.models.operations import (
+    ResourceOperationInput,
+    ResourceActionTarget,
+    OperationReceipt,
+    OperationTargetReceipt,
     ResourceActionInput,
     ResourceActionResult,
 )
 from smartcmp_provider.operations.resources import (
+    operation_rejection_reason,
     resource_operation_rejection_reason,
 )
 from smartcmp_provider.transport.client import SmartCmpClient
@@ -145,20 +150,7 @@ async def execute_resource_action(
             ),
         )
     else:
-        payload = {
-            "operationId": action,
-            "resourceIds": (
-                resource_ids[0]
-                if len(resource_ids) == 1
-                else ",".join(resource_ids)
-            ),
-            "scheduledTaskMetadataRequest": _schedule_metadata(),
-        }
-        await _submit_resource_operation_once(
-            client,
-            path="/nodes/resource-operations",
-            payload=payload,
-        )
+        await _submit_node_operation_once(client, action, resource_ids)
     return ResourceActionResult(
         action=action,
         resource_ids=tuple(resource_ids),
@@ -192,6 +184,19 @@ async def submit_deployment_actions_once(
         SmartCmpError: If SmartCMP definitely rejects the submission.
     """
 
+    response_payload = await _submit_deployment_actions_once(
+        client, operations=operations, recycled=recycled)
+    _validate_batch_execution_response(
+        client, response_payload,
+        deployment_ids=tuple(deployment_id for deployment_id, _ in operations),
+    )
+    return response_payload
+
+
+async def _submit_deployment_actions_once(
+    client: SmartCmpClient, *, operations: tuple[tuple[str, str], ...], recycled: bool = False,
+) -> Any:
+    """Keep raw acknowledgements so callers can preserve IDs even for failed tasks."""
     payload = {
         deployment_id: {
             "operationName": operation_id,
@@ -207,11 +212,6 @@ async def submit_deployment_actions_once(
         client,
         path="/deployments/execute-action",
         payload=payload,
-    )
-    _validate_batch_execution_response(
-        client,
-        response_payload,
-        deployment_ids=tuple(deployment_id for deployment_id, _ in operations),
     )
     return response_payload
 
@@ -345,3 +345,92 @@ def _validate_batch_execution_response(
                 f"{business_error}",
                 trace_id=client.request.context.trace_id,
             )
+
+
+async def _submit_node_operation_once(client: SmartCmpClient, operation_id: str,
+                                      resource_ids: list[str], parameters: dict[str, Any] | None = None) -> Any:
+    payload = {"operationId": operation_id, "resourceIds": ",".join(resource_ids),
+               "scheduledTaskMetadataRequest": _schedule_metadata()}
+    if parameters is not None:
+        payload["executeParameters"] = parameters
+    return await _submit_resource_operation_once(client, path="/nodes/resource-operations", payload=payload)
+
+
+async def list_resource_actions(client: SmartCmpClient, target: ResourceActionTarget) -> list[dict[str, Any]]:
+    """List authoritative operations without the Agent display whitelist.
+
+    Args:
+        client: Credential-scoped client.
+        target: Exact category and ID.
+    Returns:
+        Operation metadata including enabled/webOperation and available parameter definitions.
+    Raises:
+        SmartCmpError: If the target or operation list is inaccessible.
+    """
+    if not target.category.strip() or not target.resource_id.strip():
+        raise SmartCmpValidationError("Explicit category and resource ID are required.")
+    return await _fetch_current_user_operations(client, category=target.category, resource_id=target.resource_id)
+
+
+def operation_receipt(operation_id: str, targets: tuple[ResourceActionTarget, ...], payload: Any) -> OperationReceipt:
+    """Project a BatchExecutionResponse without losing acknowledged targets.
+
+    Args:
+        operation_id: Submitted operation.
+        targets: Exact submitted targets.
+        payload: CMP BatchExecutionResponse.
+    Returns:
+        One receipt per target; absent acknowledgements are unknown, never retried.
+    """
+    results = payload.get("results", {}) if isinstance(payload, dict) else {}
+    receipts = []
+    for target in targets:
+        record = results.get(target.resource_id) if isinstance(results, dict) else None
+        task_id = str(record.get("id") or "") if isinstance(record, dict) else ""
+        error = _resource_business_error(record)
+        receipts.append(OperationTargetReceipt(
+            category=target.category, resource_id=target.resource_id,
+            task_ids=(task_id,) if task_id else (), submitted=bool(task_id),
+            outcome="failed" if error else "submitted" if task_id else "unknown", error=SmartCmpClient.sanitize_error_text(error),
+        ))
+    return OperationReceipt(operation_id=operation_id, targets=tuple(receipts))
+
+
+async def submit_resource_operation(client: SmartCmpClient, operation: ResourceOperationInput) -> OperationReceipt:
+    """Validate explicit targets and submit once, retaining per-target acknowledgement.
+
+    Args:
+        client: Credential-scoped client.
+        operation: Explicit operation ID, targets and optional parameters.
+    Returns:
+        Per-target task receipts, including failed or unknown outcomes.
+    Raises:
+        SmartCmpError: For preflight rejection or indeterminate single-write transport failures.
+    """
+    if operation.operation_id in {"permanently_delete_deployment", "delete_metadata_in_resource"}:
+        raise SmartCmpValidationError("Use the dedicated deployment removal operation.")
+    categories = {target.category.casefold() for target in operation.targets}
+    if len(categories) != 1:
+        raise SmartCmpValidationError("An operation cannot mix resource categories.")
+    for target in operation.targets:
+        actions = await list_resource_actions(client, target)
+        action = next((item for item in actions if item.get("id") == operation.operation_id), None)
+        if action is None:
+            raise SmartCmpValidationError("Operation is not available for the current target and caller.")
+        reason = operation_rejection_reason(action)
+        if reason:
+            raise SmartCmpValidationError(reason)
+        if len(operation.targets) > 1 and action.get("supportBatchAction") is not True:
+            raise SmartCmpValidationError("Operation does not support batch execution.")
+        if action.get("parametersControl") and not action.get("inputsForm") and not action.get("parameters"):
+            raise SmartCmpValidationError("Operation requires parameters but exposes no API parameter contract.")
+    if categories == {"deployments"}:
+        payload = {target.resource_id: {
+            "operationName": operation.operation_id, "scheduledTaskMetadataRequest": _schedule_metadata(),
+            "operationParamJson": json.dumps(operation.parameters if operation.parameters is not None else {"systemForm": None}),
+        } for target in operation.targets}
+        response = await _submit_resource_operation_once(client, path="/deployments/execute-action", payload=payload)
+    else:
+        response = await _submit_node_operation_once(client, operation.operation_id,
+            [target.resource_id for target in operation.targets], operation.parameters)
+    return operation_receipt(operation.operation_id, operation.targets, response)

@@ -27,6 +27,7 @@ from smartcmp_provider.models.resources import (
 from smartcmp_provider.operations.recycle_bin import (
     list_recycled_resources,
     permanently_remove_recycled_resource,
+    submit_permanent_removal,
 )
 from smartcmp_provider.operations.resource_actions import execute_resource_action
 from smartcmp_provider.transport.client import SmartCmpClient
@@ -167,6 +168,23 @@ def _removal_input(**overrides: Any) -> PermanentResourceRemovalInput:
     }
     values.update(overrides)
     return PermanentResourceRemovalInput(**values)
+
+
+def test_failed_permanent_task_keeps_new_receipt_and_legacy_exception():
+    """A task-bearing failure is recoverable by the new caller without changing Agent errors."""
+    response = {"results": {"dep-1": {"id": "failed-task", "state": "FAILED"}}}
+    legacy = RecycleApiStub(post_response=response)
+    with pytest.raises(SmartCmpUpstreamError):
+        asyncio.run(_remove(legacy, _removal_input()))
+    api = RecycleApiStub(post_response=response)
+    async def invoke():
+        async with SmartCmpClient(_request_scope(), transport=httpx.MockTransport(api)) as client:
+            return await submit_permanent_removal(client, _removal_input())
+    receipt = asyncio.run(invoke())
+    assert receipt.targets[0].task_ids == ("failed-task",)
+    assert receipt.targets[0].submitted is True
+    assert receipt.targets[0].outcome == "failed"
+    assert len(legacy.writes) == len(api.writes) == 1
 
 
 def test_list_exposes_owning_scope_and_bound_permanent_action():

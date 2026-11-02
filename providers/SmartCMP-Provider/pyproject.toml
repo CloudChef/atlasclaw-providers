@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "smartcmp-provider"
-version = "1.0.0"
+version = "1.1.0"
 description = "SmartCMP Provider implementation shared by AtlasClaw Skills and MCP"
 readme = "README.md"
 requires-python = ">=3.11"

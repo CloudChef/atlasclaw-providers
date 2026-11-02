@@ -14,6 +14,7 @@ from smartcmp_provider.errors import (
     SmartCmpUpstreamError,
     SmartCmpValidationError,
 )
+from smartcmp_provider.models.operations import OperationReceipt, ResourceActionTarget
 from smartcmp_provider.models.resources import (
     PermanentResourceRemovalInput,
     PermanentResourceRemovalResult,
@@ -21,7 +22,9 @@ from smartcmp_provider.models.resources import (
     RecycledResourceQuery,
 )
 from smartcmp_provider.operations.resource_actions import (
-    submit_deployment_actions_once,
+    _submit_deployment_actions_once,
+    _validate_batch_execution_response,
+    operation_receipt,
 )
 from smartcmp_provider.operations.resources import (
     extract_items,
@@ -125,6 +128,25 @@ async def permanently_remove_recycled_resource(
         SmartCmpError: If SmartCMP definitely rejects the submission.
     """
 
+    deployment_id, deployment_name, resources, response = await _permanently_remove_once(client, action_input)
+    _validate_batch_execution_response(client, response, deployment_ids=(deployment_id,))
+    return PermanentResourceRemovalResult(
+        deployment_id=deployment_id,
+        deployment_name=deployment_name,
+        affected_resources=resources,
+        message=(
+            "SmartCMP permanently_delete_deployment request submitted for "
+            f"deployment '{deployment_name or deployment_id}'."
+        ),
+        verification_hint=(
+            "Refresh the recycle bin to verify that SmartCMP completed removal; "
+            "a submitted request does not mean deletion is complete."
+        ),
+    )
+
+
+async def _permanently_remove_once(client: SmartCmpClient, action_input: PermanentResourceRemovalInput):
+    """Keep legacy confirmation, scope and tombstone checks in their original order."""
     if action_input.confirmed is not True:
         raise SmartCmpValidationError(
             "confirmed must be true before permanent removal; this deletes the "
@@ -213,24 +235,29 @@ async def permanently_remove_recycled_resource(
             f"'{deployment_name or deployment_id}': {rejection}",
             trace_id=client.request.context.trace_id,
         )
-    await submit_deployment_actions_once(
+    response = await _submit_deployment_actions_once(
         client,
         operations=((deployment_id, str(operation.get("id") or "")),),
         recycled=True,
     )
-    return PermanentResourceRemovalResult(
-        deployment_id=deployment_id,
-        deployment_name=deployment_name,
-        affected_resources=_stable_resource_snapshot(row_snapshot),
-        message=(
-            "SmartCMP permanently_delete_deployment request submitted for "
-            f"deployment '{deployment_name or deployment_id}'."
-        ),
-        verification_hint=(
-            "Refresh the recycle bin to verify that SmartCMP completed removal; "
-            "a submitted request does not mean deletion is complete."
-        ),
-    )
+    return deployment_id, deployment_name, _stable_resource_snapshot(row_snapshot), response
+
+
+async def submit_permanent_removal(client: SmartCmpClient, action_input: PermanentResourceRemovalInput) -> OperationReceipt:
+    """Submit a confirmed exact recycled scope through the same checked removal path.
+
+    Args:
+        client: Credential-scoped client.
+        action_input: Exact deployment and previously read resource snapshot.
+    Returns:
+        Task receipt and complete affected scope.
+    Raises:
+        SmartCmpError: For scope changes, denied actions, tombstones or write errors.
+    """
+    deployment_id, _, resources, response = await _permanently_remove_once(client, action_input)
+    receipt = operation_receipt(PERMANENT_DELETE_ACTION,
+        (ResourceActionTarget(category="deployments", resource_id=deployment_id),), response)
+    return receipt.model_copy(update={"affected_resources": resources})
 
 
 def _validate_expected_scope(

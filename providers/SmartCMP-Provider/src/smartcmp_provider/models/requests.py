@@ -209,3 +209,48 @@ def redact_request_secrets(value: Any) -> Any:
     if isinstance(value, tuple):
         return tuple(redact_request_secrets(item) for item in value)
     return value
+
+
+class CatalogRequestSpec(BaseModel):
+    """Fixed catalog configuration; None means that the wrapper did not override a field."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    catalog_id: str | None = None
+    business_group_id: str | None = None
+    name: str | None = None
+    project_id: str | None = None
+    count: int | None = Field(default=None, ge=1)
+    description: str | None = None
+    params: dict[str, Any] | None = None
+    resource_specs: list[dict[str, Any]] | None = None
+    request_body: dict[str, Any] = Field(default_factory=dict)
+
+
+class RequestSnapshot(BaseModel):
+    """Correlatable request facts, separate from the legacy display-only request ID."""
+
+    model_config = ConfigDict(frozen=True)
+    request_id: str
+    request_number: str = ""
+    state: str = ""
+    provision_state: str = ""
+    completed: bool = False
+    succeeded: bool = False
+    outcome: str = "submitted"
+    error: str = ""
+
+
+class SubmissionReceipt(BaseModel):
+    """Preserve every request returned by one submission, including incomplete receipts."""
+
+    model_config = ConfigDict(frozen=True)
+    requests: tuple[RequestSnapshot, ...]
+    submitted: bool = True
+    outcome: str = "submitted"
+
+
+class ProvisioningOutputs(BaseModel):
+    """Keep output ownership explicit rather than associating requests by list position."""
+
+    model_config = ConfigDict(frozen=True)
+    requests: tuple[dict[str, Any], ...]
