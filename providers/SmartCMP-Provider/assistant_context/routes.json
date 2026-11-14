@@ -192,6 +192,16 @@
       }
     },
     {
+      "id": "recycle-bin",
+      "priority": 400,
+      "match": {"path_template": "/main/recycle-bin"},
+      "result": {
+        "page_type": "recycle-bin",
+        "object_type": "recycled_resource_collection",
+        "skill_ref": "smartcmp:resource"
+      }
+    },
+    {
       "id": "virtual-machine-detail",
       "priority": 400,
       "match": {"path_template": "/main/virtual-machines/{resource_id}/details"},

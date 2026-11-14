@@ -108,6 +108,7 @@ def test_routes_match_context_to_existing_skills_with_one_provider_resolver() ->
             "smartcmp:request",
         ),
         ("cloud-resource-detail", "/main/cloud-resource/{resource_id}", "smartcmp:resource"),
+        ("recycle-bin", "/main/recycle-bin", "smartcmp:resource"),
         (
             "virtual-machine-detail",
             "/main/virtual-machines/{resource_id}/details",
