@@ -130,6 +130,7 @@ _OBJECT_PARAMETER_NAMES: dict[str, frozenset[str]] = {
     "optimization_policy": frozenset(("policy_id",)),
     "request": frozenset(("application_type", "request_id")),
     "resource": frozenset(("resource_id",)),
+    "recycled_resource_collection": frozenset(),
     "script_definition": frozenset(("script_id",)),
     "security_compliance_policy": frozenset(("policy_id",)),
     "security_compliance_violation_collection": frozenset(),
@@ -772,6 +773,15 @@ async def resolve_page_context(
         return await _resolve_security_policy(route_parameters, reader=reader)
     if normalized_object_type == "security_compliance_violation_collection":
         return _resolve_security_violation_collection()
+    if normalized_object_type == "recycled_resource_collection":
+        return success_object(
+            object_type=normalized_object_type,
+            object_id="recycle-bin",
+            name="Recycle Bin",
+            state="",
+            attributes={},
+            object_actions=[],
+        )
     return await _resolve_resource(
         route_parameters,
         expected_kind=normalized_object_type,

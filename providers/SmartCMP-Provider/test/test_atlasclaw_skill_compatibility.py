@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import tomllib
 from dataclasses import FrozenInstanceError
@@ -304,3 +305,35 @@ def test_provider_contracts_are_request_scoped_and_immutable(
     assert capability.atlasclaw_tool_name == "smartcmp_list_all_resource"
     with pytest.raises(FrozenInstanceError):
         context.trace_id = "other-trace"  # type: ignore[misc]
+
+
+@pytest.mark.parametrize("field, expected", [("scope", "all_resources"), ("query_value", "")])
+def test_resource_list_metadata_declares_effective_defaults(field, expected) -> None:
+    schema = json.loads(_frontmatter(SKILLS_ROOT / "resource" / "SKILL.md")["tool_list_parameters"])
+    assert schema["properties"][field]["default"] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("arguments", [{}, {"scope": "virtual_machines"}, {"query_value": "owned-vm"}])
+async def test_resource_list_defaults_through_core_tool_validation(arguments, monkeypatch) -> None:
+    core_root = PROVIDER_ROOT.parents[2] / "atlasclaw"
+    if core_root.is_dir():
+        monkeypatch.syspath_prepend(str(core_root))
+    registry_module = pytest.importorskip("app.atlasclaw.skills.registry")
+    from pydantic_ai import Tool
+    from smartcmp_provider.models.resources import ResourceListQuery
+
+    schema = json.loads(_frontmatter(SKILLS_ROOT / "resource" / "SKILL.md")["tool_list_parameters"])
+
+    async def handler(ctx, **kwargs):
+        return ResourceListQuery(**kwargs)
+
+    metadata = registry_module.SkillMetadata(
+        name="resource_list", description="Validate resource inputs.", parameters_schema=schema,
+    )
+    wrapped = registry_module.SkillRegistry()._build_runtime_handler(metadata, handler)
+    tool = Tool(wrapped, takes_ctx=True)
+    result = await wrapped(None, **tool.function_schema.validator.validate_python(arguments))
+    assert result.scope == arguments.get("scope", "all_resources")
+    assert result.query_value == arguments.get("query_value", "")
+    assert result.page == 1 and result.size == 20

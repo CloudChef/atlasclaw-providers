@@ -1,5 +1,6 @@
 node_modules/
 dist/
+/providers/SmartCMP-Provider/build/
 openspec/
 .qoder/
 .sisyphus/

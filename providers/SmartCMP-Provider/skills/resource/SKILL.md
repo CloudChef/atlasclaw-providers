@@ -141,10 +141,12 @@ tool_list_parameters: |
       "scope": {
         "type": "string",
         "enum": ["all_resources", "virtual_machines"],
+        "default": "all_resources",
         "description": "Resource listing scope. Use `all_resources` for 云资源 and `virtual_machines` for 云主机."
       },
       "query_value": {
         "type": "string",
+        "default": "",
         "description": "Optional keyword used to filter resources."
       },
       "page": {
