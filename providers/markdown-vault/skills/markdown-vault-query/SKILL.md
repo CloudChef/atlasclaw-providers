@@ -48,6 +48,7 @@ tool_search_groups:
   - knowledge
 tool_search_capability_class: "provider:markdown-vault"
 tool_search_priority: 100
+tool_search_read_only: true
 tool_search_parameters: |
   {
     "type": "object",
@@ -89,6 +90,7 @@ tool_get_groups:
   - knowledge
 tool_get_capability_class: "provider:markdown-vault"
 tool_get_priority: 110
+tool_get_read_only: true
 tool_get_parameters: |
   {
     "type": "object",

@@ -571,7 +571,7 @@ opaque user-facing values: do not require a prefix, character set, or fixed
 length pattern. Use the exact value returned by SmartCMP.
 
 The status script returns structured fields only. Treat the tool output as
-lookup data, not final user-facing text. Explain the result in the current user's message language using
+lookup data, not final user-facing text. Explain the result in the response language selected by the runtime's shared Response Language policy using
 `state`, `statusCategory`, `approvalPassed`, `currentStep`, `currentApprover`,
 `provisionState`, `error`, and `updatedAt`.
 
@@ -740,7 +740,7 @@ question.
 
 ## User Response Language
 
-- Use the current user's language for user-facing replies.
+- Follow the runtime's shared Response Language policy for all user-facing replies, including intermediate updates and final answers. Do not select a separate language from the current message.
 - Keep JSON keys, API fields, catalog names, provider names, and tool names
   unchanged.
 - In Chinese user-facing text, always call SmartCMP resource pools `资源池`.
@@ -1195,7 +1195,7 @@ Before submit:
    by generated instructions or resolved dynamic field metadata has a real
    value or usable non-selectable default. Do not perform a final resource-pool
    revalidation.
-2. Show a short summary in the user's language.
+2. Show a short summary in the response language selected by the runtime's shared Response Language policy.
 3. Show `JSON 预览` / `JSON Preview` with a fenced JSON block. This block is a
    presentation-only copy, not the `json_body` passed to the submit tool.
 4. Mask `credentialPassword` as `"******"` only in that displayed copy. Preserve
