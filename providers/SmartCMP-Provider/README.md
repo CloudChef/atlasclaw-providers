@@ -355,7 +355,7 @@ already submitted request by the SmartCMP Request ID returned from submission.
 - The Tool returns structured fields such as `state`, `statusCategory`,
   `approvalPassed`, `currentStep`, `currentApprover`, `provisionState`,
   `error`, and `updatedAt`.
-- The agent should explain those fields in the current user's message language;
+- The agent should explain those fields in the response language selected by the runtime's shared Response Language policy;
   the handler does not hard-code a localized approval sentence.
 
 **Status Semantics:**
@@ -545,7 +545,7 @@ subprocess-based cross-Skill proxies.
 5. **Error Handling** - On `[ERROR]` output, report to user immediately; do NOT self-debug
 6. **Security Boundaries** - `resource` owns resource-first LLM posture and associated-violation analysis; `security-compliance` owns the CMP-wide posture and violation-object workflows
 7. **Localized Responses** - Handlers return stable fields and metadata.
-   Agents explain results in the current user's message language.
+   Agents explain results using the runtime's shared Response Language policy for both intermediate updates and final answers.
 8. **No Raw Day2 Dumps** - Resource operations should not print raw request payloads or raw SmartCMP response details after a successful submission.
 9. **Form Designer Is Read-Only** - `form-designer` outputs schema JSON for manual review/copy only. It must not save or update CMP forms.
 10. **Editor Skills Are Read-Only** - Script, optimization-policy, and component-script designers read only the exact Context-bound saved object and return manual replacement content; they do not save, publish, execute, or deploy it.
