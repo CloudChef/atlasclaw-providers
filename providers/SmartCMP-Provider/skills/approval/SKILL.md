@@ -186,7 +186,7 @@ tool_analyze_parameters: |
     "required": ["identifier"]
   }
 tool_approve_name: "smartcmp_approve"
-tool_approve_description: "Approve requests in SmartCMP. `ids` must contain the exact SmartCMP user-facing Request ID(s) returned by the latest pending-approval list; their format is opaque and may vary. Only when the user explicitly refers to a displayed row, resolve that row to the latest smartcmp_list_pending `_internal.items[].request_id`. Otherwise preserve a supplied ID exactly, including numeric or UUID-shaped values. Never invent an ID; SmartCMP Provider resolves Request IDs internally."
+tool_approve_description: "Approve requests in SmartCMP. For one request, pass the exact user-facing Request ID as a single string in `ids`. For a batch, pass an array of exact IDs. When the user confirms the approval action on a verified request, use the supplied Request ID directly. Only when the user refers to a displayed row, resolve it to `request_id` in the latest smartcmp_list_pending result. Preserve supplied IDs exactly; SmartCMP Provider resolves them against the current pending approvals."
 tool_approve_entrypoint: "scripts/adapter.py:approve"
 tool_approve_aliases:
   - "approve request"
@@ -420,12 +420,13 @@ Extract the `request_id` field
 Pass to `smartcmp_approve` or `smartcmp_reject`
 ```
 
-Treat `request_id` as opaque: do not require a prefix, character set, or fixed length pattern. Never invent a value. If the latest list metadata is unavailable, list pending approvals again before calling approve/reject.
+Treat `request_id` as opaque: do not require a prefix, character set, or fixed length pattern. Never invent a value. If the user selects a row and the latest list metadata is unavailable, list pending approvals again to resolve the row.
 
 ### Step 2: Approve Requests
 
-Call `smartcmp_approve` with one or more `request_ids` and an optional
-`reason`.
+For a verified request confirmed in the UI, call `smartcmp_approve` with its
+exact Request ID as a single string in `ids`. For a batch, pass an array in
+`ids`. The `reason` is optional.
 
 ### Step 3: Reject Requests
 

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -88,12 +89,21 @@ def build_approval_object_actions(
     )
     # Mutation actions are Agent intents, not direct SmartCMP writes. AtlasClaw still
     # applies its confirmation gate before the owning Skill may execute a Tool.
+    approve_arguments = json.dumps({"ids": request_id}, ensure_ascii=False)
     approve_action = build_object_prompt_action(
         "approve",
         label_en="Approve",
         label_zh="同意",
-        prompt_en=f"Approve {request_id}; the user confirmed this approval in the UI.",
-        prompt_zh=f"批准 {request_id}，用户已在界面确认执行。",
+        prompt_en=(
+            f"The user confirmed approval of {request_id} in the UI. "
+            f"Call smartcmp_approve once with {approve_arguments}. "
+            "Use the exact Request ID as a single string in ids and report the approval result."
+        ),
+        prompt_zh=(
+            f"用户已在界面确认批准 {request_id}。"
+            f"请调用一次 smartcmp_approve，参数为 {approve_arguments}。"
+            "ids 使用原样的单个申请号字符串，并报告审批结果。"
+        ),
         effect="mutate",
         tone="success",
         requires_confirmation=True,
