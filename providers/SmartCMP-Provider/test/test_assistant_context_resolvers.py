@@ -443,6 +443,12 @@ def test_pending_approval_resolves_exact_identifiers(monkeypatch) -> None:
         "approve",
         "reject",
     ]
+    approve = result["object_actions"][2]
+    assert approve["requires_confirmation"] is True
+    prompts = approve["agent_prompt"]
+    for prompt in (prompts["default"], prompts["translations"]["zh-CN"]):
+        assert "smartcmp_approve" in prompt
+        assert f'{{"ids": "{WORKFLOW_ID}"}}' in prompt
 
 
 def test_work_order_approval_resolves_opaque_request_id(monkeypatch) -> None:
