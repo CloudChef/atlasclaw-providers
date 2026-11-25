@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "provider_type": "audit-report",
+  "catalog": {
+    "display_name": "文件审核",
+    "description": "上传检测/试验报告，执行 19 项合规审核并生成 HTML 报告。",
+    "badge": "AUDIT",
+    "icon": "AR",
+    "icon_path": "assets/icon.svg",
+    "accent": "#1d4ed8",
+    "extension_only": true
+  },
+  "runtime_capabilities": ["documents", "audit"],
+  "extensions": {
+    "version": 1,
+    "requires": { "host": ">=1.0 <2.0" },
+    "ui": {
+      "assets_root": "ui",
+      "nav": [
+        {
+          "id": "file-audit",
+          "title": { "zh-CN": "文件审核", "en-US": "File Audit" },
+          "i18n_key": "ext.auditReport.fileAudit",
+          "icon_path": "assets/icon.svg",
+          "entry": "index.html",
+          "access": "user",
+          "layout": "full",
+          "order": 10
+        }
+      ]
+    },
+    "api": {
+      "manifest": "runtime-api.json",
+      "timeout_seconds": 30,
+      "max_body_bytes": 33554432
+    }
+  },
+  "config_schema": {
+    "fields": []
+  }
+}

@@ -1,0 +1,166 @@
+{
+  "version": 1,
+  "timeout_seconds": 30,
+  "max_body_bytes": 33554432,
+  "routes": [
+    {
+      "id": "documents.list",
+      "method": "GET",
+      "path": "documents",
+      "module": "api/handlers.py",
+      "handler": "list_documents",
+      "capability": "documents",
+      "access": "user",
+      "response": "json"
+    },
+    {
+      "id": "documents.upload",
+      "method": "POST",
+      "path": "documents",
+      "module": "api/handlers.py",
+      "handler": "upload_document",
+      "capability": "documents",
+      "access": "user",
+      "success_status": 201,
+      "response": "json",
+      "timeout_seconds": 600,
+      "max_body_bytes": 230686720
+    },
+    {
+      "id": "documents.get",
+      "method": "GET",
+      "path": "documents/{document_id}",
+      "module": "api/handlers.py",
+      "handler": "get_document",
+      "capability": "documents",
+      "access": "user",
+      "response": "json"
+    },
+    {
+      "id": "documents.audit",
+      "method": "POST",
+      "path": "documents/{document_id}/audit",
+      "module": "api/handlers.py",
+      "handler": "start_audit",
+      "capability": "audit",
+      "access": "user",
+      "success_status": 202,
+      "response": "json",
+      "timeout_seconds": 30
+    },
+    {
+      "id": "documents.file",
+      "method": "GET",
+      "path": "documents/{document_id}/file",
+      "module": "api/handlers.py",
+      "handler": "download_document",
+      "capability": "documents",
+      "access": "user",
+      "response": "binary"
+    },
+    {
+      "id": "documents.report",
+      "method": "GET",
+      "path": "documents/{document_id}/report",
+      "module": "api/handlers.py",
+      "handler": "download_report",
+      "capability": "documents",
+      "access": "user",
+      "response": "binary"
+    },
+    {
+      "id": "documents.report_download",
+      "method": "GET",
+      "path": "documents/{document_id}/report/download",
+      "module": "api/handlers.py",
+      "handler": "download_report_file",
+      "capability": "documents",
+      "access": "user",
+      "response": "binary"
+    },
+    {
+      "id": "documents.results",
+      "method": "GET",
+      "path": "documents/{document_id}/results",
+      "module": "api/handlers.py",
+      "handler": "document_results",
+      "capability": "documents",
+      "access": "user",
+      "response": "json"
+    },
+    {
+      "id": "documents.evidence",
+      "method": "GET",
+      "path": "documents/{document_id}/evidence/{evidence_name}",
+      "module": "api/handlers.py",
+      "handler": "document_evidence",
+      "capability": "documents",
+      "access": "user",
+      "response": "binary"
+    },
+    {
+      "id": "documents.delete",
+      "method": "DELETE",
+      "path": "documents/{document_id}",
+      "module": "api/handlers.py",
+      "handler": "delete_document",
+      "capability": "documents",
+      "access": "user",
+      "response": "json"
+    },
+    {
+      "id": "standards.list",
+      "method": "GET",
+      "path": "standards",
+      "module": "api/handlers.py",
+      "handler": "list_standards",
+      "capability": "documents",
+      "access": "user",
+      "response": "json"
+    },
+    {
+      "id": "standards.upload",
+      "method": "POST",
+      "path": "standards",
+      "module": "api/handlers.py",
+      "handler": "upload_standard",
+      "capability": "documents",
+      "access": "user",
+      "success_status": 201,
+      "response": "json",
+      "timeout_seconds": 600,
+      "max_body_bytes": 230686720
+    },
+    {
+      "id": "standards.file",
+      "method": "GET",
+      "path": "standards/{standard_id}/file",
+      "module": "api/handlers.py",
+      "handler": "download_standard",
+      "capability": "documents",
+      "access": "user",
+      "response": "binary"
+    },
+    {
+      "id": "standards.recompile",
+      "method": "POST",
+      "path": "standards/{standard_id}/recompile",
+      "module": "api/handlers.py",
+      "handler": "recompile_standard",
+      "capability": "documents",
+      "access": "user",
+      "success_status": 202,
+      "response": "json"
+    },
+    {
+      "id": "standards.delete",
+      "method": "DELETE",
+      "path": "standards/{standard_id}",
+      "module": "api/handlers.py",
+      "handler": "delete_standard",
+      "capability": "documents",
+      "access": "user",
+      "response": "json"
+    }
+  ]
+}

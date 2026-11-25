@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>文档审核</title>
+  <link rel="stylesheet" href="style.css?v=6" />
+</head>
+<body>
+  <main class="audit-page">
+    <header class="page-header">
+      <div>
+        <h1>文档审核</h1>
+        <p class="page-subtitle">上传检测/试验报告，执行内置 19 项 + 规则包合规审核</p>
+      </div>
+      <button type="button" class="btn btn-primary" id="uploadButton">
+        <span class="btn-icon" aria-hidden="true">↑</span>
+        <span>上传文档</span>
+      </button>
+    </header>
+
+    <nav class="view-tabs" role="tablist">
+      <button type="button" class="view-tab is-active" data-view="audit" role="tab" aria-selected="true">文档审核</button>
+      <button type="button" class="view-tab" data-view="standards" role="tab" aria-selected="false">审核标准库</button>
+    </nav>
+
+    <section id="auditView">
+    <section class="filters">
+      <label class="search-field">
+        <span class="search-icon" aria-hidden="true">⌕</span>
+        <input type="search" id="searchInput" placeholder="搜索文档名称" autocomplete="off" />
+      </label>
+      <select id="statusFilter" aria-label="全部状态">
+        <option value="">全部状态</option>
+        <option value="pending">待审核</option>
+        <option value="running">审核中</option>
+        <option value="completed">审核完成</option>
+        <option value="failed">解析失败</option>
+      </select>
+      <select id="timeFilter" aria-label="上传时间">
+        <option value="">上传时间</option>
+        <option value="7">近 7 天</option>
+        <option value="30">近 30 天</option>
+      </select>
+    </section>
+
+    <section class="table-wrap">
+      <table class="document-table">
+        <thead>
+          <tr>
+            <th id="thName">文档名称</th>
+            <th id="thUploadedAt">上传时间</th>
+            <th id="thStatus">处理状态</th>
+            <th id="thResult">审核结果</th>
+            <th id="thActions" class="actions-column">操作</th>
+          </tr>
+        </thead>
+        <tbody id="documentRows"></tbody>
+      </table>
+      <div class="empty-state" id="emptyState" hidden>
+        <h2>还没有文档</h2>
+        <p>点击右上角“上传文档”开始审核。</p>
+      </div>
+    </section>
+
+    <footer class="page-footer">
+      <span id="documentCount">共 0 份文档</span>
+    </footer>
+    </section>
+
+    <section id="standardsView" hidden>
+      <section class="standards-toolbar">
+        <p class="standards-hint">上传客户的规则/标准文档（支持 PDF、Word、Markdown、txt）。系统会自动编译成技能规则包并启用，所有开启该 provider 的人共用同一份规则库，下一次审核即生效。</p>
+        <button type="button" class="btn btn-primary" id="standardUploadButton">
+          <span class="btn-icon" aria-hidden="true">↑</span>
+          <span>上传标准</span>
+        </button>
+        <input type="file" id="standardInput" accept=".pdf,.docx,.md,.txt" multiple hidden />
+      </section>
+      <section class="table-wrap">
+        <table class="document-table standards-table">
+          <thead>
+            <tr>
+              <th id="thStandardName">标准文件</th>
+              <th id="thStandardRules">规则数</th>
+              <th id="thStandardStatus">编译状态</th>
+              <th id="thStandardUploadedAt">上传时间</th>
+              <th id="thStandardActions" class="actions-column">操作</th>
+            </tr>
+          </thead>
+          <tbody id="standardRows"></tbody>
+        </table>
+        <div class="empty-state" id="standardEmpty" hidden>
+          <h2>还没有审核标准</h2>
+          <p>点击右上角“上传标准”添加规则文档。</p>
+        </div>
+      </section>
+      <footer class="page-footer">
+        <span id="standardCount">共 0 份标准</span>
+      </footer>
+    </section>
+  </main>
+
+  <div class="modal" id="uploadModal" hidden>
+    <div class="modal-card">
+      <h2 id="uploadTitle">上传文档</h2>
+      <input type="file" id="fileInput" accept=".pdf,.docx" multiple hidden />
+      <label class="dropzone" id="dropzone">
+        <strong>拖拽 PDF / Word 到此处</strong>
+        <span>或点击选择文件（单个不超过 200 MiB）</span>
+      </label>
+      <ul class="upload-list" id="uploadList"></ul>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="cancelUpload">取消</button>
+        <button type="button" class="btn btn-primary" id="confirmUpload" disabled>开始上传</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="resultModal" hidden>
+    <div class="modal-card result-card">
+      <h2 id="resultTitle">审核结果</h2>
+      <div class="result-summary" id="resultSummary"></div>
+      <div class="result-body" id="resultBody"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="closeResult">关闭</button>
+        <button type="button" class="btn btn-primary" id="openReport">下载报告</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+  <script type="module" src="app.js?v=6"></script>
+</body>
+</html>

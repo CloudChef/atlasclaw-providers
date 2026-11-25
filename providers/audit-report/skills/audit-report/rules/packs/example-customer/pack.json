@@ -1,0 +1,72 @@
+{
+  "pack": "example-customer",
+  "version": "1.0.0",
+  "title": "示例客户附加规则",
+  "status": "draft",
+  "extends": "builtin",
+  "compiled_from": {
+    "source": "source/rules.md",
+    "sha256": "d7efa51dfa0ce0cc3269d7784a8bbf933f90ccea934d468bfbbd24c9740fed87",
+    "compiled_at": "2026-11-24 16:38:13",
+    "compiler": "rules_compile.py"
+  },
+  "compile_warnings": [],
+  "rules": [
+    {
+      "id": "X01",
+      "module": "客户要求",
+      "title": "环境试验温度曲线",
+      "severity": "B",
+      "fail_when": "含环境试验但未附试验箱温度曲线原始记录",
+      "evidence": [
+        "试验记录页",
+        "附件"
+      ],
+      "scope": "single",
+      "applies_when": "",
+      "na_when": "",
+      "check": {
+        "type": "manual",
+        "params": {}
+      },
+      "doc": "rules/packs/example-customer/rules.md#X01"
+    },
+    {
+      "id": "X02",
+      "module": "客户要求",
+      "title": "分包实验室信息",
+      "severity": "B",
+      "fail_when": "存在分包但未注明分包实验室名称和资质",
+      "evidence": [
+        "声明页",
+        "资质页"
+      ],
+      "scope": "single",
+      "applies_when": "",
+      "na_when": "",
+      "check": {
+        "type": "manual",
+        "params": {}
+      },
+      "doc": "rules/packs/example-customer/rules.md#X02"
+    },
+    {
+      "id": "X03",
+      "module": "客户要求",
+      "title": "检测设备使用有效期",
+      "severity": "A",
+      "fail_when": "设备表只列校准有效期，未列使用有效期",
+      "evidence": [
+        "各项目设备表"
+      ],
+      "scope": "single",
+      "applies_when": "",
+      "na_when": "",
+      "check": {
+        "type": "text_consistency",
+        "params": {}
+      },
+      "doc": "rules/packs/example-customer/rules.md#X03"
+    }
+  ]
+}

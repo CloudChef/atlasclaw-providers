@@ -1,0 +1,380 @@
+{
+  "pack": "builtin",
+  "version": "1.0.0",
+  "title": "内置 19 项检测报告审核规则",
+  "status": "active",
+  "extends": null,
+  "rules": [
+    {
+      "id": "R01",
+      "module": "文件合规",
+      "title": "页码连续完整",
+      "severity": "B",
+      "fail_when": "存在缺页、乱码",
+      "evidence": [
+        "每页页脚",
+        "PDF 页序",
+        "扫描页"
+      ],
+      "scope": "single",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "check": {
+        "type": "page_sequence",
+        "params": {}
+      },
+      "doc": "references/audit-rules.md#R01"
+    },
+    {
+      "id": "R02",
+      "module": "文件合规",
+      "title": "三方签章（编制/审核/批准）",
+      "severity": "A",
+      "fail_when": "签署不齐全，或三者为同一人",
+      "evidence": [
+        "封面",
+        "签署页",
+        "批准页"
+      ],
+      "scope": "single",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "check": {
+        "type": "visual",
+        "params": {}
+      },
+      "doc": "references/audit-rules.md#R02"
+    },
+    {
+      "id": "R03",
+      "module": "文件合规",
+      "title": "报告专用章/骑缝章",
+      "severity": "B",
+      "fail_when": "未加盖专用章或骑缝章",
+      "evidence": [
+        "盖章页",
+        "每页装订边"
+      ],
+      "scope": "single",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "check": {
+        "type": "visual",
+        "params": {}
+      },
+      "doc": "references/audit-rules.md#R03"
+    },
+    {
+      "id": "R04",
+      "module": "身份唯一性",
+      "title": "主编号前后缀规则",
+      "severity": "B",
+      "fail_when": "同批主编号前后缀未 100% 统一",
+      "evidence": [
+        "同批全部报告封面",
+        "同批全部报告页眉"
+      ],
+      "scope": "batch",
+      "applies_when": "同批审核且提供同批全部文件",
+      "na_when": "单份报告且未提供同批文件",
+      "check": {
+        "type": "cross_file",
+        "params": {}
+      },
+      "doc": "references/audit-rules.md#R04"
+    },
+    {
+      "id": "R05",
+      "module": "身份唯一性",
+      "title": "报告编号唯一性",
+      "severity": "A",
+      "fail_when": "同一份报告内报告编号不一致",
+      "evidence": [
+        "封面",
+        "页眉",
+        "声明",
+        "结论",
+        "附件"
+      ],
+      "scope": "single",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "check": {
+        "type": "text_consistency",
+        "params": {}
+      },
+      "doc": "references/audit-rules.md#R05"
+    },
+    {
+      "id": "R06",
+      "module": "身份唯一性",
+      "title": "报告编号与样品编号关联",
+      "severity": "A",
+      "fail_when": "报告编号中 7 位数字与样品编号前 7 位不一致",
+      "evidence": [
+        "封面",
+        "样品信息表"
+      ],
+      "scope": "single",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "check": {
+        "type": "text_consistency",
+        "params": {}
+      },
+      "doc": "references/audit-rules.md#R06"
+    },
+    {
+      "id": "R07",
+      "module": "标准与方法",
+      "title": "标准号（含年份）有效性",
+      "severity": "B",
+      "fail_when": "同一标准年代号写法不一致，或标准缺年代号",
+      "evidence": [
+        "封面",
+        "方法表",
+        "结论表",
+        "页眉"
+      ],
+      "scope": "single",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "check": {
+        "type": "text_consistency",
+        "params": {}
+      },
+      "doc": "references/audit-rules.md#R07"
+    },
+    {
+      "id": "R08",
+      "module": "标准与方法",
+      "title": "方法条件与照片一致",
+      "severity": "B",
+      "fail_when": "方法描述的温度、电压值与检测照片显示值不一致",
+      "evidence": [
+        "方法描述",
+        "检测照片"
+      ],
+      "scope": "single",
+      "applies_when": "报告含检测照片且方法描述含温度/电压等条件",
+      "na_when": "报告无检测照片或无方法条件描述",
+      "check": {
+        "type": "visual",
+        "params": {}
+      },
+      "doc": "references/audit-rules.md#R08"
+    },
+    {
+      "id": "R09",
+      "module": "数据与结论",
+      "title": "评判要求完整性",
+      "severity": "B",
+      "fail_when": "要求项数与数据表行数不一致，存在缺项",
+      "evidence": [
+        "判定依据",
+        "数据表"
+      ],
+      "scope": "single",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "check": {
+        "type": "text_consistency",
+        "params": {}
+      },
+      "doc": "references/audit-rules.md#R09"
+    },
+    {
+      "id": "R10",
+      "module": "数据与结论",
+      "title": "极限值代入验证",
+      "severity": "A",
+      "fail_when": "最大值大于上限，或最小值小于下限",
+      "evidence": [
+        "数据表",
+        "判定列"
+      ],
+      "scope": "single",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "check": {
+        "type": "numeric_range",
+        "params": {}
+      },
+      "doc": "references/audit-rules.md#R10"
+    },
+    {
+      "id": "R11",
+      "module": "数据与结论",
+      "title": "结论一致性",
+      "severity": "A",
+      "fail_when": "结论汇总表的“结果评判”与正文同一项目结论不一致",
+      "evidence": [
+        "结论汇总",
+        "试验项目信息",
+        "正文"
+      ],
+      "scope": "single",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "check": {
+        "type": "text_consistency",
+        "params": {}
+      },
+      "doc": "references/audit-rules.md#R11"
+    },
+    {
+      "id": "R12",
+      "module": "数据与结论",
+      "title": "结论与数据逻辑",
+      "severity": "A",
+      "fail_when": "存在未达标数据仍判“合格”",
+      "evidence": [
+        "结论页",
+        "数据表",
+        "技术要求"
+      ],
+      "scope": "single",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "check": {
+        "type": "manual",
+        "params": {}
+      },
+      "doc": "references/audit-rules.md#R12"
+    },
+    {
+      "id": "R13",
+      "module": "时间逻辑",
+      "title": "日期链递增",
+      "severity": "A",
+      "fail_when": "生产/来样/检测/签发日期不满足递增链",
+      "evidence": [
+        "样品信息",
+        "检测记录",
+        "签发页"
+      ],
+      "scope": "single",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "check": {
+        "type": "date_chain",
+        "params": {}
+      },
+      "doc": "references/audit-rules.md#R13"
+    },
+    {
+      "id": "R14",
+      "module": "时间逻辑",
+      "title": "检测日期在设备有效期内",
+      "severity": "A",
+      "fail_when": "任一检测日期超出参与设备使用有效期",
+      "evidence": [
+        "设备表",
+        "检测日期"
+      ],
+      "scope": "single",
+      "applies_when": "报告含设备表或可识别检测设备",
+      "na_when": "报告未提供任何设备信息",
+      "check": {
+        "type": "date_chain",
+        "params": {}
+      },
+      "doc": "references/audit-rules.md#R14"
+    },
+    {
+      "id": "R15",
+      "module": "时间逻辑",
+      "title": "检测日期在校准有效期内",
+      "severity": "A",
+      "fail_when": "任一检测日期超出设备校准有效期",
+      "evidence": [
+        "设备表",
+        "检测日期"
+      ],
+      "scope": "single",
+      "applies_when": "报告含设备表或可识别检测设备",
+      "na_when": "报告未提供任何设备信息",
+      "check": {
+        "type": "date_chain",
+        "params": {}
+      },
+      "doc": "references/audit-rules.md#R15"
+    },
+    {
+      "id": "R16",
+      "module": "资质声明",
+      "title": "分包/认可状态声明",
+      "severity": "B",
+      "fail_when": "分包声明既非“无”，也未注明分包实验室名称",
+      "evidence": [
+        "声明页",
+        "资质页"
+      ],
+      "scope": "single",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "check": {
+        "type": "manual",
+        "params": {}
+      },
+      "doc": "references/audit-rules.md#R16"
+    },
+    {
+      "id": "R17",
+      "module": "语法规范性",
+      "title": "中文错别字",
+      "severity": "C",
+      "fail_when": "存在错别字，或语句不通顺、不完整",
+      "evidence": [
+        "全文"
+      ],
+      "scope": "single",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "check": {
+        "type": "manual",
+        "params": {}
+      },
+      "doc": "references/audit-rules.md#R17"
+    },
+    {
+      "id": "R18",
+      "module": "语法规范性",
+      "title": "英文语法",
+      "severity": "C",
+      "fail_when": "英文拼写/语法错误，或句子不完整",
+      "evidence": [
+        "英文摘要",
+        "项目名",
+        "结论",
+        "图注"
+      ],
+      "scope": "single",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "check": {
+        "type": "manual",
+        "params": {}
+      },
+      "doc": "references/audit-rules.md#R18"
+    },
+    {
+      "id": "R19",
+      "module": "照片有效性",
+      "title": "照片 AI 生成标记",
+      "severity": "B",
+      "fail_when": "出现 AI 生成类水印或生成痕迹",
+      "evidence": [
+        "所有检测照片及附件"
+      ],
+      "scope": "single",
+      "applies_when": "报告含检测照片",
+      "na_when": "报告无检测照片",
+      "check": {
+        "type": "visual",
+        "params": {}
+      },
+      "doc": "references/audit-rules.md#R19"
+    }
+  ]
+}

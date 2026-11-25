@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "builtin": "builtin/rules.json",
+  "packs": [],
+  "allow_overrides": false
+}

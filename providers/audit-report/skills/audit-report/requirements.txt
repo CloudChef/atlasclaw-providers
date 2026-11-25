@@ -1,0 +1,4 @@
+# Runtime dependencies for the audit-report skill.
+# Install into the AtlasClaw service virtual environment so skill_exec can use them.
+pymupdf>=1.24.0
+python-docx>=1.2.0

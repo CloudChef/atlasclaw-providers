@@ -133,6 +133,24 @@ See the [Core Embedded integration
 guide](https://github.com/CloudChef/atlasclaw/blob/main/docs/EMBED-INTEGRATION.md)
 for surface bootstrap, Cookie, Context, and page-message contracts.
 
+### Standalone Skills
+
+Skills that do not belong to one external system live under `skills/<skill-name>/`
+and are loaded through `skills_root` when AtlasClaw starts. They keep the same
+layout as provider skills (`SKILL.md`, `scripts/`, `references/`, optional
+`test/`) and are still selected on demand: only metadata is listed up front, and
+the instructions/scripts run after the skill is chosen for a turn.
+
+`skills/audit-report` is such a skill. It audits third-party test/inspection
+reports (PDF or Word) and is never started automatically; it runs only when the
+user explicitly asks for an audit.
+
+- Runtime dependencies: `skills/audit-report/requirements.txt` (PyMuPDF, python-docx)
+- Dependency self-check: `"${ATLASCLAW_PYTHON}" "${ATLASCLAW_SKILL_DIR}/scripts/selfcheck.py"`
+- `skill_exec` runs from the user's `work_dir` without a shell, so scripts must be
+  referenced through `"${ATLASCLAW_SKILL_DIR}/scripts/..."` rather than relative paths
+- User uploads arrive as `uploads/<attachment_id>/<file name>` inside `work_dir`
+
 ## Authentication Model
 
 Authentication is a provider responsibility. AtlasClaw Core can pass user identity and runtime context, but each provider must obtain or derive credentials that the target system actually accepts.
