@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS audit_documents (
   grade_summary   TEXT,
   report_path     TEXT,
   report_name     TEXT,
+  desensitized_path TEXT,
+  desensitized_name TEXT,
   error_code      TEXT,
   error_message   TEXT,
   created_at      TEXT NOT NULL,
@@ -82,6 +84,20 @@ class DocumentStore:
     def _init(self) -> None:
         with self._connect() as connection:
             connection.executescript(_SCHEMA)
+            # Serialize schema inspection and ALTER together so concurrent provider
+            # workers cannot both observe a missing migration column.
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                columns = {
+                    row["name"] for row in connection.execute("PRAGMA table_info(audit_documents)")
+                }
+                for name in ("desensitized_path", "desensitized_name"):
+                    if name not in columns:
+                        connection.execute(f"ALTER TABLE audit_documents ADD COLUMN {name} TEXT")
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
 
     def create(self, document: dict[str, Any]) -> dict[str, Any]:
         """Insert one document record and return it."""
@@ -106,6 +122,8 @@ class DocumentStore:
             "grade_summary": json.dumps(document.get("grade_summary") or {}, ensure_ascii=False),
             "report_path": document.get("report_path") or "",
             "report_name": document.get("report_name") or "",
+            "desensitized_path": document.get("desensitized_path") or "",
+            "desensitized_name": document.get("desensitized_name") or "",
             "error_code": document.get("error_code") or "",
             "error_message": document.get("error_message") or "",
             "created_at": now,
@@ -197,11 +215,26 @@ class DocumentStore:
             ).fetchone()
         return row is not None
 
+    def fail_interrupted(self, user_id: str, document: dict[str, Any] | None = None) -> None:
+        """Fail orphaned audits, optionally matching a previously observed row."""
+        where = "user_id = ? AND status = 'running'"
+        params = [_now(), user_id]
+        if document is not None:
+            where += " AND id = ? AND updated_at = ?"
+            params.extend((document["id"], document["updated_at"]))
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE audit_documents SET status = 'failed', progress = 100, "
+                "progress_text = '审核中断', error_code = 'host_restarted', "
+                f"error_message = '服务已重启，请重新审核。', updated_at = ? WHERE {where}",
+                params,
+            )
+
     def delete(self, document_id: str, user_id: str) -> bool:
         """Delete one owned document row."""
         with self._connect() as connection:
             cursor = connection.execute(
-                "DELETE FROM audit_documents WHERE id = ? AND user_id = ?",
+                "DELETE FROM audit_documents WHERE id = ? AND user_id = ? AND status != 'running'",
                 (document_id, user_id),
             )
             return cursor.rowcount > 0

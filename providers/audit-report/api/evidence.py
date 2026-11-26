@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 
 EVIDENCE_DPI = 150
 FULL_PAGE_DPI = 110
-MAX_EVIDENCE = 24
 ABOVE = 70.0
 BELOW = 170.0
 MARGIN = 60.0
@@ -48,7 +47,7 @@ def render_evidence(
     evidence_dir.mkdir(parents=True, exist_ok=True)
     images: dict[str, str] = {}
     with pymupdf.open(source) as pdf:
-        for item in findings[:MAX_EVIDENCE]:
+        for item in findings:
             page_no = _first_page(item)
             if page_no is None or not 1 <= page_no <= pdf.page_count:
                 continue

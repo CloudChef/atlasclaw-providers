@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -21,7 +22,6 @@ from typing import Any, Iterable, Sequence
 logger = logging.getLogger(__name__)
 
 MAX_CHUNK_CHARS = 60_000
-MAX_CHUNKS = 8
 RULE_BATCH_SIZE = 7
 VERDICTS = ("PASS", "FAIL", "REVIEW", "NA")
 VERDICT_LABELS = {"PASS": "通过", "FAIL": "不通过", "REVIEW": "待复核", "NA": "不适用"}
@@ -113,7 +113,7 @@ def load_rules(rules_path: Path) -> list[Rule]:
                 rule_id=rule_id,
                 title=match.group(2).strip(),
                 severity=match.group(3),
-                guidance=body[:2400],
+                guidance=body,
                 module_name=RULE_MODULES.get(rule_id, "其他"),
             )
         )
@@ -265,8 +265,8 @@ def _read_json(path: Path) -> dict[str, Any]:
 def chunk_document(text: str) -> tuple[list[TextChunk], str]:
     """Split page-marked extraction output into bounded chunks.
 
-    Returns the chunks and a note describing any pages that were dropped because
-    the document exceeds the automatic judgement window.
+    Returns all chunks in document order. The chunk size controls request
+    batching only; it does not limit the amount of source text processed.
     """
     pages = re.split(r"^## Page (\d+)\s*$", text, flags=re.M)
     header = pages[0].strip()
@@ -275,7 +275,11 @@ def chunk_document(text: str) -> tuple[list[TextChunk], str]:
         blocks.append((int(pages[index]), f"## Page {pages[index]}\n\n{pages[index + 1].strip()}"))
     if not blocks:
         body = text.strip()
-        return ([TextChunk(0, 1, 1, body)] if body else []), ""
+        chunks = [
+            TextChunk(i // MAX_CHUNK_CHARS, 1, 1, body[i:i + MAX_CHUNK_CHARS])
+            for i in range(0, len(body), MAX_CHUNK_CHARS)
+        ]
+        return chunks, ""
 
     chunks: list[TextChunk] = []
     buffer: list[str] = [header] if header else []
@@ -283,23 +287,20 @@ def chunk_document(text: str) -> tuple[list[TextChunk], str]:
     first_page = blocks[0][0]
     last_page = blocks[0][0]
     for page_no, block in blocks:
-        if buffer and size + len(block) > MAX_CHUNK_CHARS:
-            chunks.append(TextChunk(len(chunks), first_page, last_page, "\n\n".join(buffer)))
-            buffer = []
-            size = 0
-            first_page = page_no
-        buffer.append(block)
-        size += len(block) + 2
-        last_page = page_no
+        for offset in range(0, len(block), MAX_CHUNK_CHARS):
+            part = block[offset:offset + MAX_CHUNK_CHARS]
+            if buffer and size + len(part) > MAX_CHUNK_CHARS:
+                chunks.append(TextChunk(len(chunks), first_page, last_page, "\n\n".join(buffer)))
+                buffer = []
+                size = 0
+                first_page = page_no
+            buffer.append(part)
+            size += len(part) + 2
+            last_page = page_no
     if buffer:
         chunks.append(TextChunk(len(chunks), first_page, last_page, "\n\n".join(buffer)))
 
-    note = ""
-    if len(chunks) > MAX_CHUNKS:
-        dropped = chunks[MAX_CHUNKS:]
-        chunks = chunks[:MAX_CHUNKS]
-        note = f"第 {chunks[-1].last_page + 1}–{dropped[-1].last_page} 页超出自动判定范围，未纳入本次判定"
-    return chunks, note
+    return chunks, ""
 
 
 def rule_batches(rules: Sequence[Rule]) -> list[list[Rule]]:
@@ -307,6 +308,16 @@ def rule_batches(rules: Sequence[Rule]) -> list[list[Rule]]:
     if not rules:
         return []
     return [list(rules[index:index + RULE_BATCH_SIZE]) for index in range(0, len(rules), RULE_BATCH_SIZE)]
+
+
+def _render_report_template(name: str, **values: str) -> str:
+    """Render a trusted UTF-8 report template from the audit skill assets."""
+    scripts_dir = Path(__file__).resolve().parents[1] / "skills" / "audit-report" / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    from audit_project_prompts import render_report_template
+
+    return render_report_template(name, **values)
 
 
 def build_prompt(
@@ -326,24 +337,14 @@ def build_prompt(
     retry = f"\n{retry_note}\n" if retry_note else ""
     scope = f"全文共 {total_pages} 页，" if total_pages else ""
     packs = " + ".join(rule_packs) if rule_packs else "builtin"
-    return (
-        "你是第三方检测报告审核专家。请只针对下面列出的规则，对给出的报告原文逐条判定。\n"
-        "不要调用任何工具，不要读取任何文件，不要臆测原文中不存在的内容。\n\n"
-        f"## 本次需要判定的规则（{rule_ids}，来源规则包：{packs}）\n\n{rule_text}\n\n"
-        f"## 报告原文（{chunk.label}，{scope}文本分 {total_chunks} 个片段提供）\n\n{chunk.text}\n\n"
-        "## 输出要求\n"
-        "只输出一个 JSON 对象，不要输出解释、前后缀文字或 Markdown 代码块：\n"
-        '{"results":[{"rule":"R01","verdict":"PASS","page":"3","quote":"原文摘录","problem":"","suggestion":""}]}\n'
-        "- results 必须包含上面每一条规则，每条规则恰好一个对象。\n"
-        "- verdict 取值：PASS（符合）、FAIL（不符合）、REVIEW（证据不足或无法判定）、NA（本报告不适用）。\n"
-        "- FAIL/REVIEW 必须填写 page（阿拉伯数字页码）、quote（原文摘录，最多 120 字）、"
-        "problem（违反了什么规则）、suggestion（可执行的整改建议）。\n"
-        "- PASS 时 page 填证据所在页码，quote 填关键证据原文，problem/suggestion 留空。\n"
-        "- 页码连续性等全局检查项：结合本片段页码范围与全文总页数判断，本片段内页码连续即判 PASS，"
-        "不要仅因其他页面不在本片段而判 REVIEW。\n"
-        "- 判断依据必须是本片段原文；证据确实不足一律用 REVIEW，不要猜。\n"
-        f"{retry}"
-    )
+    scripts_dir = Path(__file__).resolve().parents[1] / "skills" / "audit-report" / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    from audit_project_prompts import render_prompt_template
+
+    return render_prompt_template("batch.md", RULE_IDS=rule_ids, PACKS=packs, RULE_TEXT=rule_text,
+        CHUNK_LABEL=chunk.label, PAGE_SCOPE=scope, TOTAL_CHUNKS=str(total_chunks),
+        CHUNK_TEXT=chunk.text, RETRY=retry)
 
 
 def parse_answer(answer: str, rules: Sequence[Rule]) -> list[Verdict]:
@@ -370,10 +371,10 @@ def parse_answer(answer: str, rules: Sequence[Rule]) -> list[Verdict]:
                     rule=rule_id,
                     verdict=verdict,
                     severity=rule.severity,
-                    page=_clean(str(item.get("page") or ""), 20),
-                    quote=_clean(str(item.get("quote") or ""), 240),
-                    problem=_clean(str(item.get("problem") or ""), 400),
-                    suggestion=_clean(str(item.get("suggestion") or ""), 400),
+                    page=_clean(str(item.get("page") or "")),
+                    quote=_clean(str(item.get("quote") or "")),
+                    problem=_clean(str(item.get("problem") or "")),
+                    suggestion=_clean(str(item.get("suggestion") or "")),
                 )
             )
         if verdicts:
@@ -459,7 +460,6 @@ def build_markdown(
     extra_note = f" + 附加 {extra_rules} 项" if extra_rules else ""
     basis = f"规则包：{pack_label}"
     findings = finding_list(results)
-    lines: list[str] = ["# 检测报告审核报告", "", "## 1. 审核对象", "", "| 项目 | 内容 |", "| --- | --- |"]
     rows = [
         ("文件名", str(document.get("file_name") or "")),
         ("文件类型", "PDF" if str(document.get("extension") or "").lower() == ".pdf" else "Word（.docx）"),
@@ -473,60 +473,43 @@ def build_markdown(
         ("判定方式", f"文本预提取 + {total_rules} 项规则分批判定（{chunk_count} 个文本片段）"),
         ("审核依据", basis),
     ]
-    lines += [f"| {name} | {_cell(value)} |" for name, value in rows]
-    lines += [
-        "",
-        f"**审核范围**：文件合规、身份唯一性、标准与方法、数据与结论、时间逻辑、资质声明、语法规范性、照片有效性，共 {total_rules} 项规则"
-        f"（内置 19 项{extra_note}）。",
-        "",
-        "**审核方式**：文档文本提取后按规则分批判定；仅依据文本层内容，图像类证据不足时记为待复核。",
-        "",
-        "## 2. 总评",
-        "",
-        f"**总评：{summary['verdict']}**",
-        "",
-        "| 等级 | 数量 | 说明 |",
-        "| --- | --- | --- |",
-    ]
+    object_rows = "\n".join(f"| {name} | {_cell(value)} |" for name, value in rows)
+    audit_scope = _render_report_template("legacy-audit-scope.md", TOTAL_RULES=str(total_rules), EXTRA_NOTE=extra_note)
+    verdict_rows = []
     for grade in ("A", "B", "C"):
         involved = "、".join(item.rule.rule_id for item in findings if item.verdict == "FAIL" and item.severity == grade)
-        lines.append(f"| {SEVERITY_LABELS[grade]} | {summary['grade_summary'].get(grade, 0)} | {involved or '无'} |")
+        verdict_rows.append(f"| {SEVERITY_LABELS[grade]} | {summary['grade_summary'].get(grade, 0)} | {involved or '无'} |")
     na_rules = "、".join(item.rule.rule_id for item in results if item.verdict == "NA")
-    lines.append(f"| 不适用 | {sum(1 for item in results if item.verdict == 'NA')} | {na_rules or '无'} |")
-    lines += ["", f"**一句话结论**：{_conclusion(summary, findings, total_rules)}", ""]
+    verdict_rows.append(f"| 不适用 | {sum(1 for item in results if item.verdict == 'NA')} | {na_rules or '无'} |")
 
-    lines += ["## 3. 问题清单", ""]
     if findings:
-        lines += ["**问题总表**", "", "| 序号 | 规则号 | 等级 | 页码 | 位置 | 问题摘要 |", "| --- | --- | --- | --- | --- | --- |"]
+        finding_rows = []
+        finding_details = []
         for index, item in enumerate(findings, start=1):
             page = item.evidence[0].page if item.evidence and item.evidence[0].page else "-"
-            lines.append(
+            finding_rows.append(
                 f"| F-{index:02d} | {item.rule.rule_id} | {item.severity} | 第 {page} 页 | {item.rule.module} | "
                 f"{_cell(_finding_title(item))} |"
             )
-        lines += ["", "**问题详情**", ""]
-        for index, item in enumerate(findings, start=1):
-            lines += _finding_detail(index, item, (evidence or {}).get(item.rule.rule_id, ""))
+            finding_details += _finding_detail(index, item, (evidence or {}).get(item.rule.rule_id, ""))
+        finding_section = _render_report_template(
+            "legacy-findings.md", FINDING_ROWS="\n".join(finding_rows),
+            FINDING_DETAILS="\n".join(finding_details).rstrip("\n"),
+        )
     else:
-        lines += [f"本次审核未发现不符合项，{total_rules} 项规则均判定通过或不适用。", ""]
+        finding_section = _render_report_template("legacy-no-findings.md", TOTAL_RULES=str(total_rules))
 
-    lines += ["## 4. 不适用项", ""]
     na_items = [item for item in results if item.verdict == "NA"]
     if na_items:
-        lines += ["| # | 规则 | 检查项 | 不适用理由 |", "| --- | --- | --- | --- |"]
+        na_rows = []
         for index, item in enumerate(na_items, start=1):
             reason = item.evidence[0].problem if item.evidence and item.evidence[0].problem else "本报告不涉及该检查项"
-            lines.append(f"| N-{index:02d} | {item.rule.rule_id} | {_cell(item.rule.title)} | {_cell(reason)} |")
+            na_rows.append(f"| N-{index:02d} | {item.rule.rule_id} | {_cell(item.rule.title)} | {_cell(reason)} |")
+        na_section = _render_report_template("legacy-na-items.md", NA_ROWS="\n".join(na_rows))
     else:
-        lines += ["无。"]
-    lines.append("")
+        na_section = _render_report_template("legacy-na-none.md")
 
-    lines += [
-        "## 5. 检查覆盖表（内置 19 项 + 已启用规则包）",
-        "",
-        "| # | 模块 | 检查项 | 等级 | 结果 | 证据位置/说明 |",
-        "| --- | --- | --- | --- | --- | --- |",
-    ]
+    coverage_rows = []
     for item in results:
         first = item.evidence[0] if item.evidence else None
         location = "-"
@@ -536,40 +519,38 @@ def build_markdown(
                 location = f"{location} {first.quote}".strip() if location else first.quote
             if not location:
                 location = first.problem or "-"
-        lines.append(
+        coverage_rows.append(
             f"| {item.rule.rule_id} | {item.rule.module} | {_cell(item.rule.title)} | {item.rule.severity} | "
-            f"{VERDICT_LABELS[item.verdict]} | {_cell(location)[:200]} |"
+            f"{VERDICT_LABELS[item.verdict]} | {_cell(location)} |"
         )
-    lines += ["", "## 6. 结构性缺失说明", ""]
+
     missing = [item for item in results if item.verdict == "REVIEW" and "缺失" in item.evidence[0].problem]
     if missing:
-        lines += ["| 缺失内容 | 位置/表现 | 影响的规则 | 说明 |", "| --- | --- | --- | --- |"]
-        for item in missing:
-            lines.append(f"| {_cell(item.rule.title)} | 全文未见 | {item.rule.rule_id} | {_cell(item.evidence[0].problem)} |")
+        missing_rows = "\n".join(
+            f"| {_cell(item.rule.title)} | 全文未见 | {item.rule.rule_id} | {_cell(item.evidence[0].problem)} |"
+            for item in missing
+        )
+        missing_section = _render_report_template("legacy-missing.md", MISSING_ROWS=missing_rows)
     else:
-        lines += ["未发现整块内容缺失。"]
-    lines.append("")
+        missing_section = _render_report_template("legacy-missing-none.md")
 
-    lines += ["## 7. 补充观察（不构成判定）", ""]
-    observations = [f"- {item.rule.rule_id} {item.rule.title}：待复核。{_cell(item.evidence[0].problem)}" for item in results if item.verdict == "REVIEW"]
-    lines += observations or ["- 无。"]
-    lines.append("")
-
-    lines += [
-        "## 8. 审核记录",
-        "",
-        "| 项目 | 内容 |",
-        "| --- | --- |",
-        "| 提取工具 | `scripts/extract_report.py`（文本层） |",
-        f"| 文本层 | {'完整' if manifest.get('has_text_layer') else '部分扫描页无文本层'} |",
-        f"| 证据截图 | {len(evidence or {})} 条问题附 PDF 页面截图 |" if evidence else "| 证据截图 | 无（未渲染页面图片） |",
-        f"| 空白/扫描页 | {_page_list(manifest)} |",
-        f"| 计算校验 | 编号一致性、日期链、极限值由模型基于原文文本判定 |",
-        f"| 未执行项 | {_cell(truncated_note) if truncated_note else '无'} |",
-        "",
+    observations = [
+        _render_report_template("legacy-observation.md", RULE_ID=item.rule.rule_id,
+                                TITLE=item.rule.title, PROBLEM=_cell(item.evidence[0].problem))
+        for item in results if item.verdict == "REVIEW"
     ]
-    return "\n".join(lines)
+    observation_section = "\n".join(observations) if observations else _render_report_template("legacy-observations-none.md")
 
+    return _render_report_template(
+        "legacy-batch-report.md", OBJECT_ROWS=object_rows, AUDIT_SCOPE=audit_scope,
+        VERDICT=summary["verdict"], VERDICT_ROWS="\n".join(verdict_rows),
+        CONCLUSION=_conclusion(summary, findings, total_rules), FINDING_SECTION=finding_section,
+        NA_SECTION=na_section, COVERAGE_ROWS="\n".join(coverage_rows), MISSING_SECTION=missing_section,
+        OBSERVATIONS=observation_section,
+        TEXT_LAYER="完整" if manifest.get("has_text_layer") else "部分扫描页无文本层",
+        SCREENSHOTS=f"{len(evidence or {})} 条问题附 PDF 页面截图" if evidence else "无（未渲染页面图片）",
+        BLANK_PAGES=_page_list(manifest), TRUNCATED_NOTE=_cell(truncated_note) if truncated_note else "无",
+    ) + "\n"
 
 def build_verification(
     results: Sequence[RuleResult],
@@ -600,7 +581,7 @@ def build_verification(
 def _finding_title(item: RuleResult) -> str:
     evidence = item.evidence[0] if item.evidence else None
     if evidence and evidence.problem:
-        return evidence.problem[:80]
+        return evidence.problem
     return item.rule.title
 
 
@@ -612,39 +593,28 @@ def _finding_detail(index: int, item: RuleResult, image: str = "") -> list[str]:
         if item.severity == "A"
         else "该缺陷影响报告的规范性，需整改后重新审核。"
     )
-    if image:
-        screenshot_lines = [
-            "- **证据截图**：",
-            "",
-            f"![F-{index:02d} 证据：第 {page} 页 {_cell(_finding_title(item))}]({image})",
-        ]
-    else:
-        screenshot_lines = ["- **证据截图**：该文档未提供可渲染的页面图片，证据以原文摘录为准。"]
-    return [
-        f"### F-{index:02d} [{item.severity}] {_cell(_finding_title(item))}（{item.rule.rule_id}）",
-        "",
-        f"- **规则号**：`{item.rule.rule_id}`",
-        f"- **规则来源**：`{item.rule.pack}`",
-        f"- **等级**：`{SEVERITY_LABELS[item.severity]}`",
-        f"- **页码**：第 {page} 页",
-        f"- **位置**：{_cell(item.rule.module)} / {_cell(item.rule.title)}",
-        "- **原文上下文**：",
-        f"  - 问题处：「{_cell(evidence.quote) or '见原报告'}」",
-        f"- **不规范说明**：{_cell(evidence.problem) or item.rule.title}",
-        f"- **影响**：{impact}",
-        f"- **整改建议**：{_cell(evidence.suggestion) or '核实原始记录后修正报告并重新签发。'}",
-        "- **关联问题**：无",
-        *screenshot_lines,
-        "",
-    ]
+    title = _cell(_finding_title(item))
+    screenshot_block = (
+        _render_report_template("legacy-finding-screenshot.md", INDEX=f"{index:02d}", PAGE=page,
+                                TITLE=title, IMAGE=image)
+        if image else _render_report_template("legacy-no-finding-screenshot.md")
+    )
+    markdown = _render_report_template(
+        "legacy-finding-detail.md", INDEX=f"{index:02d}", SEVERITY=item.severity, TITLE=title,
+        RULE_ID=item.rule.rule_id, PACK=item.rule.pack, SEVERITY_LABEL=SEVERITY_LABELS[item.severity],
+        PAGE=page, MODULE=_cell(item.rule.module), RULE_TITLE=_cell(item.rule.title),
+        QUOTE=_cell(evidence.quote) or "见原报告", PROBLEM=_cell(evidence.problem) or item.rule.title,
+        IMPACT=impact, SUGGESTION=_cell(evidence.suggestion) or "核实原始记录后修正报告并重新签发。",
+        SCREENSHOT_BLOCK=screenshot_block,
+    )
+    return (markdown + "\n").split("\n")
 
 
 def _conclusion(summary: dict[str, Any], findings: Sequence[RuleResult], total_rules: int = 19) -> str:
     if not findings:
         return f"报告未发现不符合项，{total_rules} 项规则均判定通过或不适用。"
-    rules = "、".join(item.rule.rule_id for item in findings[:5])
-    more = f" 等 {len(findings)} 项" if len(findings) > 5 else ""
-    return f"报告在 {rules}{more} 检查项上存在不符合或证据不足，需整改后重新审核。"
+    rules = "、".join(item.rule.rule_id for item in findings)
+    return f"报告在 {rules} 检查项上存在不符合或证据不足，需整改后重新审核。"
 
 
 def _worst_severity(items: Sequence[Verdict], rule: Rule) -> str:
@@ -673,13 +643,13 @@ def _json_payloads(answer: str) -> list[Any]:
     return payloads
 
 
-def _clean(value: str, limit: int) -> str:
+def _clean(value: str) -> str:
     text = re.sub(r"\s+", " ", str(value or "")).strip().strip("`")
-    return text[:limit]
+    return text
 
 
 def _cell(value: str) -> str:
-    return _clean(str(value or ""), 400).replace("|", "／")
+    return _clean(str(value or "")).replace("|", "／")
 
 
 def _size_label(size: int) -> str:
@@ -692,4 +662,4 @@ def _size_label(size: int) -> str:
 
 def _page_list(manifest: dict[str, Any]) -> str:
     pages = [str(item.get("page")) for item in manifest.get("pages") or [] if not item.get("text_layer")]
-    return "、".join(pages[:20]) + (" 等" if len(pages) > 20 else "") if pages else "无"
+    return "、".join(pages) if pages else "无"

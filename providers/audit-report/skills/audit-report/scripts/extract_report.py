@@ -163,8 +163,8 @@ def convert_office(path: Path, outdir: Path, target: str) -> tuple[Path | None, 
     if output.exists():
         output.unlink()
     try:
-        proc = subprocess.run(cmd, check=False, capture_output=True, timeout=240)
-    except (OSError, subprocess.TimeoutExpired) as exc:
+        proc = subprocess.run(cmd, check=False, capture_output=True)
+    except OSError as exc:
         return None, f"LibreOffice conversion failed: {exc}"
     if proc.returncode != 0 or not output.exists():
         detail = (proc.stderr or proc.stdout or b"").decode("utf-8", errors="replace")[:300]

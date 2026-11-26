@@ -11,7 +11,7 @@ const MESSAGES = {
     statusPending: '待审核',
     statusRunning: '审核中',
     statusCompleted: '审核完成',
-    statusFailed: '解析失败',
+    statusFailed: '审核失败',
     colName: '文档名称',
     colUploadedAt: '上传时间',
     colStatus: '处理状态',
@@ -24,6 +24,8 @@ const MESSAGES = {
     viewProgress: '查看进度',
     viewResult: '查看结果',
     downloadReport: '下载报告',
+    downloadReportPdf: '下载审核 PDF',
+    downloadDesensitizedPdf: '下载脱敏 PDF',
     reaudit: '重新审核',
     retry: '重试',
     delete: '删除',
@@ -31,15 +33,18 @@ const MESSAGES = {
     findings: '{total} 条问题 · {review} 条待复核',
     uploadTitle: '上传文档',
     dropzone: '拖拽 PDF / Word 到此处',
-    dropzoneHint: '或点击选择文件（单个不超过 200 MiB）',
+    dropzoneHint: '或点击选择文件',
     cancel: '取消',
     confirmUpload: '开始上传',
     close: '关闭',
-    openReport: '下载报告',
+    openReport: '打开报告',
+    previewTitle: '报告预览',
+    viewDetails: '查看详情',
     colRule: '规则',
     colCheck: '检查项',
     colVerdict: '判定',
     colPage: '页码',
+    pageValue: '第 {page} 页',
     colDetail: '问题与整改建议',
     colEvidence: '证据截图',
     evidenceMissing: '无',
@@ -51,25 +56,33 @@ const MESSAGES = {
     resultsNotReady: '审核结果尚未生成',
     resultsOverview: '总评：{verdict} · 通过 {pass} · 不通过 {fail} · 待复核 {review} · 不适用 {na}',
     viewAudit: '文档审核',
-    viewStandards: '审核标准库',
-    uploadStandard: '上传标准',
-    standardHint: '上传客户的规则/标准文档（支持 PDF、Word、Markdown、txt）。系统会自动编译成技能规则包并启用，所有开启该 provider 的人共用同一份规则库，下一次审核即生效。',
-    colStandardName: '标准文件',
-    colStandardRules: '规则数',
-    colStandardStatus: '状态',
+    viewStandards: '共享资料',
+    uploadStandard: '上传资料',
+    standardHint: '支持检测标准、总台账等资料（PDF、Word、Markdown、txt、Excel）。系统按文件名识别用途并本地读取；资料在所有用户间共享。上传不会自动编译规则包。',
+    colStandardName: '资料文件',
+    colStandardRules: '用途 / 规则数',
+    colStandardStatus: '读取/编译状态',
     colStandardUploadedAt: '上传时间',
-    standardCount: '共 {count} 份标准',
-    standardUploaded: '标准已上传',
-    standardDeleted: '标准已删除',
-    standardDeleteConfirm: '确定删除这份审核标准？',
-    standardEmptyTitle: '还没有审核标准',
-    standardEmptyBody: '点击右上角“上传标准”添加判定依据。',
+    standardCount: '共 {count} 份资料',
+    standardUploaded: '资料已上传',
+    standardDeleted: '资料已删除',
+    standardDeleteConfirm: '确定删除这份共享资料？',
+    standardEmptyTitle: '还没有共享资料',
+    standardEmptyBody: '点击右上角“上传资料”添加检测标准、台账或补充资料。',
     statusCompiling: '编译中',
     statusActive: '已启用',
     statusCompileFailed: '编译失败',
+    readStatusReading: '读取中',
+    readStatusReady: '可读取',
+    readStatusFailed: '读取失败',
+    kindLedger: '总台账',
+    kindStandard: '检测标准',
+    kindSupplement: '补充资料',
     recompile: '重新编译',
     recompileStarted: '已重新开始编译',
-    unsupportedStandard: '只支持 PDF、Word、Markdown、txt 规则文档',
+    refresh: '重新读取',
+    refreshStarted: '已开始重新读取',
+    unsupportedStandard: '只支持 PDF、Word、Markdown、txt、Excel 资料',
     download: '下载',
     uploading: '正在上传 {name}',
     uploadFailed: '上传失败：{message}',
@@ -78,11 +91,13 @@ const MESSAGES = {
     deleted: '已删除',
     deleteConfirm: '确定删除这份文档？',
     unsupported: '只支持 PDF 和 Word(.docx) 文件',
-    tooLarge: '单个文件不能超过 200 MiB',
     grades: 'A 级 {A} · B 级 {B} · C 级 {C}',
     progress: '审核中 · {progress}%',
     failedSummary: '审核失败',
+    coverageLimit: '文档超出完整审核范围，请拆分后重试',
+    auditInterrupted: '服务重启导致审核中断，请重试',
     reportNotReady: '报告尚未生成，请先完成审核',
+    desensitizedNotReady: '脱敏 PDF 尚未生成',
     timeFilter: '上传时间',
   },
   'en-US': {
@@ -92,7 +107,7 @@ const MESSAGES = {
     statusPending: 'Pending',
     statusRunning: 'Auditing',
     statusCompleted: 'Completed',
-    statusFailed: 'Failed',
+    statusFailed: 'Audit failed',
     colName: 'Document',
     colUploadedAt: 'Uploaded',
     colStatus: 'Status',
@@ -105,6 +120,8 @@ const MESSAGES = {
     viewProgress: 'View progress',
     viewResult: 'View result',
     downloadReport: 'Download report',
+    downloadReportPdf: 'Download audit PDF',
+    downloadDesensitizedPdf: 'Download desensitized PDF',
     reaudit: 'Re-audit',
     retry: 'Retry',
     delete: 'Delete',
@@ -112,15 +129,18 @@ const MESSAGES = {
     findings: '{total} finding(s) · {review} to review',
     uploadTitle: 'Upload documents',
     dropzone: 'Drop PDF / Word files here',
-    dropzoneHint: 'or click to choose files (max 200 MiB each)',
+    dropzoneHint: 'or click to choose files',
     cancel: 'Cancel',
     confirmUpload: 'Upload',
     close: 'Close',
-    openReport: 'Download report',
+    openReport: 'Open report',
+    previewTitle: 'Report preview',
+    viewDetails: 'View details',
     colRule: 'Rule',
     colCheck: 'Check',
     colVerdict: 'Verdict',
     colPage: 'Page',
+    pageValue: 'Page {page}',
     colDetail: 'Issue and remediation',
     colEvidence: 'Evidence',
     evidenceMissing: 'None',
@@ -132,25 +152,33 @@ const MESSAGES = {
     resultsNotReady: 'Audit results are not ready',
     resultsOverview: 'Overall: {verdict} · Pass {pass} · Fail {fail} · Review {review} · N/A {na}',
     viewAudit: 'Audit',
-    viewStandards: 'Standards',
-    uploadStandard: 'Upload standard',
-    standardHint: 'Upload rule/standard documents (PDF, Word, Markdown, txt). They are compiled into skill rule packs and enabled for everyone who can open this provider; the next audit uses them.',
-    colStandardName: 'Standard',
-    colStandardRules: 'Rules',
-    colStandardStatus: 'Status',
+    viewStandards: 'Shared materials',
+    uploadStandard: 'Upload materials',
+    standardHint: 'Upload test standards, equipment ledgers, and other materials (PDF, Word, Markdown, txt, or Excel). Purpose is inferred from the filename and files are read locally. Materials are shared by all users and are not automatically compiled into rule packs.',
+    colStandardName: 'Material',
+    colStandardRules: 'Purpose / rules',
+    colStandardStatus: 'Read / compile status',
     colStandardUploadedAt: 'Uploaded',
-    standardCount: '{count} standard(s)',
-    standardUploaded: 'Standard uploaded',
-    standardDeleted: 'Standard deleted',
-    standardDeleteConfirm: 'Delete this standard?',
-    standardEmptyTitle: 'No standards yet',
-    standardEmptyBody: 'Use “Upload standard” to add audit criteria.',
+    standardCount: '{count} material(s)',
+    standardUploaded: 'Material uploaded',
+    standardDeleted: 'Material deleted',
+    standardDeleteConfirm: 'Delete this shared material?',
+    standardEmptyTitle: 'No shared materials yet',
+    standardEmptyBody: 'Use “Upload materials” to add standards, ledgers, or supplements.',
     statusCompiling: 'Compiling',
     statusActive: 'Active',
     statusCompileFailed: 'Compile failed',
+    readStatusReading: 'Reading',
+    readStatusReady: 'Readable',
+    readStatusFailed: 'Read failed',
+    kindLedger: 'Equipment ledger',
+    kindStandard: 'Test standard',
+    kindSupplement: 'Supplementary material',
     recompile: 'Recompile',
     recompileStarted: 'Recompiling',
-    unsupportedStandard: 'Only PDF, Word, Markdown and txt rule documents are supported',
+    refresh: 'Read again',
+    refreshStarted: 'Reading started',
+    unsupportedStandard: 'Only PDF, Word, Markdown, txt, and Excel materials are supported',
     download: 'Download',
     uploading: 'Uploading {name}',
     uploadFailed: 'Upload failed: {message}',
@@ -159,17 +187,22 @@ const MESSAGES = {
     deleted: 'Deleted',
     deleteConfirm: 'Delete this document?',
     unsupported: 'Only PDF and Word (.docx) files are supported',
-    tooLarge: 'Each file must be at most 200 MiB',
     grades: 'A {A} · B {B} · C {C}',
     progress: 'Auditing · {progress}%',
     failedSummary: 'Audit failed',
+    coverageLimit: 'Split the document and retry to audit all its content',
+    auditInterrupted: 'The service restarted during the audit. Please retry.',
     reportNotReady: 'The report is not ready yet. Finish the audit first.',
+    desensitizedNotReady: 'The desensitized PDF is not ready yet.',
     timeFilter: 'Upload time',
   },
 };
 
+const LEGACY_DEFAULT_API_BASE = '/api/providers/audit-report/default';
+
 const state = {
   basePath: '',
+  providerInstance: '',
   locale: 'zh-CN',
   items: [],
   standards: [],
@@ -181,6 +214,8 @@ const state = {
   pollTimer: null,
   standardsTimer: null,
   currentResultId: '',
+  resultRequestVersion: 0,
+  resultsRequestedFor: '',
   started: false,
 };
 
@@ -193,7 +228,31 @@ function t(key, params = {}) {
 }
 
 function apiBase() {
-  return `${state.basePath || ''}/api/providers/audit-report/default`;
+  // The current host init bridge omits provider instance; keep its extension-only default alias.
+  if (!state.providerInstance) return `${state.basePath || ''}${LEGACY_DEFAULT_API_BASE}`;
+  const instance = encodeURIComponent(state.providerInstance);
+  return `${state.basePath || ''}/api/providers/audit-report/${instance}`;
+}
+
+function serverUrl(value) {
+  if (typeof value !== 'string' || !value.trim()) return '';
+  try {
+    const url = new URL(value, window.location.origin);
+    if (url.origin !== window.location.origin) return '';
+    const prefix = String(state.basePath || '').replace(/\/$/, '');
+    const isProviderApiPath = url.pathname === '/api/providers'
+      || url.pathname.startsWith('/api/providers/');
+    const hasProviderPrefix = prefix && (
+      url.pathname === `${prefix}/api/providers`
+      || url.pathname.startsWith(`${prefix}/api/providers/`)
+    );
+    if (prefix && isProviderApiPath && !hasProviderPrefix) {
+      url.pathname = `${prefix}${url.pathname}`;
+    }
+    return url.href;
+  } catch (_) {
+    return '';
+  }
 }
 
 function escapeHtml(value) {
@@ -236,6 +295,20 @@ async function api(path, options = {}) {
   return payload;
 }
 
+async function apiAt(url, options = {}) {
+  const target = serverUrl(url);
+  if (!target) throw new Error('Invalid server URL');
+  const response = await fetch(target, { credentials: 'same-origin', ...options });
+  let payload = null;
+  try { payload = await response.json(); } catch (_) { payload = null; }
+  if (!response.ok) {
+    const detail = payload?.detail;
+    const message = typeof detail === 'string' ? detail : (detail?.message || `HTTP ${response.status}`);
+    throw new Error(message);
+  }
+  return payload;
+}
+
 function formatTime(value) {
   if (!value) return '—';
   const date = new Date(value);
@@ -260,9 +333,13 @@ function resultText(document) {
     return t('findings', { total: document.findings_total, review: document.findings_review });
   }
   if (document.status === 'running') {
-    return t('progress', { progress: document.progress || 0 });
+    return document.progress_text || t('progress', { progress: document.progress || 0 });
   }
-  if (document.status === 'failed') return t('failedSummary');
+  if (document.status === 'failed') {
+    if (document.error_code === 'audit_coverage_limit') return t('coverageLimit');
+    if (document.error_code === 'host_restarted') return t('auditInterrupted');
+    return t('failedSummary');
+  }
   return '—';
 }
 
@@ -275,6 +352,15 @@ function actionButtons(document) {
   if (actions.includes('start_audit')) add('audit', t('startAudit'));
   if (actions.includes('view_progress')) add('result', t('viewProgress'));
   if (actions.includes('view_result')) add('result', t('viewResult'));
+  if (document.status === 'failed' && !actions.includes('view_progress') && !actions.includes('view_result')) {
+    add('result', t('viewDetails'));
+  }
+  if (document.desensitized_available && serverUrl(document.urls?.desensitized_download)) {
+    add('download-desensitized', t('downloadDesensitizedPdf'));
+  }
+  if (document.report_available && serverUrl(document.urls?.report_download)) {
+    add('download-report', document.report_format === 'pdf' ? t('downloadReportPdf') : t('downloadReport'));
+  }
   if (actions.includes('retry') || actions.includes('reaudit')) add('audit', t('retry'));
   if (actions.includes('delete')) add('delete', t('delete'), 'danger');
   return buttons.join('');
@@ -319,12 +405,44 @@ function renderTable() {
   els.count.textContent = t('count', { count: items.length });
 }
 
+async function fetchAllDocuments() {
+  const items = [];
+  const pageSize = 100;
+  let total = Number.POSITIVE_INFINITY;
+  for (let page = 1; items.length < total; page += 1) {
+    const payload = await api('/documents?page=' + page + '&page_size=' + pageSize);
+    if (!Array.isArray(payload?.items) || !Number.isFinite(Number(payload.total))) {
+      throw new Error('Invalid document list response');
+    }
+    items.push(...payload.items);
+    total = Math.max(0, Number(payload.total));
+    if (items.length < total && payload.items.length === 0) {
+      throw new Error('Document list pagination stopped before all documents were loaded');
+    }
+  }
+  return items;
+}
+
 async function loadDocuments() {
   window.clearTimeout(state.pollTimer);
   try {
-    const payload = await api('/documents?page_size=100');
-    state.items = payload.items || [];
+    state.items = await fetchAllDocuments();
     renderTable();
+    if (!els.resultModal.hidden && state.currentResultId) {
+      const currentDocument = state.items.find(item => item.id === state.currentResultId);
+      if (currentDocument) {
+        syncResultSummary(currentDocument);
+        syncResultArtifacts(currentDocument);
+        if (currentDocument.status === 'completed') loadCurrentResults(currentDocument.id);
+        else {
+          if (state.resultsRequestedFor === currentDocument.id) {
+            state.resultsRequestedFor = '';
+            state.resultRequestVersion += 1;
+          }
+          els.resultBody.innerHTML = `<p class="result-line">${escapeHtml(t('resultsNotReady'))}</p>`;
+        }
+      }
+    }
     if (state.items.some(item => item.status === 'running')) {
       state.pollTimer = window.setTimeout(loadDocuments, 3000);
     }
@@ -333,40 +451,104 @@ async function loadDocuments() {
   }
 }
 
+function syncResultSummary(document) {
+  const grades = document.grade_summary || {};
+  els.resultTitle.textContent = document.file_name;
+  els.resultSummary.innerHTML = `
+    <p class="result-line">${escapeHtml(resultText(document))}</p>
+    ${document.status === 'failed' && document.error_message ? `<p class="result-line error-line">${escapeHtml(document.error_message)}</p>` : ''}
+    <p class="result-line">${escapeHtml(t('grades', {
+      A: grades.A || 0, B: grades.B || 0, C: grades.C || 0,
+    }))}</p>
+    ${document.status === 'running' ? `<div class="progress-bar"><span style="width:${Number(document.progress) || 0}%"></span></div>` : ''}
+  `;
+}
+
+function syncResultArtifacts(document) {
+  els.downloadDesensitized.hidden = !document.desensitized_available
+    || !serverUrl(document.urls?.desensitized_download);
+  els.downloadAudit.hidden = !document.report_available
+    || !serverUrl(document.urls?.report_download);
+  els.downloadAudit.textContent = document.report_format === 'pdf' ? t('downloadReportPdf') : t('downloadReport');
+  const previewUrl = document.report_available ? reportPreviewUrl(document) : '';
+  els.openReport.hidden = !previewUrl;
+  els.reportPreviewTitle.textContent = t('previewTitle');
+  els.reportPreviewSection.hidden = !previewUrl;
+  els.reportPreview.hidden = !previewUrl;
+
+  if (els.reportPreview.dataset.previewUrl !== previewUrl) {
+    els.reportPreview.src = previewUrl || 'about:blank';
+    els.reportPreview.dataset.previewUrl = previewUrl;
+  }
+}
+
+function reportPreviewUrl(document) {
+  const url = serverUrl(document?.urls?.report_preview || document?.urls?.report);
+  if (!url) return '';
+  const version = document.report_version || document.artifact_version
+    || (document.status === 'completed' ? document.updated_at : '');
+  if (!version) return url;
+  try {
+    const versioned = new URL(url, window.location.origin);
+    versioned.searchParams.set('artifact_version', String(version));
+    return versioned.href;
+  } catch (_) {
+    return url;
+  }
+}
+
 function standardStatusLabel(standard) {
-  if (standard.status === 'compiling') return t('statusCompiling');
-  if (standard.status === 'failed') return t('statusCompileFailed');
-  return t('statusActive');
+  const labels = [];
+  if (standard.read_status) {
+    labels.push(t({ reading: 'readStatusReading', ready: 'readStatusReady', failed: 'readStatusFailed' }[standard.read_status] || 'readStatusReady'));
+  }
+  if (standard.status === 'compiling') labels.push(t('statusCompiling'));
+  else if (standard.status === 'failed' && !standard.read_status) labels.push(t('statusCompileFailed'));
+  else if (standard.status === 'active') labels.push(t('statusActive'));
+  return labels.join(' · ') || t('statusActive');
 }
 
 function standardBadge(standard) {
+  if (standard.read_status === 'reading') return 'pending';
+  if (standard.read_status === 'failed') return 'failed';
   if (standard.status === 'compiling') return 'pending';
   if (standard.status === 'failed') return 'failed';
   return 'completed';
 }
 
+function standardKindLabel(kind) {
+  return t({ ledger: 'kindLedger', standard: 'kindStandard', supplement: 'kindSupplement' }[kind] || 'kindSupplement');
+}
+
 function renderStandards() {
   els.standardRows.innerHTML = state.standards.map(standard => {
     const badge = standardBadge(standard);
-    const title = standard.error_message
-      ? ` title="${escapeHtml(standard.error_message)}"`
+    const title = standard.read_error || standard.error_message
+      ? ` title="${escapeHtml(standard.read_error || standard.error_message)}"`
       : '';
     const rules = standard.rules ? escapeHtml(String(standard.rules)) : '—';
-    const recompile = standard.status === 'compiling'
-      ? ''
-      : `<button type="button" class="action" data-standard-action="recompile" data-id="${escapeHtml(standard.id)}">${escapeHtml(t('recompile'))}</button>`;
+    const refreshUrl = serverUrl(standard.urls?.refresh);
+    const readAction = refreshUrl
+      ? `<button type="button" class="action" data-standard-action="refresh" data-id="${escapeHtml(standard.id)}">${escapeHtml(t('refresh'))}</button>`
+      : '';
+    const recompileAction = standard.pack && standard.status !== 'compiling'
+      ? `<button type="button" class="action" data-standard-action="recompile" data-id="${escapeHtml(standard.id)}">${escapeHtml(t('recompile'))}</button>`
+      : '';
+    const extension = String(standard.extension || '').toLowerCase();
+    const fileType = extension === '.docx' ? 'docx' : (extension === '.pdf' ? 'pdf' : (['.xlsx', '.xlsm'].includes(extension) ? 'excel' : 'md'));
     return `
     <tr>
       <td class="name-cell">
-        <span class="file-badge ${standard.extension === '.docx' ? 'docx' : (standard.extension === '.pdf' ? 'pdf' : 'md')}">${escapeHtml((standard.extension || '.pdf').replace('.', '').toUpperCase())}</span>
-        <span class="file-name" title="${escapeHtml(standard.file_name)}">${escapeHtml(standard.file_name)}</span>
+        <span class="file-badge ${fileType}">${escapeHtml((extension || '.pdf').replace('.', '').toUpperCase())}</span>
+        <span class="standard-name"><span class="file-name" title="${escapeHtml(standard.file_name)}">${escapeHtml(standard.file_name)}</span><small>${escapeHtml(standardKindLabel(standard.kind))}</small></span>
       </td>
       <td>${rules}</td>
       <td><span class="status status-${badge}"${title}>${escapeHtml(standardStatusLabel(standard))}</span></td>
       <td>${escapeHtml(formatTime(standard.created_at))}</td>
       <td class="actions-cell"><div class="row-actions">
         <button type="button" class="action" data-standard-action="download" data-id="${escapeHtml(standard.id)}">${escapeHtml(t('download'))}</button>
-        ${recompile}
+        ${readAction}
+        ${recompileAction}
         <button type="button" class="action danger" data-standard-action="delete" data-id="${escapeHtml(standard.id)}">${escapeHtml(t('delete'))}</button>
       </div></td>
     </tr>
@@ -383,7 +565,7 @@ async function loadStandards() {
     const payload = await api('/standards');
     state.standards = payload.items || [];
     renderStandards();
-    if (state.standards.some(item => item.status === 'compiling')) {
+    if (state.standards.some(item => item.status === 'compiling' || item.read_status === 'reading')) {
       state.standardsTimer = window.setTimeout(loadStandards, 4000);
     }
   } catch (error) {
@@ -392,15 +574,11 @@ async function loadStandards() {
 }
 
 async function uploadStandardFiles(fileList) {
-  const allowed = ['.pdf', '.docx', '.md', '.txt'];
+  const allowed = ['.pdf', '.docx', '.md', '.txt', '.xlsx', '.xlsm'];
   const files = Array.from(fileList || []).filter(file => {
     const name = String(file.name || '').toLowerCase();
     if (!allowed.some(extension => name.endsWith(extension))) {
       showToast(t('unsupportedStandard'), 'error');
-      return false;
-    }
-    if (file.size > 200 * 1024 * 1024) {
-      showToast(t('tooLarge'), 'error');
       return false;
     }
     return true;
@@ -416,6 +594,17 @@ async function uploadStandardFiles(fileList) {
     }
   }
   await loadStandards();
+}
+
+async function refreshStandard(standardId) {
+  const standard = state.standards.find(item => item.id === standardId);
+  try {
+    await apiAt(standard?.urls?.refresh, { method: 'POST' });
+    showToast(t('refreshStarted'), 'success');
+    await loadStandards();
+  } catch (error) {
+    showToast(t('auditFailed', { message: error.message }), 'error');
+  }
 }
 
 async function recompileStandard(standardId) {
@@ -482,23 +671,37 @@ async function deleteDocument(documentId) {
   }
 }
 
-function reportUrl(documentId, download = false) {
-  const suffix = download ? '/report/download' : '/report';
-  return `${apiBase()}/documents/${encodeURIComponent(documentId)}${suffix}`;
-}
-
-function downloadReport(documentId) {
+function downloadDocumentArtifact(documentId, artifact) {
   const document = state.items.find(item => item.id === documentId);
-  if (!document || document.status !== 'completed' || !document.report_available) {
-    showToast(t('reportNotReady'), 'error');
+  if (!document) return;
+  const isDesensitized = artifact === 'desensitized';
+  const available = isDesensitized ? document.desensitized_available : document.report_available;
+  const key = isDesensitized ? 'desensitized_download' : 'report_download';
+  const url = serverUrl(document.urls?.[key]);
+  if (!available || !url) {
+    showToast(isDesensitized ? t('desensitizedNotReady') : t('reportNotReady'), 'error');
     return;
   }
   const link = window.document.createElement('a');
-  link.href = reportUrl(documentId, true);
+  link.href = url;
   link.rel = 'noopener';
   window.document.body.appendChild(link);
   link.click();
   link.remove();
+}
+
+function downloadReport(documentId) {
+  downloadDocumentArtifact(documentId, 'report');
+}
+
+function openInlineReport(documentId) {
+  const document = state.items.find(item => item.id === documentId);
+  const url = reportPreviewUrl(document);
+  if (!document?.report_available || !url) {
+    showToast(t('reportNotReady'), 'error');
+    return;
+  }
+  window.open(url, '_blank', 'noopener');
 }
 
 function verdictLabel(verdict) {
@@ -520,7 +723,7 @@ function renderResults(payload) {
   const counts = payload.counts || {};
   const rows = (payload.results || []).map(item => {
     const verdict = String(item.verdict || '').toUpperCase();
-    const detail = [item.problem, item.suggestion].filter(Boolean).join(' ／ ');
+    const detail = [item.problem || item.reason, item.suggestion].filter(Boolean).join(' ／ ');
     const imageUrl = evidenceUrl(payload.document_id, item.image);
     const evidenceCell = imageUrl
       ? `<a href="${imageUrl}" target="_blank" rel="noopener"><img class="evidence-thumb" src="${imageUrl}" alt="${escapeHtml(t('colEvidence'))}"></a>`
@@ -528,9 +731,9 @@ function renderResults(payload) {
     return `
       <tr>
         <td class="rule-cell">${escapeHtml(item.rule)}</td>
-        <td>${escapeHtml(item.title || '')}</td>
+        <td>${escapeHtml(item.title || item.name || '')}</td>
         <td><span class="verdict verdict-${verdict.toLowerCase()}">${escapeHtml(verdictLabel(verdict))}</span></td>
-        <td>${item.page ? `第 ${escapeHtml(String(item.page))} 页` : '—'}</td>
+        <td>${item.page ? escapeHtml(t('pageValue', { page: item.page })) : '—'}</td>
         <td class="detail-cell">${escapeHtml(detail || '—')}</td>
         <td class="evidence-cell">${evidenceCell}</td>
       </tr>
@@ -564,27 +767,34 @@ function renderResults(payload) {
 async function showResult(documentId) {
   const document = state.items.find(item => item.id === documentId);
   if (!document) return;
+  state.resultRequestVersion += 1;
+  state.resultsRequestedFor = '';
   state.currentResultId = documentId;
-  els.resultTitle.textContent = document.file_name;
-  const grades = document.grade_summary || {};
-  els.resultSummary.innerHTML = `
-    <p class="result-line">${escapeHtml(resultText(document))}</p>
-    <p class="result-line">${escapeHtml(t('grades', {
-      A: grades.A || 0, B: grades.B || 0, C: grades.C || 0,
-    }))}</p>
-    ${document.status === 'running' ? `<div class="progress-bar"><span style="width:${Number(document.progress) || 0}%"></span></div>` : ''}
-  `;
-  els.openReport.hidden = document.status !== 'completed' || !document.report_available;
+  syncResultSummary(document);
+  syncResultArtifacts(document);
   els.resultModal.hidden = false;
   if (document.status !== 'completed') {
     els.resultBody.innerHTML = `<p class="result-line">${escapeHtml(t('resultsNotReady'))}</p>`;
     return;
   }
+  await loadCurrentResults(documentId);
+}
+
+async function loadCurrentResults(documentId) {
+  if (state.resultsRequestedFor === documentId) return;
+  state.resultsRequestedFor = documentId;
+  const requestVersion = ++state.resultRequestVersion;
   els.resultBody.innerHTML = `<p class="result-line">${escapeHtml(t('resultsLoading'))}</p>`;
   try {
     const payload = await api(`/documents/${encodeURIComponent(documentId)}/results`);
+    if (state.resultRequestVersion !== requestVersion
+      || state.currentResultId !== documentId
+      || els.resultModal.hidden) return;
     els.resultBody.innerHTML = renderResults(payload);
   } catch (error) {
+    if (state.resultRequestVersion !== requestVersion
+      || state.currentResultId !== documentId
+      || els.resultModal.hidden) return;
     els.resultBody.innerHTML = `<p class="result-line">${escapeHtml(error.message)}</p>`;
   }
 }
@@ -607,10 +817,6 @@ function addFiles(fileList) {
     const name = String(file.name || '').toLowerCase();
     if (!name.endsWith('.pdf') && !name.endsWith('.docx')) {
       showToast(t('unsupported'), 'error');
-      continue;
-    }
-    if (file.size > 200 * 1024 * 1024) {
-      showToast(t('tooLarge'), 'error');
       continue;
     }
     state.pendingFiles.push(file);
@@ -682,10 +888,22 @@ function bindEvents() {
     if (action === 'audit') startAudit(id);
     else if (action === 'delete') deleteDocument(id);
     else if (action === 'result') showResult(id);
-    else if (action === 'download') downloadReport(id);
+    else if (action === 'download-desensitized') downloadDocumentArtifact(id, 'desensitized');
+    else if (action === 'download-report') downloadReport(id);
   });
-  els.closeResult.addEventListener('click', () => { els.resultModal.hidden = true; });
+  els.closeResult.addEventListener('click', () => {
+    els.resultModal.hidden = true;
+    state.currentResultId = '';
+    state.resultsRequestedFor = '';
+    state.resultRequestVersion += 1;
+  });
   els.openReport.addEventListener('click', () => {
+    if (state.currentResultId) openInlineReport(state.currentResultId);
+  });
+  els.downloadDesensitized.addEventListener('click', () => {
+    if (state.currentResultId) downloadDocumentArtifact(state.currentResultId, 'desensitized');
+  });
+  els.downloadAudit.addEventListener('click', () => {
     if (state.currentResultId) downloadReport(state.currentResultId);
   });
   els.viewTabs.forEach(tab => {
@@ -701,6 +919,7 @@ function bindEvents() {
     if (!button) return;
     const { standardAction, id } = button.dataset;
     if (standardAction === 'download') downloadStandard(id);
+    else if (standardAction === 'refresh') refreshStandard(id);
     else if (standardAction === 'recompile') recompileStandard(id);
     else if (standardAction === 'delete') deleteStandard(id);
   });
@@ -730,6 +949,9 @@ function applyLocale() {
   els.confirmUpload.textContent = t('confirmUpload');
   els.closeResult.textContent = t('close');
   els.openReport.textContent = t('openReport');
+  els.downloadDesensitized.textContent = t('downloadDesensitizedPdf');
+  els.downloadAudit.textContent = t('downloadReportPdf');
+  els.reportPreviewTitle.textContent = t('previewTitle');
   document.getElementById('uploadTitle').textContent = t('uploadTitle');
   els.dropzone.querySelector('strong').textContent = t('dropzone');
   els.dropzone.querySelector('span').textContent = t('dropzoneHint');
@@ -769,8 +991,13 @@ function start() {
     resultTitle: document.getElementById('resultTitle'),
     resultSummary: document.getElementById('resultSummary'),
     resultBody: document.getElementById('resultBody'),
+    reportPreview: document.getElementById('reportPreview'),
+    reportPreviewSection: document.querySelector('.report-preview-section'),
+    reportPreviewTitle: document.getElementById('reportPreviewTitle'),
     closeResult: document.getElementById('closeResult'),
     openReport: document.getElementById('openReport'),
+    downloadDesensitized: document.getElementById('downloadDesensitized'),
+    downloadAudit: document.getElementById('downloadAudit'),
     viewTabs: [...document.querySelectorAll('.view-tab')],
     auditView: document.getElementById('auditView'),
     standardsView: document.getElementById('standardsView'),
@@ -793,6 +1020,9 @@ window.addEventListener('message', event => {
   const data = event.data;
   if (!data || data.type !== 'atlasclaw:init') return;
   state.basePath = String(data.basePath || '');
+  state.providerInstance = String(
+    data.provider?.instance || data.provider?.instanceName || data.providerInstance || '',
+  );
   state.locale = String(data.locale || 'zh-CN');
   document.documentElement.dataset.theme = data.theme || 'light';
   applyLocale();

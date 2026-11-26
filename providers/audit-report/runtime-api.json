@@ -24,7 +24,7 @@
       "success_status": 201,
       "response": "json",
       "timeout_seconds": 600,
-      "max_body_bytes": 230686720
+      "max_body_bytes": 268435456
     },
     {
       "id": "documents.get",
@@ -129,7 +129,7 @@
       "success_status": 201,
       "response": "json",
       "timeout_seconds": 600,
-      "max_body_bytes": 230686720
+      "max_body_bytes": 268435456
     },
     {
       "id": "standards.file",
@@ -161,6 +161,37 @@
       "capability": "documents",
       "access": "user",
       "response": "json"
+    },
+    {
+      "response": "binary",
+      "access": "user",
+      "capability": "documents",
+      "method": "GET",
+      "handler": "download_desensitized",
+      "id": "documents.desensitized",
+      "path": "documents/{document_id}/desensitized",
+      "module": "api/handlers.py"
+    },
+    {
+      "response": "binary",
+      "access": "user",
+      "capability": "documents",
+      "method": "GET",
+      "handler": "download_desensitized_file",
+      "id": "documents.desensitized_download",
+      "path": "documents/{document_id}/desensitized/download",
+      "module": "api/handlers.py"
+    },
+    {
+      "method": "POST",
+      "path": "standards/{standard_id}/refresh",
+      "success_status": 202,
+      "module": "api/handlers.py",
+      "access": "user",
+      "response": "json",
+      "capability": "documents",
+      "handler": "refresh_standard",
+      "id": "standards.refresh"
     }
   ]
 }

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>文档审核</title>
-  <link rel="stylesheet" href="style.css?v=6" />
+  <link rel="stylesheet" href="style.css?v=7" />
 </head>
 <body>
   <main class="audit-page">
@@ -21,7 +21,7 @@
 
     <nav class="view-tabs" role="tablist">
       <button type="button" class="view-tab is-active" data-view="audit" role="tab" aria-selected="true">文档审核</button>
-      <button type="button" class="view-tab" data-view="standards" role="tab" aria-selected="false">审核标准库</button>
+      <button type="button" class="view-tab" data-view="standards" role="tab" aria-selected="false">共享资料</button>
     </nav>
 
     <section id="auditView">
@@ -70,20 +70,20 @@
 
     <section id="standardsView" hidden>
       <section class="standards-toolbar">
-        <p class="standards-hint">上传客户的规则/标准文档（支持 PDF、Word、Markdown、txt）。系统会自动编译成技能规则包并启用，所有开启该 provider 的人共用同一份规则库，下一次审核即生效。</p>
+        <p class="standards-hint" id="standardHint">支持检测标准、总台账等资料（PDF、Word、Markdown、txt、Excel）。系统按文件名识别用途并本地读取；资料在所有用户间共享。上传不会自动编译规则包。</p>
         <button type="button" class="btn btn-primary" id="standardUploadButton">
           <span class="btn-icon" aria-hidden="true">↑</span>
-          <span>上传标准</span>
+          <span>上传资料</span>
         </button>
-        <input type="file" id="standardInput" accept=".pdf,.docx,.md,.txt" multiple hidden />
+        <input type="file" id="standardInput" accept=".pdf,.docx,.md,.txt,.xlsx,.xlsm" multiple hidden />
       </section>
       <section class="table-wrap">
         <table class="document-table standards-table">
           <thead>
             <tr>
-              <th id="thStandardName">标准文件</th>
-              <th id="thStandardRules">规则数</th>
-              <th id="thStandardStatus">编译状态</th>
+              <th id="thStandardName">资料文件</th>
+              <th id="thStandardRules">用途 / 规则数</th>
+              <th id="thStandardStatus">读取/编译状态</th>
               <th id="thStandardUploadedAt">上传时间</th>
               <th id="thStandardActions" class="actions-column">操作</th>
             </tr>
@@ -91,8 +91,8 @@
           <tbody id="standardRows"></tbody>
         </table>
         <div class="empty-state" id="standardEmpty" hidden>
-          <h2>还没有审核标准</h2>
-          <p>点击右上角“上传标准”添加规则文档。</p>
+          <h2>还没有共享资料</h2>
+          <p>点击右上角“上传资料”添加检测标准、台账或补充资料。</p>
         </div>
       </section>
       <footer class="page-footer">
@@ -121,15 +121,21 @@
     <div class="modal-card result-card">
       <h2 id="resultTitle">审核结果</h2>
       <div class="result-summary" id="resultSummary"></div>
+      <section class="report-preview-section">
+        <h3 id="reportPreviewTitle">报告预览</h3>
+        <iframe id="reportPreview" title="报告预览" hidden></iframe>
+      </section>
       <div class="result-body" id="resultBody"></div>
       <div class="modal-actions">
         <button type="button" class="btn" id="closeResult">关闭</button>
-        <button type="button" class="btn btn-primary" id="openReport">下载报告</button>
+        <button type="button" class="btn" id="openReport" hidden>打开报告</button>
+        <button type="button" class="btn" id="downloadDesensitized" hidden>下载脱敏 PDF</button>
+        <button type="button" class="btn btn-primary" id="downloadAudit" hidden>下载审核 PDF</button>
       </div>
     </div>
   </div>
 
   <div class="toast" id="toast" hidden></div>
-  <script type="module" src="app.js?v=6"></script>
+  <script type="module" src="app.js?v=7"></script>
 </body>
 </html>
