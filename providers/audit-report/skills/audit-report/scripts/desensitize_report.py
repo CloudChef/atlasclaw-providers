@@ -2,13 +2,12 @@
 # -*- coding: utf-8 -*-
 """Local desensitization before a report is sent to the LLM.
 
-Rules recovered from the customer's word_tool.exe (PyInstaller, Python 3.13):
-- Replace values after known report labels with "N/A".
-- Redact tables containing "表面处理信息" completely (except technical labels).
-- Replace full-cell material/coating words (TPE, Rand, 底漆, Primer, ...).
-- Replace OEM words 小米/Xiaomi/XIAOMI/主机厂 with "N/A".
-- Remove header/footer logo images.
-- Keep technical fields listed in EXCLUDE_KEYWORDS.
+Confirmed scope: redact organization/supplier identity, contact details,
+customer/project identity and sample/part descriptions. Preserve all identifiers,
+versions, materials, dates, quantities, test phases and audit standards.
+Only redact identified text or its value cell; never mask row/table bands.
+Signature images/names are removed from labeled signature cells; seals/dates remain.
+Header/footer image removal remains unchanged.
 
 Usage:
     python desensitize_report.py input.docx --out output.docx
@@ -30,70 +29,113 @@ EXCLUDE_KEYWORDS = [
     "实验室名称", "实验室地址",
 ]
 
-ALL_LABELS = [
-    ["委托单位名称", "Client Name", "Applicant name", "生产单位名称"],
-    ["委托单位地址", "Client Address", "Applicant address"],
-    ["车厂", "OEM"],
-    ["车型", "Vehicle Model"],
-    ["项目名称", "Project Name"],
-    ["测试阶段", "试验阶段", "Test phase"],
-    ["样品名称", "Sample Name"],
-    ["零件号", "Part No.", "Part Number"],
-    ["样品规格", "Sample Specification"],
-    ["材质信息", "Material information", "材料名称", "Material name", "材料牌号", "Material brand"],
-    ["材质供应商", "Material Supplier", "材料供应商"],
-    ["表面处理信息", "Coating information"],
-    ["表面处理供应商", "Coating Supplier"],
-    ["生产日期", "Manufacture date"],
-    ["批次号", "Batch No."],
-    ["样件件号", "Sample Part Number"],
-    ["委托单位", "Client", "Customer"],
-    ["零件生产商", "Part Manufacturer"],
-    ["零部件一级供应商", "Tier 1 Supplier", "一级供应商"],
-    ["车型项目号", "Vehicle Project Number"],
-    ["软件版本号", "Software Version", "软件版本"],
-    ["硬件版本号", "Hardware Version", "硬件版本"],
-    ["供应商", "Supplier"],
-    ["样品信息", "Sample information"],
-    ["Tel", "电话"],
-    ["E-mail", "邮箱"],
-    ["地址", "Address"],
-    ["联系人", "CONTACT", "Attn."],
-    ["合同号", "Contract No", "测试计划编号", "Test plan No", "测试计划版本",
-     "Test plan Revision", "零件名称", "DUT", "零件数量", "Qty",
-     "试验标准", "Specification", "试验大纲", "Test plan"],
+SIGNATURE_LABELS = [
+    "编制", "编制人", "编写", "编写人", "审核", "审核人", "批准", "批准人", "签名", "签字", "签署",
+    "Prepared by", "Prepare", "Audited by", "Audit", "Reviewed by", "Review", "Approved by", "Approve", "Signature", "Signed by",
 ]
 
-FULL_CELL_REPLACE_WORDS = [
-    "TPE LC65A", "TPE", "冼洋 Rand", "洗洋 Rand", "Rand",
-    "详见“材质信息”", "Details see Material information", "详见材质信息",
-    "底漆", "Primer", "色漆", "Base coat", "清漆", "Clear coat",
+ALL_LABELS = [
+    ["委托单位名称", "Client Name", "Applicant name", "生产单位名称", "委托单位", "Client", "Customer", "零件生产商", "Part Manufacturer"],
+    ["材质供应商", "Material Supplier", "材料供应商", "表面处理供应商", "Coating Supplier", "零部件一级供应商", "Tier 1 Supplier", "一级供应商", "供应商", "Supplier"],
+    ["委托单位地址", "Client Address", "Applicant address", "Tel.", "Tel", "电话", "E-mail", "电子邮箱", "邮箱", "地址", "Address", "联系人", "CONTACT", "Attn."],
+    ["车厂", "OEM", "车型", "Vehicle Model", "项目名称", "Project Name"],
+    ["样品名称", "Sample Name", "样品规格", "Sample Specification", "样品信息", "Sample information", "零件名称", "DUT"],
+    SIGNATURE_LABELS,
 ]
+
+RETAINED_LABELS = EXCLUDE_KEYWORDS + [
+    "零件号", "Part No.", "Part Number", "批次号", "Batch No.", "样件件号", "Sample Part Number",
+    "车型项目号", "Vehicle Project Number", "合同号", "Contract No", "Contract No.",
+    "测试计划编号", "Test plan No", "Test Plan Approval Number", "测试计划版本", "Test plan Revision",
+    "软件版本号", "Software Version", "软件版本", "硬件版本号", "Hardware Version", "硬件版本",
+    "材质信息", "Material information", "材料名称", "Material name", "材料牌号", "Material brand",
+    "表面处理信息", "Coating information", "生产日期", "Manufacture date", "测试阶段", "试验阶段", "Test phase",
+    "零件数量", "Qty", "试验标准", "Specification", "试验大纲", "Test plan", "Report No", "Report No.",
+    "收样日期", "Samples received date", "Test date", "Fax", "传真", "序号", "No.", "No",
+    "签发日期", "Issue Date", "Project number of the vehicle model", "Project number of", "the vehicle model", "Batch number", "production date",
+]
+
+TECHNICAL_HEADER_MARKERS = (
+    "产品端电压", "产品工作电流", "静态电流", "MCU温度", "试验样件工作模式",
+    "Terminal Voltage", "Operating Current", "Operating mode",
+)
+TECHNICAL_HEADER_HINTS = (
+    "产品端", "端电压", "产品工作电", "工作电流", "静态电", "温度", "MCU",
+    "Termina", "Voltage", "Operat", "Current", "工作模式",
+)
 
 PARTIAL_REPLACE_WORDS = ["小米", "Xiaomi", "XIAOMI", "主机厂"]
-
+SENSITIVE_LABELS = [label for group in ALL_LABELS for label in group]
+FIELD_LABELS = SENSITIVE_LABELS + RETAINED_LABELS
+FIELD_ALTERNATIVES = "|".join(re.escape(label) for label in sorted(FIELD_LABELS, key=len, reverse=True))
 LABEL_PATTERN = re.compile(
-    "((?:" + "|".join(re.escape(label) for label in sorted(
-        (label for group in ALL_LABELS for label in group), key=len, reverse=True
-    )) + r")\s*[:：]\s*)([^\n]*?)(?=\n|$)",
-    re.IGNORECASE | re.MULTILINE,
+    r"(?<![A-Za-z])((?:" + FIELD_ALTERNATIVES + r")\s*[:：]\s*)([^\n]*?)(?=(?<![A-Za-z])(?:"
+    + FIELD_ALTERNATIVES + r")\s*[:：]|\n|$)", re.IGNORECASE | re.MULTILINE,
 )
 LABEL_VALUE_RE = re.compile(r"^\s*(.+?)\s*[:：]\s*(.*)$")
+LABEL_MATCHERS = {
+    tuple(labels): re.compile("(?:" + "|".join(re.escape(label) for label in sorted(
+        {re.sub(r"[\s:：/()]", "", label).casefold() for label in labels}, key=len, reverse=True
+    )) + ")+") for labels in (SENSITIVE_LABELS, RETAINED_LABELS, FIELD_LABELS, SIGNATURE_LABELS)
+}
 
 
 def is_excluded(text: str) -> bool:
     return any(keyword in text for keyword in EXCLUDE_KEYWORDS)
 
 
+def _matches_labels(text: str, labels: list[str]) -> bool:
+    clean = re.sub(r"[\s:：/()]", "", text).casefold()
+    return bool(clean and LABEL_MATCHERS[tuple(labels)].fullmatch(clean))
+
+
 def is_label(text: str) -> bool:
-    clean = re.sub(r"[\s:：]", "", text).lower()
-    if not clean or len(clean) > 30 or is_excluded(text):
+    """Recognize confirmed identity/contact/description and signature field labels."""
+    return not is_excluded(text.split(":", 1)[0].split("：", 1)[0]) and _matches_labels(text.split(":", 1)[0].split("：", 1)[0], SENSITIVE_LABELS)
+
+
+def _is_field_label(text: str) -> bool:
+    return _matches_labels(text, FIELD_LABELS) or bool(LABEL_VALUE_RE.match(text))
+
+
+def _sensitive_ranges(text: str):
+    for match in LABEL_PATTERN.finditer(text):
+        if is_label(match.group(1)) and match.group(2).strip() not in ("", "N/A"):
+            start, end = match.span(2)
+            while start < end and text[start].isspace():
+                start += 1
+            while end > start and text[end - 1].isspace():
+                end -= 1
+            yield start, end
+
+
+def _normalize_header_context(text: str) -> str:
+    """Normalize whitespace and case only for recognizing technical headers."""
+    return re.sub(r"\s+", "", text).casefold()
+
+
+def _is_technical_header(text: str) -> bool:
+    normalized = _normalize_header_context(text)
+    return any(_normalize_header_context(marker) in normalized for marker in TECHNICAL_HEADER_MARKERS)
+
+
+def _is_bare_dut(text: str) -> bool:
+    return re.fullmatch(r"\s*DUT\s*", text, re.IGNORECASE) is not None
+
+
+def _is_technical_dut_line(text: str, rect, has_technical_header: bool, hints: list) -> bool:
+    if not _is_bare_dut(text) or not has_technical_header:
         return False
-    return any(
-        re.sub(r"\s", "", label).lower() in clean
-        for group in ALL_LABELS
-        for label in group
-    )
+    center_y = (rect.y0 + rect.y1) / 2
+    for hint_text, hint_rect in hints:
+        normalized = _normalize_header_context(hint_text)
+        if not any(_normalize_header_context(hint) in normalized for hint in TECHNICAL_HEADER_HINTS):
+            continue
+        center_hint_y = (hint_rect.y0 + hint_rect.y1) / 2
+        horizontal_gap = max(rect.x0 - hint_rect.x1, hint_rect.x0 - rect.x1, 0)
+        if abs(center_y - center_hint_y) <= 55 and horizontal_gap <= 250:
+            return True
+    return False
 
 
 def _set_paragraph_text(paragraph, text: str) -> None:
@@ -132,30 +174,32 @@ def _remove_images(element) -> int:
 
 def _process_paragraph(paragraph) -> int:
     text = "".join(run.text for run in paragraph.runs)
-    if not text or is_excluded(text):
-        return 0
+    if _matches_labels(text.split(":", 1)[0].split("：", 1)[0], SIGNATURE_LABELS):
+        _remove_images(paragraph._element)
     new_text = text
-    if LABEL_PATTERN.search(text) and re.search(r"[:：]", text):
-        def replace(match):
-            prefix, suffix = match.group(1), match.group(2)
-            if suffix and suffix.strip() != "N/A" and not is_excluded(suffix):
-                return prefix + "N/A"
-            return match.group(0)
-
-        new_text = LABEL_PATTERN.sub(replace, text)
+    for start, end in reversed(list(_sensitive_ranges(text))):
+        new_text = new_text[:start] + "N/A" + new_text[end:]
     if new_text != text:
         _set_paragraph_text(paragraph, new_text)
         return 1
     return 0
 
 
+def _partial_word_ranges(text: str):
+    retained = [match.span(2) for match in LABEL_PATTERN.finditer(text) if not is_label(match.group(1))]
+    if is_excluded(text):
+        return
+    for word in PARTIAL_REPLACE_WORDS:
+        for match in re.finditer(re.escape(word), text, flags=re.IGNORECASE):
+            if not any(start <= match.start() and match.end() <= end for start, end in retained):
+                yield match.span()
+
+
 def _process_partial_paragraph(paragraph) -> int:
     text = "".join(run.text for run in paragraph.runs)
-    if not text or is_excluded(text):
-        return 0
     new_text = text
-    for word in PARTIAL_REPLACE_WORDS:
-        new_text = re.sub(re.escape(word), "N/A", new_text, flags=re.IGNORECASE)
+    for start, end in sorted(set(_partial_word_ranges(text)), reverse=True):
+        new_text = new_text[:start] + "N/A" + new_text[end:]
     if new_text != text:
         _set_paragraph_text(paragraph, new_text)
         return 1
@@ -181,45 +225,35 @@ def _iter_paragraphs(container):
 
 
 def _process_table(table, stats: dict) -> None:
-    table_text = "".join(cell.text for row in table.rows for cell in row.cells)
-    surface_table = "表面处理信息" in table_text
-
-    if surface_table:
-        for row in table.rows:
-            for cell in row.cells:
-                if cell.text.strip() and not is_excluded(cell.text):
-                    _clear_cell_text(cell)
-                    stats["redacted_cells"] += 1
+    headers = table.rows[0].cells if table.rows else []
+    if len(headers) > 1 and all(_matches_labels(cell.text, FIELD_LABELS) for cell in headers):
+        for index, header in enumerate(headers):
+            if is_label(header.text):
+                for row in table.rows[1:]:
+                    removed = _remove_images(row.cells[index]._tc) if _matches_labels(header.text, SIGNATURE_LABELS) else 0
+                    stats["removed_images"] += removed
+                    if removed or row.cells[index].text.strip() not in ("", "N/A"):
+                        _clear_cell_text(row.cells[index])
+                        stats["redacted_cells"] += 1
         return
-
     for row in table.rows:
         unique_cells = []
         seen = set()
         for cell in row.cells:
-            tc_id = id(cell._tc)
-            if tc_id in seen:
-                continue
-            seen.add(tc_id)
-            unique_cells.append(cell)
-
-        for index, cell in enumerate(unique_cells):
+            if id(cell._tc) not in seen:
+                seen.add(id(cell._tc))
+                unique_cells.append(cell)
+        for index, cell in enumerate(unique_cells[:-1]):
             text = cell.text.strip()
-            if not text or is_excluded(text):
+            if not is_label(text) or (LABEL_VALUE_RE.match(text) and LABEL_VALUE_RE.match(text).group(2).strip()):
                 continue
-            is_pointer = any(pointer in text for pointer in ("详见“材质信息”", "详见材质信息"))
-            if any(word in text for word in FULL_CELL_REPLACE_WORDS) and not is_pointer:
-                _clear_cell_text(cell)
+            target = unique_cells[index + 1]
+            target_text = target.text.strip()
+            removed = _remove_images(target._tc) if _matches_labels(text, SIGNATURE_LABELS) else 0
+            stats["removed_images"] += removed
+            if (removed or target_text and target_text != "N/A") and not _is_field_label(target_text):
+                _clear_cell_text(target)
                 stats["redacted_cells"] += 1
-            elif is_label(text):
-                for target in unique_cells[index + 1:]:
-                    target_text = target.text.strip()
-                    if not target_text:
-                        continue
-                    if is_excluded(target_text) or is_label(target_text):
-                        break
-                    if target_text != "N/A":
-                        _clear_cell_text(target)
-                        stats["redacted_cells"] += 1
 
 
 def desensitize_docx(input_path: Path, output_path: Path) -> dict:
@@ -259,11 +293,13 @@ def desensitize_docx(input_path: Path, output_path: Path) -> dict:
         stats["redacted_partial_words"] += _process_partial_paragraph(paragraph)
     for table in _iter_tables(doc):
         for row in table.rows:
-            for cell in row.cells:
+            for index, cell in enumerate(row.cells):
+                if index and _matches_labels(row.cells[index - 1].text, RETAINED_LABELS):
+                    continue
                 for paragraph in cell.paragraphs:
                     stats["redacted_partial_words"] += _process_partial_paragraph(paragraph)
 
-    # Surface-treatment tables are fully redacted before the general pass.
+    # Only the identified value cell is cleared; adjacent fields remain intact.
     for table in _iter_tables(doc):
         _process_table(table, stats)
 
@@ -286,8 +322,44 @@ def _redact_pdf_text(page, rects: list, stats: dict) -> None:
         return
     for rect in rects:
         page.add_redact_annot(rect, fill=(0, 0, 0))
-    page.apply_redactions()
+    page.apply_redactions(images=0, graphics=0)
     stats["redacted_regions"] += len(rects)
+
+
+def _signature_regions(page, lines: list, pymupdf) -> list:
+    """Locate signature value cells from their labels and actual table borders."""
+    horizontal, vertical = [], []
+    for drawing in page.get_drawings():
+        for item in drawing["items"]:
+            segments = []
+            if item[0] == "l":
+                segments = [(item[1], item[2])]
+            elif item[0] == "re":
+                rect = item[1]
+                segments = [(rect.tl, rect.tr), (rect.bl, rect.br), (rect.tl, rect.bl), (rect.tr, rect.br)]
+            for start, end in segments:
+                if abs(start.y - end.y) < 0.5:
+                    horizontal.append((start.y, min(start.x, end.x), max(start.x, end.x)))
+                if abs(start.x - end.x) < 0.5:
+                    vertical.append((start.x, min(start.y, end.y), max(start.y, end.y)))
+    regions = []
+    for line in lines:
+        label = line["text"].split(":", 1)[0].split("：", 1)[0]
+        if not _matches_labels(label, SIGNATURE_LABELS):
+            continue
+        area = line["rect"]
+        center_x = (area.x0 + area.x1) / 2
+        dividers = sorted({x for x, start, end in vertical if start <= area.y0 + 1 and end >= area.y1 + 2})
+        left = max((x for x in dividers if x < center_x), default=None)
+        right = min((x for x in dividers if x > center_x), default=None)
+        if left is None or right is None:
+            continue
+        edges = sorted({y for y, start, end in horizontal
+                        if y >= area.y1 and start <= left + 1 and end >= right - 1})
+        if len(edges) >= 2:
+            top, bottom = edges[:2]
+            regions.append(pymupdf.Rect(left + 1, top + 1, right - 1, bottom - 1))
+    return regions
 
 
 def desensitize_pdf(input_path: Path, output_path: Path, max_pages: int | None = None, tables: bool = False) -> dict:
@@ -306,6 +378,8 @@ def desensitize_pdf(input_path: Path, output_path: Path, max_pages: int | None =
         "pages": doc.page_count,
         "redacted_regions": 0,
         "removed_header_images": 0,
+        "redacted_signatures": 0,
+        "removed_signature_widgets": 0,
         "table_pages": 0,
     }
     limit = doc.page_count if max_pages is None else min(doc.page_count, max_pages)
@@ -314,104 +388,32 @@ def desensitize_pdf(input_path: Path, output_path: Path, max_pages: int | None =
         page = doc[page_index]
         rects = []
 
-        # OEM words anywhere.
-        for word in PARTIAL_REPLACE_WORDS:
-            rects.extend(page.search_for(word))
-
-        # Full-cell material/coating words (do not redact labels themselves).
-        for word in FULL_CELL_REPLACE_WORDS:
-            if is_label(word):
-                continue
-            rects.extend(page.search_for(word))
-
-        # Paragraph lines: label: value -> redact value, including adjacent table cells.
-        page_dict = page.get_text("dict")
+        flags = pymupdf.TEXTFLAGS_RAWDICT & ~pymupdf.TEXT_PRESERVE_IMAGES
         lines = []
-        for block in page_dict.get("blocks", []):
+        for block in page.get_text("rawdict", flags=flags).get("blocks", []):
             for line in block.get("lines", []):
-                text = "".join(span.get("text", "") for span in line.get("spans", []))
+                chars = [char for span in line.get("spans", []) for char in span.get("chars", [])]
+                text = "".join(char["c"] for char in chars)
                 if text.strip():
-                    lines.append({"text": text, "rect": pymupdf.Rect(line["bbox"])})
+                    lines.append({"text": text, "rect": pymupdf.Rect(line["bbox"]), "chars": chars})
+        signature_regions = _signature_regions(page, lines, pymupdf) if any(
+            _matches_labels(line["text"].split(":", 1)[0].split("：", 1)[0], SIGNATURE_LABELS) for line in lines
+        ) else []
+        has_technical_header = _is_technical_header(" ".join(line["text"] for line in lines))
+        technical_hints = [(line["text"], line["rect"]) for line in lines]
 
-        for index, line in enumerate(lines):
-            text = line["text"]
-            if not text.strip() or is_excluded(text):
-                continue
-            match = LABEL_VALUE_RE.match(text)
-            if match:
-                label, value = match.group(1).strip(), match.group(2).strip()
-                if value and value != "N/A" and not is_excluded(value) and is_label(label):
-                    value_rects = page.search_for(value)
-                    if value_rects:
-                        rects.extend(value_rects)
-                    else:
-                        label_rects = page.search_for(label)
-                        if label_rects:
-                            label_rect = label_rects[0]
-                            rects.append(
-                                pymupdf.Rect(label_rect.x1, line["rect"].y0, line["rect"].x1, line["rect"].y1)
-                            )
-                continue
+        def text_rect(line, start=0, end=None):
+            chars = line["chars"][start:end]
+            rect = pymupdf.Rect(chars[0]["bbox"])
+            for char in chars[1:]:
+                rect |= pymupdf.Rect(char["bbox"])
+            # Tighten vertical bounds to avoid touching glyphs on adjacent lines.
+            inset = rect.height * 0.2
+            return pymupdf.Rect(rect.x0, rect.y0 + inset, rect.x1, rect.y1 - inset)
 
-            if not is_label(text):
-                continue
-
-            # Same row (table cell): redact non-label cells to the right.
-            row_targets = []
-            for other in lines:
-                if other is line:
-                    continue
-                if abs((other["rect"].y0 + other["rect"].y1) / 2 - (line["rect"].y0 + line["rect"].y1) / 2) <= 6:
-                    if other["rect"].x0 >= line["rect"].x1 - 2:
-                        row_targets.append(other)
-            for target in row_targets:
-                target_text = target["text"].strip()
-                if not target_text or target_text == "N/A":
-                    continue
-                if is_excluded(target_text) or is_label(target_text):
-                    break
-                rects.append(target["rect"])
-
-            # Row-band fallback: cover the area between this label and the next
-            # same-row label (or page edge). This handles table cells whose text
-            # is not returned as an independent line.
-            next_labels = [
-                other for other in lines
-                if other is not line
-                and abs((other["rect"].y0 + other["rect"].y1) / 2 - (line["rect"].y0 + line["rect"].y1) / 2) <= 6
-                and other["rect"].x0 > line["rect"].x1
-                and is_label(other["text"])
-            ]
-            boundary = min((other["rect"].x0 for other in next_labels), default=page.rect.x1) - 2
-            if boundary > line["rect"].x1:
-                rects.append(
-                    pymupdf.Rect(line["rect"].x1, line["rect"].y0 - 2, boundary, line["rect"].y1 + 2)
-                )
-
-            # Vertical layout: value on the next line(s) below the label.
-            if row_targets:
-                continue
-            redacted_any = False
-            label_skips = 0
-            for other in lines[index + 1:index + 8]:
-                if other["rect"].y0 <= line["rect"].y1:
-                    continue
-                if other["rect"].y0 - line["rect"].y1 > 40:
-                    break
-                target_text = other["text"].strip()
-                if not target_text or target_text == "N/A":
-                    continue
-                if is_excluded(target_text):
-                    break
-                if is_label(target_text):
-                    if redacted_any or label_skips >= 2:
-                        break
-                    label_skips += 1
-                    continue
-                rects.append(other["rect"])
-                redacted_any = True
-
-        # Optional table-cell redaction (slower; recommended for small files).
+        table_cells = []
+        handled_cells = []
+        retained_lines = set()
         if tables:
             try:
                 found = page.find_tables()
@@ -420,36 +422,117 @@ def desensitize_pdf(input_path: Path, output_path: Path, max_pages: int | None =
             if found is not None and found.tables:
                 stats["table_pages"] += 1
                 for table in found.tables:
+                    headers = [pymupdf.Rect(cell) for cell in table.rows[0].cells if cell is not None and page.get_textbox(cell).strip()] if table.rows else []
+                    if len(headers) > 1 and all(_matches_labels(page.get_textbox(cell), FIELD_LABELS) for cell in headers):
+                        for header in headers:
+                            if not is_label(page.get_textbox(header)):
+                                continue
+                            column = pymupdf.Rect(header.x0, header.y1, header.x1, table.bbox[3])
+                            for line in lines:
+                                target = text_rect(line) & column
+                                if not target.is_empty:
+                                    rects.append(target)
+                        handled_cells.extend(headers)
                     for row in table.rows:
-                        cells = list(row.cells)
-                        for index, cell in enumerate(cells):
-                            if cell is None:
+                        cells = [pymupdf.Rect(cell) for cell in row.cells if cell is not None]
+                        table_cells.extend(cells)
+                        for index, cell in enumerate(cells[:-1]):
+                            label = page.get_textbox(cell).strip()
+                            sensitive = is_label(label)
+                            if not (sensitive or _matches_labels(label, RETAINED_LABELS)) or (LABEL_VALUE_RE.match(label) and LABEL_VALUE_RE.match(label).group(2).strip()):
                                 continue
-                            cell_text = page.get_textbox(cell).strip()
-                            if not cell_text or is_excluded(cell_text):
+                            if _is_technical_dut_line(label, cell, has_technical_header, technical_hints):
                                 continue
-                            if is_label(cell_text):
-                                for target in cells[index + 1:]:
-                                    if target is None:
-                                        continue
-                                    target_text = page.get_textbox(target).strip()
-                                    if not target_text:
-                                        continue
-                                    if is_excluded(target_text) or is_label(target_text):
-                                        break
-                                    if target_text != "N/A":
-                                        rects.append(pymupdf.Rect(target))
-                            elif any(word in cell_text for word in FULL_CELL_REPLACE_WORDS):
-                                rects.append(pymupdf.Rect(cell))
+                            target = cells[index + 1]
+                            value = page.get_textbox(target).strip()
+                            if not value or value == "N/A" or _is_field_label(value):
+                                continue
+                            handled_cells.append(cell)
+                            for line in lines:
+                                if target.contains((line["rect"].tl + line["rect"].br) / 2):
+                                    if sensitive:
+                                        rects.append(text_rect(line) & target)
+                                    else:
+                                        retained_lines.add(id(line))
 
+        for line in lines:
+            text, area = line["text"], line["rect"]
+            for start, end in _sensitive_ranges(text):
+                rects.append(text_rect(line, start, end))
+            sensitive = is_label(text)
+            if not (sensitive or _matches_labels(text, RETAINED_LABELS)) or (LABEL_VALUE_RE.match(text) and LABEL_VALUE_RE.match(text).group(2).strip()):
+                continue
+            if _is_technical_dut_line(text, area, has_technical_header, technical_hints):
+                continue
+            if any(cell.contains((area.tl + area.br) / 2) for cell in handled_cells):
+                continue
+            cell = next((cell for cell in table_cells if cell.contains((area.tl + area.br) / 2)), None)
+            if cell is not None and _matches_labels(page.get_textbox(cell), FIELD_LABELS):
+                cell = None
+            peers = lines if cell is None else [other for other in lines
+                if cell.contains((other["rect"].tl + other["rect"].br) / 2)]
+            # A label inside a value-bearing cell cannot reach neighboring cells.
+            candidates = sorted((other for other in peers if other is not line
+                and other["rect"].x0 >= area.x1
+                and min(area.y1, other["rect"].y1) > max(area.y0, other["rect"].y0)),
+                key=lambda other: other["rect"].x0)
+            if candidates and not _is_field_label(candidates[0]["text"]):
+                first = candidates[0]
+                for target in candidates:
+                    if abs(target["rect"].x0 - first["rect"].x0) > 2 or _is_field_label(target["text"]):
+                        break
+                    if target["text"].strip() != "N/A":
+                        if sensitive:
+                            rects.append(text_rect(target))
+                        else:
+                            retained_lines.add(id(target))
+            else:
+                # A stacked value must align with this label and precede any new field.
+                below = sorted((other for other in peers if other["rect"].y0 >= area.y1
+                    and (cell is not None or abs(other["rect"].x0 - area.x0) <= 2)), key=lambda other: other["rect"].y0)
+                for target in below:
+                    if _is_field_label(target["text"]) or (cell is None and target["rect"].y0 - area.y1 > 40):
+                        break
+                    if target["text"].strip() != "N/A":
+                        if sensitive:
+                            rects.append(text_rect(target))
+                        else:
+                            retained_lines.add(id(target))
+                    if cell is None:
+                        break
+
+        for line in lines:
+            if id(line) not in retained_lines:
+                for start, end in _partial_word_ranges(line["text"]):
+                    rects.append(text_rect(line, start, end))
+        _redact_pdf_text(page, rects, stats)
+        for widget in list(page.widgets() or []):
+            if any(region.intersects(widget.rect) for region in signature_regions):
+                page.delete_widget(widget)
+                stats["removed_signature_widgets"] += 1
+        for annotation in list(page.annots() or []):
+            if any(region.intersects(annotation.rect) for region in signature_regions):
+                page.delete_annot(annotation)
+        for region in signature_regions:
+            page.add_redact_annot(region, fill=(0, 0, 0))
+        if signature_regions:
+            page.apply_redactions(images=1, graphics=2)
+            stats["redacted_signatures"] += len(signature_regions)
+            stats["redacted_regions"] += len(signature_regions)
+        image_rects = []
         # Header/footer logo images: redact images in the top/bottom bands.
         for image in page.get_images(full=True):
             for rect in page.get_image_rects(image[0]):
-                if rect.y0 < page.rect.height * 0.16 or rect.y1 > page.rect.height * 0.92:
-                    rects.append(rect)
+                if (rect.y1 <= page.rect.height * 0.16
+                        or rect.y0 >= page.rect.height * 0.92):
+                    image_rects.append(rect)
                     stats["removed_header_images"] += 1
 
-        _redact_pdf_text(page, rects, stats)
+        for rect in image_rects:
+            page.add_redact_annot(rect, fill=(0, 0, 0))
+        if image_rects:
+            page.apply_redactions(images=2, graphics=0)
+            stats["redacted_regions"] += len(image_rects)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(output_path), garbage=4, deflate=True)

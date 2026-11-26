@@ -1,0 +1,170 @@
+:root {
+  --ink: #1d2939;
+  --muted: #475467;
+  --line: #d0d5dd;
+  --blue: #175cd3;
+  --red: #b42318;
+  --orange: #b54708;
+  --green: #067647;
+  --bg: #eef2f6;
+}
+* { box-sizing: border-box; }
+html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body {
+  margin: 0;
+  background: #eef2f6;
+  color: #1d2939;
+  font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif;
+  font-size: 14px;
+  line-height: 1.75;
+}
+.page {
+  max-width: 1120px;
+  margin: 28px auto;
+  padding: 52px 58px 44px;
+  background: #fff;
+  border-radius: 6px;
+  box-shadow: 0 10px 30px rgba(16, 24, 40, .10);
+}
+h1, h2, h3, h4 { color: #101828; line-height: 1.35; }
+h1 {
+  margin: 0 0 24px;
+  padding-bottom: 14px;
+  font-size: 30px;
+  border-bottom: 2px solid #101828;
+  letter-spacing: .5px;
+}
+h2 {
+  margin: 38px 0 14px;
+  padding-left: 12px;
+  font-size: 21px;
+  border-left: 5px solid #175cd3;
+}
+h3 {
+  margin: 26px 0 10px;
+  font-size: 16px;
+}
+h3.finding {
+  padding: 10px 14px;
+  background: #f8fafc;
+  border: 1px solid #e4e7ec;
+  border-left: 5px solid #175cd3;
+  border-radius: 4px;
+}
+p { margin: 8px 0; }
+strong { color: #101828; }
+code {
+  padding: 1px 5px;
+  background: #f2f4f7;
+  border: 1px solid #eaecf0;
+  border-radius: 4px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12.5px;
+}
+hr { margin: 30px 0; border: 0; border-top: 1px solid #d0d5dd; }
+blockquote {
+  margin: 16px 0;
+  padding: 10px 16px;
+  background: #f9fafb;
+  border-left: 4px solid #98a2b3;
+  color: #475467;
+}
+blockquote p { margin: 4px 0; }
+.verdict {
+  margin: 18px 0 22px;
+  padding: 14px 18px;
+  border-radius: 6px;
+  font-size: 18px;
+  font-weight: 700;
+}
+.verdict-fail { background: #fef3f2; border-left: 7px solid #b42318; color: #b42318; }
+.verdict-pass { background: #ecfdf3; border-left: 7px solid #067647; color: #067647; }
+.verdict-unknown { background: #fffaeb; border-left: 7px solid #b54708; color: #b54708; }
+.table-wrap { width: 100%; margin: 14px 0 22px; overflow-x: auto; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  background: #fff;
+}
+th, td {
+  padding: 8px 10px;
+  border: 1px solid #d0d5dd;
+  text-align: left;
+  vertical-align: top;
+}
+th { background: #f2f4f7; color: #344054; font-weight: 700; white-space: nowrap; }
+tbody tr:nth-child(even) { background: #fcfcfd; }
+tbody tr:hover { background: #f8fafc; }
+.sev, .result {
+  display: inline-block;
+  padding: 1px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.sev-a { background: #fee4e2; color: #b42318; }
+.sev-b { background: #fef0c7; color: #b54708; }
+.sev-c { background: #d1e9ff; color: #175cd3; }
+.result-pass { background: #dcfae6; color: #067647; }
+.result-fail { background: #fee4e2; color: #b42318; }
+.result-unknown { background: #f2f4f7; color: #475467; }
+.result-na { background: #f2f4f7; color: #667085; }
+ul, ol { margin: 8px 0 14px; padding-left: 24px; }
+li { margin: 4px 0; }
+li > ul, li > ol { margin: 4px 0; }
+figure.evidence {
+  margin: 14px 0 18px;
+  padding: 10px;
+  background: #fcfcfd;
+  border: 1px solid #e4e7ec;
+  border-radius: 6px;
+}
+figure.evidence img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+  border: 1px solid #d0d5dd;
+}
+figure.evidence figcaption {
+  margin-top: 8px;
+  color: #475467;
+  font-size: 12px;
+  text-align: center;
+}
+.missing-evidence {
+  padding: 8px 12px;
+  color: #b42318;
+  background: #fef3f2;
+  border-left: 4px solid #b42318;
+}
+footer {
+  margin-top: 42px;
+  padding-top: 14px;
+  border-top: 1px solid #d0d5dd;
+  color: #667085;
+  font-size: 12px;
+  text-align: right;
+}
+@media print {
+  body { background: #fff; }
+  .page { max-width: none; margin: 0; padding: 0; box-shadow: none; border-radius: 0; }
+  h2 { page-break-after: avoid; }
+  h3.finding { page-break-after: avoid; }
+  tr { page-break-inside: avoid; }
+  .table-wrap { overflow: visible; }
+  @page { size: A4; margin: 14mm; }
+}
+.check-point { margin: 22px 0 30px; }
+.check-point h3 { margin: 0; padding: 12px 14px; background: #eaf1fa; border: 1px solid #9fb5d1; color: #17365d; }
+.field-table { margin: 0; }
+.field-table th { width: 22%; white-space: normal; background: #f3f6fa; color: #344054; }
+.field-table td { width: 78%; overflow-wrap: anywhere; }
+.check-point .evidence { margin-top: 10px; }
+.finding-point { page-break-before: always; }
+thead { display: table-header-group; }
+th, td { overflow-wrap: anywhere; }
+h1, h2, h3 { break-after: avoid; }
+figure.evidence { break-inside: avoid; }

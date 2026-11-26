@@ -15,6 +15,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 import _rules  # noqa: E402
 import check_coverage  # noqa: E402
+import verify_findings  # noqa: E402
 from rules_compile import compile_pack, slugify  # noqa: E402
 
 
@@ -158,6 +159,225 @@ def test_extra_pack_requires_coverage_row(tmp_path):
 
     problems = check_coverage.check_report(report, ruleset)
     assert any("missing coverage rows" in problem and "X01" in problem for problem in problems)
+
+
+def test_rule_ids_over_99_compile_load_and_appear_in_coverage(tmp_path):
+    rules_dir = tmp_path / "rules"
+    shutil.copytree(SKILL_ROOT / "rules" / "builtin", rules_dir / "builtin")
+    pack_dir = rules_dir / "packs" / "large-customer"
+    source = tmp_path / "large-rules.md"
+    rows = [
+        "| 规则ID | 模块 | 检查项 | 判定规则（不通过条件） | 建议等级 | 取证位置 | 适用范围 |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    ids = [f"X{index:02d}" for index in range(1, 102)]
+    rows.extend(
+        f"| {rule_id} | 客户要求 | 检查项 {rule_id} | 条件 {rule_id} | B | 报告页 | 单份 |"
+        for rule_id in ids
+    )
+    source.write_text("\n".join(rows), encoding="utf-8")
+    pack = compile_pack(source, "large-customer", pack_dir)
+
+    assert [rule["id"] for rule in pack["rules"]] == ids
+    pack_path = pack_dir / "pack.json"
+    stored = json.loads(pack_path.read_text(encoding="utf-8"))
+    stored["status"] = "active"
+    pack_path.write_text(json.dumps(stored, ensure_ascii=False), encoding="utf-8")
+    (rules_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "builtin": "builtin/rules.json",
+                "packs": ["packs/large-customer"],
+                "allow_overrides": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    ruleset = _rules.load_rules(rules_dir)
+    assert [rule_id for rule_id in ruleset.ids if rule_id.startswith("X")] == ids
+
+    report = tmp_path / "report.md"
+    rows = [
+        f"| {rule_id} | 模块 | 检查项 | B | 通过 | 证据 |" for rule_id in ruleset.ids
+    ]
+    summary = "\n".join(
+        [
+            "| 等级 | 数量 |",
+            "| --- | ---: |",
+            "| A · 严重 | 0 |",
+            "| B · 主要 | 0 |",
+            "| C · 次要 | 0 |",
+            "| 不适用 | 0 |",
+        ]
+    )
+    report.write_text("**总评：通过**\n\n" + "\n".join(rows) + "\n\n" + summary, encoding="utf-8")
+    assert check_coverage.check_report(report, ruleset) == []
+
+
+def test_coverage_checker_preserves_review_without_forcing_failure(tmp_path):
+    ruleset = _rules.load_rules()
+    coverage = [
+        f"| {rule_id} | 模块 | 检查项 | {_rules.FALLBACK_SEVERITY[rule_id]} | "
+        f"{'证据不足' if rule_id == 'R01' else '通过'} | 证据 |"
+        for rule_id in ruleset.ids
+    ]
+    summary = [
+        "| 等级 | 数量 |",
+        "| --- | ---: |",
+        "| A · 严重 | 0 |",
+        "| B · 主要 | 1 |",
+        "| C · 次要 | 0 |",
+        "| 不适用 | 0 |",
+    ]
+    report = tmp_path / "review.md"
+    report.write_text(
+        "\n".join(
+            [
+                "**总评：待复核**",
+                *coverage,
+                "| 问题 | 等级 | 页码 | 位置 | 说明 |",
+                "| --- | --- | --- | --- | --- |",
+                "| F-001001 | R01/B | 1 | 第1页记录区域 | 待复核 | 截图 |",
+                "### F-001001 [B] 证据不足（R01）",
+                "- **页码**：1",
+                "- **位置**：第1页记录区域",
+                "- **原文上下文**：温度记录",
+                "- **不规范说明**：文本来源不足以确认",
+                *summary,
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert check_coverage.check_report(report, ruleset) == []
+
+    report_text = report.read_text(encoding="utf-8")
+    report_text = report_text.replace("**总评：待复核**", "**总评：不通过**")
+    report_text = report_text.replace(
+        "| R01 | 模块 | 检查项 | B | 证据不足 | 证据 |",
+        "| R01 | 模块 | 检查项 | B | 不通过（不合格） | 证据 |",
+    )
+    report.write_text(report_text, encoding="utf-8")
+    assert check_coverage.check_report(report, ruleset) == []
+
+    duplicate_and_missing = [
+        line for line in report.read_text(encoding="utf-8").splitlines()
+        if not line.startswith("| R19 |")
+    ]
+    duplicate_and_missing.append("| R01 | 模块 | 重复项 | B | 通过 | 证据 |")
+    report.write_text("\n".join(duplicate_and_missing), encoding="utf-8")
+    problems = check_coverage.check_report(report, ruleset)
+    assert any("R01: duplicate coverage row" in problem for problem in problems)
+    assert any("missing coverage rows" in problem and "R19" in problem for problem in problems)
+
+
+def test_finding_verifier_keeps_uncertain_coverage_as_review_and_decodes_small_image(
+    tmp_path, monkeypatch
+):
+    import base64
+
+    report = tmp_path / "report.md"
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    (evidence / "tiny.png").write_bytes(
+        base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/"
+            "pL8AAAAASUVORK5CYII="
+        )
+    )
+    report.write_text(
+        "\n".join(
+            [
+                "**总评：待复核**",
+                "| R02 | 模块 | 检查项 | A | 证据不足 | 证据 |",
+                "### F-001001 [B] 资料受限待复核（R02）",
+                "- **页码**：1",
+                "- **位置**：第1页记录区域",
+                "- **原文上下文**：",
+                "“温度记录”",
+                "- **不规范说明**：当前来源不足以确认",
+                "![证据截图](evidence/tiny.png)",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    source = tmp_path / "source.md"
+    source.write_text("## Page 1\n温度记录\n", encoding="utf-8")
+    result_json = tmp_path / "verify.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "verify_findings.py",
+            str(report),
+            "--source",
+            str(source),
+            "--evidence",
+            str(evidence),
+            "--json",
+            str(result_json),
+        ],
+    )
+
+    original_report = report.read_bytes()
+    assert verify_findings.main() == 0
+    assert report.read_bytes() == original_report
+    result = json.loads(result_json.read_text(encoding="utf-8"))
+    assert result["counts"] == {"PASS": 0, "REVIEW": 1, "FAIL": 0}
+    assert "证据不足" in result["results"][0]["reasons"][0]
+
+    report_text = report.read_text(encoding="utf-8").replace(
+        "| R02 | 模块 | 检查项 | A | 证据不足 | 证据 |",
+        "| R02 | 模块 | 检查项 | A | 不通过（不合格） | 证据 |",
+    )
+    report.write_text(report_text, encoding="utf-8")
+    assert verify_findings.main() == 0
+    result = json.loads(result_json.read_text(encoding="utf-8"))
+    assert result["counts"] == {"PASS": 1, "REVIEW": 0, "FAIL": 0}
+
+    (evidence / "tiny.png").write_bytes(b"invalid image")
+    assert verify_findings.main() == 1
+    result = json.loads(result_json.read_text(encoding="utf-8"))
+    assert result["counts"]["FAIL"] == 1
+    assert any("无法解码" in reason for reason in result["results"][0]["reasons"])
+
+
+def test_findings_and_coverage_recognize_extended_rule_and_finding_ids():
+    finding = verify_findings.parse_findings(
+        ["### F-1000-1001 [B] extended rule finding（X100）", "- **页码**：8"]
+    )
+    assert len(finding) == 1
+    assert finding[0]["id"] == "F-1000-1001"
+    assert finding[0]["rule"] == "X100"
+    assert verify_findings.coverage_results(["| X100 | 模块 | 检查项 | B | 不通过 | 证据 |"])["X100"] == "不通过"
+    assert check_coverage.FINDING_RE.match(
+        "### F-1000-1001 [B] extended rule finding（X100）"
+    ).groups()[3] == "X100"
+
+    report_text = "| F-1000-1001 | 不通过 | finding | page 8 | detail |"
+    assert check_coverage.OVERVIEW_RE.match(report_text).group(1) == "F-1000-1001"
+    legacy = verify_findings.parse_findings(
+        ["### F-001001 [B] legacy finding（X100）"]
+    )
+    assert legacy[0]["id"] == "F-001001"
+    assert check_coverage.OVERVIEW_RE.match(
+        "| F-001001 | 不通过 | finding | page 8 | detail |"
+    ).group(1) == "F-001001"
+    short_legacy = verify_findings.parse_findings(
+        ["### F-01 [B] short legacy finding（X100）"]
+    )
+    assert short_legacy[0]["id"] == "F-01"
+    assert check_coverage.OVERVIEW_RE.match(
+        "| F-01 | 不通过 | finding | page 8 | detail |"
+    ).group(1) == "F-01"
+    separated_legacy = verify_findings.parse_findings(
+        ["### F-1-1 [B] separated legacy finding（X100）"]
+    )
+    assert separated_legacy[0]["id"] == "F-1-1"
+    assert check_coverage.OVERVIEW_RE.match(
+        "| F-1-1 | 不通过 | finding | page 8 | detail |"
+    ).group(1) == "F-1-1"
 
 
 def test_slugify_falls_back_to_hash_for_non_ascii_names():

@@ -31,6 +31,9 @@ def test_manifest_declares_v1_extension() -> None:
     assert nav["access"] == "user"
     assert (ROOT / "ui" / nav["entry"]).is_file()
     assert (ROOT / nav["icon_path"]).is_file()
+    fields = {field["name"]: field for field in manifest["config_schema"]["fields"]}
+    assert set(fields) == {"reports_dir", "standards_dir"}
+    assert all(field["required"] is False for field in fields.values())
 
 
 def test_runtime_manifest_routes_are_consistent() -> None:
@@ -40,6 +43,9 @@ def test_runtime_manifest_routes_are_consistent() -> None:
 
     assert runtime["version"] == 1
     assert runtime["routes"]
+    for route in runtime["routes"]:
+        if route["id"] in {"documents.upload", "standards.upload"}:
+            assert route["max_body_bytes"] == 256 * 1024 * 1024
     sys.path.insert(0, str(ROOT / "api"))
     for route in runtime["routes"]:
         assert route["capability"] in capabilities

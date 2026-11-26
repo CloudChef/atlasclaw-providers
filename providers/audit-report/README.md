@@ -7,7 +7,9 @@ Provider-owned document workspace for third-party inspection reports.
 - Backend API: `runtime-api.json` → `api/handlers.py`
 - Skill: `skills/audit-report/` (rule references + rule packs + extract/render scripts)
 - Rules: `skills/audit-report/rules/` (builtin 19 + active packs from `config.json`)
-- Pipeline: `api/audit_service.py` + `api/batch_audit.py`
+- Pipeline: `api/audit_service.py` → skill `scripts/run_document_audit.py`
+- Legacy `api/batch_audit.py` utilities remain for existing rule-pack and
+  historical-result compatibility; new audits use the skill workflow above.
 
 ## API
 
@@ -22,51 +24,91 @@ Prefix: `/api/providers/audit-report/default`
 | GET | `/documents/{id}/file` | Original file |
 | GET | `/documents/{id}/results` | Per-rule verdicts for in-page result view |
 | GET | `/documents/{id}/evidence/{name}` | Rendered evidence screenshot for one finding |
-| GET | `/documents/{id}/report` | Generated HTML report (inline preview) |
-| GET | `/documents/{id}/report/download` | Generated HTML report (attachment) |
+| GET | `/documents/{id}/desensitized` | Prepared PDF (inline preview) |
+| GET | `/documents/{id}/desensitized/download` | Prepared PDF (attachment) |
+| GET | `/documents/{id}/report` | Audit PDF, or legacy HTML (inline preview) |
+| GET | `/documents/{id}/report/download` | Audit PDF, or legacy HTML (attachment) |
 | DELETE | `/documents/{id}` | Delete record and files |
 | GET | `/standards` | List uploaded audit standards |
-| POST | `/standards` | Upload a rule document (PDF/DOCX/MD/TXT) and compile it |
+| POST | `/standards` | Upload shared references (PDF/DOCX/MD/TXT/Excel) for local reading |
+| POST | `/standards/{id}/refresh` | Read a shared reference again |
 | POST | `/standards/{id}/recompile` | Recompile one standard into a rule pack |
 | GET | `/standards/{id}/file` | Download a standard file |
 | DELETE | `/standards/{id}` | Delete a standard, its pack and config entry |
 
 ## Storage
 
-- Per-user data: `<workspace>/.provider-data/audit-report/<tenant>/<user>/`
-- Per-user index: `audit.db` (provider-owned SQLite)
-- Per-user files: `documents/<id>/original.pdf`, `documents/<id>/report.html`,
-  `documents/<id>/evidence/F-*.png` (one rendered page crop per finding)
-- Shared library: `<workspace>/.provider-data/audit-report/_shared/`
-  - `standards/<id>/original.*` + `standard.json` (rule document and compile state)
+- Per-user default data: `context.host.data_dir` containing `audit.db` and `documents/<id>/`
+- With `reports_dir`: `<reports_dir>/<tenant>/<user>/` containing `audit.db` and `documents/<id>/`
+- Prepared PDF: `documents/<id>/prepared/desensitized.pdf`
+- Each new attempt: `documents/<id>/runs/<attempt-id>/` containing the private
+  library snapshot, model originals, workflow manifests, screenshots, and PDF.
+- Historical `documents/<id>/report.html` and legacy results remain readable.
+- Shared library: `context.host.shared_data_dir` by default, or the configured `standards_dir`
+  - `standards/<id>/original.*` + `standard.json` (reference, read state, and optional legacy compile state)
   - `rules/config.json` (active packs) and `rules/packs/<pack>/` (compiled rules)
+  - With a configured shared root, `rules/builtin/rules.json` stores the builtin 19 rules; an existing file is kept.
 - The shared library is visible to every user who can open the provider; it is
   never stored under a user directory.
 
+To store provider documents and standards outside the workspace, set these optional
+absolute paths on the `default` instance in `/opt/atlasclaw/atlasclaw.json`:
+
+```json
+{
+  "service_providers": {
+    "audit-report": {
+      "default": {
+        "reports_dir": "/opt/atlasclaw/documents/provider/audit-report/reports",
+        "standards_dir": "/opt/atlasclaw/documents/provider/audit-report/standards"
+      }
+    }
+  }
+}
+```
+
+Blank values preserve the Host Services storage locations. The service account must
+have read/write access. Configured reports storage partitions the entire per-user
+workspace, including `audit.db`, as `reports/<tenant>/<user>/...`. Configured shared
+storage keeps the existing `standards/<id>/` plus `rules/` layout.
+Changing these settings does not migrate existing data or rewrite stored file paths;
+stop AtlasClaw and migrate the provider index and files before enabling new roots.
+
 ## Dependencies
 
-`pymupdf`, `python-docx` — declared in `skills/audit-report/requirements.txt` and
-installed in the AtlasClaw runtime virtualenv.
+Python dependencies (`pymupdf`, `python-docx`, `openpyxl`, `httpx`, and
+`python-dotenv`) come from AtlasClaw's runtime/build. LibreOffice converts Word;
+CJK fonts support Chinese PDF output. The Provider does not install packages.
 
 ## Notes
 
 - Single audit per user at a time; concurrent requests return `409`.
-- Interrupted runs (core restart) are marked `failed` with `host_restarted`.
-- An audit loads `rules/builtin/rules.json` (19 rules) plus every active pack
-  from the shared `rules/config.json`, and passes every rule to the model in
-  batches of seven; packs come from standards uploaded in the 审核标准库 page.
-- Audits are stateless batched runs (`agent.start_run`, no pinned skill), so
-  long documents cannot exhaust one agent loop; each batch is retried once and
-  unparseable or missing verdicts become `REVIEW` instead of a lost report.
+- In a deployment with one AtlasClaw worker per workspace, interrupted audits are
+  marked `failed` with `host_restarted` when viewed or when the user starts another audit.
+- Every audit first desensitizes the report and snapshots all shared references
+  and enabled rule packs. Excel is parsed locally. All business checking is done
+  by the LLM, including measurements, dates, standards, and ledger comparisons.
+- The skill identifies projects from complete extracted text, audits each project
+  with its full native text, preceding text, parsed materials, and all enabled
+  rules, then requests a global Markdown report. Every accepted project original
+  is appended. Numeric and other business judgments remain with the LLM.
+- LLM requests use the configured Core model. The audit sends text and parsed
+  source positions only; it does not submit report-page images. Findings that
+  require visual evidence are marked as evidence-limited, without claiming the
+  original lacks content merely because it was redacted or not extracted.
+  Incomplete or failed calls prevent report publication; no page or rule is
+  silently skipped to produce a pass.
+- Each uploaded standard owns its compiled pack. A failed recompile preserves the
+  previously active pack. Recompile legacy same-name uploads to restore their
+  individual rule sets if an earlier upload overwrote the original pack.
 - Rule packs: drop a rule document into `skills/audit-report/rules/_inbox/`,
   run `rules_sync.py` then `rules_validate.py <pack.json> --activate`. Only
   packs listed in `rules/config.json` are loaded; draft packs stay inactive.
-  A broken or duplicate pack is logged and skipped instead of failing the audit.
-- Documents without a readable text layer fail fast with `no_text_layer`
-  (no OCR in the runtime); seal/signature/photo rules are text-only and are
-  reported as `REVIEW` when the evidence is visual.
-- Evidence screenshots: after the verdicts are merged, PDF findings are rendered
-  to `documents/<id>/evidence/F-*.png` (quote region, falling back to the full
-  page), embedded as base64 in the HTML report and shown as thumbnails in the
-  in-page result view. DOCX findings keep text-only evidence because the runtime
-  has no page renderer for Word documents.
+  Ordinary shared references do not need compilation. An unreadable enabled
+  source or missing shared file fails snapshot preparation explicitly.
+- Evidence screenshots use model-cited physical PDF pages, including listed
+  page ranges and continuation headers. Failed quote positioning falls back to
+  the cited full page. Local code inserts screenshots and converts Markdown to
+  PDF without changing the model's business findings.
+- The prepared PDF remains downloadable after a later audit failure. A re-audit
+  clears the prior report reference and publishes only its own successful PDF.

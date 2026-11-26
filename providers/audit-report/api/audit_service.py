@@ -1,11 +1,9 @@
 # -*- coding: utf-8 -*-
 # Copyright 2026 Qianyun, Inc., www.cloudchef.io, All rights reserved.
-"""Audit orchestration through the AtlasClaw provider Agent Host.
+"""Run the audit-report skill through the AtlasClaw configured text model.
 
-The provider never asks one agent run to audit a whole document. It extracts the
-text itself, then runs small rule batches as stateless model calls and assembles
-the HTML report deterministically. This keeps long or large documents bounded
-and guarantees a downloadable report whenever the text layer is readable.
+Each attempt prepares a private desensitized PDF and shared-library snapshot,
+then delegates business judgment to skill LLM calls and publishes its PDF.
 """
 
 from __future__ import annotations
@@ -15,6 +13,8 @@ import json
 import logging
 import shutil
 import sys
+import uuid
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -26,155 +26,186 @@ if str(_API_DIR) not in sys.path:
 import batch_audit
 import evidence as evidence_module
 import standards_service
+from storage import report_data_dir
 from errors import ProviderError
 from store import DocumentStore
 
 logger = logging.getLogger(__name__)
-_TASKS: set[asyncio.Task] = set()
+_TASKS: dict[tuple[Path, str], tuple[str, asyncio.Task]] = {}
 
-EXTRACT_TIMEOUT_SECONDS = 1800
-BATCH_TIMEOUT_SECONDS = 900
-RENDER_TIMEOUT_SECONDS = 180
 BATCH_ATTEMPTS = 3
 
 
-async def start_document_audit(host: Any, store: DocumentStore, document: dict[str, Any]) -> None:
-    """Start the deterministic audit pipeline and persist its initial state."""
-    agent = getattr(host, "agent", None)
-    if agent is None:
-        raise ProviderError("Agent runtime is unavailable", status_code=503, code="agent_unavailable")
+def _require_model_bridges(context: Any) -> None:
+    """Fail before preparation when this scripted workflow lacks a model bridge."""
+    if not callable(getattr(context, "run_text", None)):
+        raise ProviderError(
+            "Text model bridge is unavailable",
+            status_code=503,
+            code="text_model_unavailable",
+        )
+
+
+async def start_document_audit(context: Any, store: DocumentStore, document: dict[str, Any]) -> None:
+    """Start one isolated LLM audit attempt in the background."""
+    host = getattr(context, "host", context)
+    _require_model_bridges(context)
     file_path = Path(str(document.get("file_path") or ""))
     if not file_path.is_file():
         raise ProviderError("Original report file is missing", status_code=404, code="file_not_found")
-    await asyncio.to_thread(
-        store.update,
-        document["id"],
-        status="running",
-        progress=2,
-        progress_text="正在准备审核",
-        run_id="",
-        error_code="",
-        error_message="",
-        report_path="",
-        report_name="",
-        findings_total=0,
-        findings_review=0,
-        grade_summary={},
-    )
-    task = asyncio.create_task(_run_document_audit(host, store, document))
-    _TASKS.add(task)
-    task.add_done_callback(_TASKS.discard)
+    key = (store.db_path.resolve(), str(document["id"]))
+    active = _TASKS.get(key)
+    if active is not None and not active[1].done():
+        raise ProviderError("An audit is already running for this document.", status_code=409, code="audit_already_running")
+
+    attempt_id = uuid.uuid4().hex
+    attempt_dir = report_data_dir(host) / "documents" / str(document["id"]) / "runs" / attempt_id
+
+    async def run() -> None:
+        try:
+            await _run_document_audit(context, store, document, attempt_dir)
+        finally:
+            active_task = _TASKS.get(key)
+            if active_task is not None and active_task[1] is asyncio.current_task():
+                _TASKS.pop(key, None)
+
+    async def prepare() -> None:
+        await asyncio.to_thread(store.fail_interrupted, document["user_id"], document)
+        await asyncio.to_thread(
+            store.update, document["id"], status="running", progress=2,
+            progress_text="正在准备审核", run_id="", error_code="", error_message="",
+            report_path="", report_name="", desensitized_path="", desensitized_name="",
+            findings_total=0, findings_review=0, grade_summary={},
+        )
+        _TASKS[key] = (document["id"], asyncio.create_task(run()))
+
+    task = asyncio.create_task(prepare())
+    _TASKS[key] = (document["id"], task)
+    try:
+        await asyncio.shield(task)
+    finally:
+        if task.done() and _TASKS.get(key) == (document["id"], task):
+            _TASKS.pop(key)
 
 
-async def reconcile_document(host: Any, store: DocumentStore, document: dict[str, Any]) -> dict[str, Any]:
-    """Mark interrupted provider runs as failed when the host no longer knows them."""
+async def reconcile_document(store: DocumentStore, document: dict[str, Any]) -> dict[str, Any]:
+    """Recover a document whose owning pipeline is no longer running."""
     if document.get("status") != "running":
         return document
-    run_id = str(document.get("run_id") or "")
-    agent = getattr(host, "agent", None)
-    snapshot = await agent.get_run(run_id) if agent is not None and run_id else {}
-    status = str(snapshot.get("status") or "")
-    if status not in {"failed", "cancelled"}:
+    key = (store.db_path.resolve(), str(document.get("id") or ""))
+    active = _TASKS.get(key)
+    if active is not None and active[0] == document["id"] and not active[1].done():
         return document
-    error = snapshot.get("error") or {}
-    cancelled = status == "cancelled"
-    return await asyncio.to_thread(
-        store.update,
-        document["id"],
-        status="failed",
-        progress_text="审核已取消" if cancelled else "审核中断",
-        error_code="run_cancelled" if cancelled else "host_restarted",
-        error_message=str(error.get("message") or "The audit run is no longer available.")[:500],
-    ) or document
+    await asyncio.to_thread(store.fail_interrupted, document["user_id"], document)
+    return await asyncio.to_thread(store.get, document["id"], document["user_id"]) or document
 
 
-async def _run_document_audit(host: Any, store: DocumentStore, document: dict[str, Any]) -> None:
-    """Extract, judge every rule batch and assemble the final report."""
+async def _run_document_audit(context: Any, store: DocumentStore, document: dict[str, Any], attempt_dir: Path | None = None) -> None:
+    """Prepare a private snapshot, run the skill LLM workflow, and persist its PDF."""
     document_id = str(document["id"])
-    started_at = datetime.now().astimezone()
+    host = getattr(context, "host", context)
     try:
-        doc_dir = Path(host.data_dir) / "documents" / document_id
-        extract_dir = doc_dir / "extract"
-        await _progress(store, document_id, 4, "正在提取文档文本")
-        markdown_path, manifest = await _extract_document(document, extract_dir)
-        text = markdown_path.read_text(encoding="utf-8", errors="replace")
-        if not manifest.get("has_text_layer", True):
-            raise ProviderError(
-                "报告没有可读取的文本层，无法自动判定；请提供可复制文字的 PDF 或 Word 文件",
-                status_code=422,
-                code="no_text_layer",
+        _require_model_bridges(context)
+        if attempt_dir is None:
+            attempt_dir = report_data_dir(host) / "documents" / document_id / "runs" / uuid.uuid4().hex
+        await asyncio.to_thread(attempt_dir.mkdir, parents=True, exist_ok=True)
+        doc_dir = report_data_dir(host) / "documents" / document_id
+        skill_dir = _skill_dir()
+        scripts_dir = skill_dir / "scripts"
+        if str(scripts_dir) not in sys.path:
+            sys.path.insert(0, str(scripts_dir))
+        import audit_preparation
+        import run_document_audit
+        prepared_dir = doc_dir / f"prepared-v{audit_preparation.PREPARATION_VERSION}"
+        text_system_prompt = (skill_dir / "references" / "audit-system.md").read_text(encoding="utf-8")
+
+        await _progress(store, document_id, 4, "正在脱敏并准备报告")
+        prepared = await asyncio.to_thread(audit_preparation.prepare_report, document["file_path"], prepared_dir)
+        prepared_pdf = Path(str(prepared.get("pdf") or "")).resolve()
+        try:
+            prepared_pdf.relative_to(report_data_dir(host).resolve())
+        except ValueError as exc:
+            raise ProviderError("Prepared PDF is outside provider storage", status_code=500, code="prepared_path_invalid") from exc
+        if not prepared_pdf.is_file():
+            raise ProviderError("Desensitized PDF was not created", status_code=500, code="desensitize_failed")
+        await asyncio.to_thread(
+            store.update, document_id, desensitized_path=str(prepared_pdf),
+            desensitized_name=f"{Path(str(document.get('file_name') or 'report')).stem}_脱敏.pdf",
+            progress=10, progress_text="脱敏 PDF 已就绪，正在读取共享资料",
+        )
+
+        library_dir = attempt_dir / "library"
+        snapshot = await asyncio.to_thread(standards_service.snapshot_audit_library, host, library_dir)
+        material_paths = [Path(path) for path in snapshot["material_paths"]]
+        rules_dir = Path(snapshot["rules_dir"])
+        await _progress(store, document_id, 15, f"资料快照完成，共 {len(material_paths)} 份参考资料")
+
+        async def submit(prompt: str) -> str:
+            runner = getattr(context, "run_text", None)
+            if not callable(runner):
+                raise ProviderError(
+                    "Text model bridge is unavailable",
+                    status_code=503,
+                    code="text_model_unavailable",
+                )
+            answer = await runner(
+                prompt=prompt,
+                system_prompt=text_system_prompt,
             )
-        chunks, truncated_note = batch_audit.chunk_document(text)
-        if not chunks:
-            raise ProviderError("未能从文档中提取到可用文本", status_code=422, code="extract_empty")
-
-        config_path = await asyncio.to_thread(standards_service.ensure_rules_config, host)
-        rules, rule_packs = batch_audit.load_rule_set(_skill_dir(), rules_dir=config_path.parent)
-        if not rules:
-            raise ProviderError("审核规则未能加载", status_code=500, code="rules_missing")
-        batches = batch_audit.rule_batches(rules)
-        total_pages = int(manifest.get("page_count") or document.get("pages") or 0)
-        total_steps = len(chunks) * len(batches)
-        done = 0
-        verdicts: list[batch_audit.Verdict] = []
-        for chunk in chunks:
-            for batch in batches:
-                label = f"{batch[0].rule_id}–{batch[-1].rule_id}"
-                await _progress(
-                    store, document_id, 8 + int(74 * done / total_steps),
-                    f"判定 {label}（{chunk.label}）",
+            answer = str(answer or "")
+            if not answer.strip():
+                raise ProviderError(
+                    "Text model bridge returned an empty response",
+                    status_code=502,
+                    code="text_model_empty",
                 )
-                verdicts.extend(
-                    await _run_batch(
-                        host, store, document_id, batch, chunk, len(chunks), total_pages, rule_packs,
-                    )
-                )
-                done += 1
+            return answer
 
-        results = batch_audit.merge_results(rules, verdicts)
-        summary = batch_audit.summarize(results)
-        finished_at = datetime.now().astimezone()
-        findings = batch_audit.finding_list(results)
-        await _progress(store, document_id, 88, "正在生成证据截图")
-        await asyncio.to_thread(shutil.rmtree, doc_dir / "evidence", True)
-        evidence = await asyncio.to_thread(evidence_module.render_evidence, document, doc_dir, findings)
-        markdown = batch_audit.build_markdown(
-            document=document,
-            results=results,
-            manifest=manifest,
-            started_at=started_at,
-            finished_at=finished_at,
-            truncated_note=truncated_note,
-            chunk_count=len(chunks),
-            rule_packs=rule_packs,
-            evidence=evidence,
-        )
-        doc_dir.mkdir(parents=True, exist_ok=True)
-        source = doc_dir / "audit-report.md"
-        source.write_text(markdown, encoding="utf-8")
-        (doc_dir / "verification.json").write_text(
-            json.dumps(
-                batch_audit.build_verification(results, evidence=evidence),
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
+        async def on_progress(event: dict[str, Any]) -> None:
+            stage = str(event.get("stage") or "audit")
+            phase = stage.split(":", 1)[0]
+            completed = int(event.get("completed") or 0)
+            total = max(1, int(event.get("total") or 1))
+            ratio = min(1.0, max(0.0, completed / total))
+            labels = {"index": "识别项目目录", "project-review": "审核检测项目",
+                      "projects": "准备逐项目审核",
+                      "summary": "全局审核与汇总", "delivery": "生成审核 PDF",
+                      "complete": "审核处理完成"}
+            progress = {
+                "index": 35 + int(3 * ratio),
+                "projects": 38 + int(47 * ratio),
+                "summary": 85 + int(8 * ratio),
+                "delivery": 93 + int(5 * ratio),
+                "complete": 98,
+            }.get(phase)
+            await _progress(store, document_id, progress,
+                            f"{labels.get(phase, stage)}（{completed}/{total}）{str(event.get('message') or '')[:100]}")
 
-        await _progress(store, document_id, 92, "正在生成 HTML 报告")
-        report_path = doc_dir / "report.html"
-        await _render_report(source, report_path)
+        await run_document_audit.audit_prepared(
+            prepared_pdf, material_paths, attempt_dir, submit,
+            on_progress=on_progress, rules_dir=rules_dir,
+        )
+        report_path = (attempt_dir / "audit-report.pdf").resolve()
+        raw_path = attempt_dir / "audit-raw.md"
+        if not report_path.is_file() or report_path.stat().st_size == 0 or not raw_path.is_file():
+            raise RuntimeError("Skill audit did not create complete PDF and Markdown outputs")
+        raw_markdown = raw_path.read_text(encoding="utf-8")
+        from _rules import load_rules
+        verification, summary = _llm_report_metadata(raw_markdown, load_rules(rules_dir).ids)
+        (attempt_dir / "verification.json").write_text(
+            json.dumps(verification, ensure_ascii=False, indent=2), encoding="utf-8",
+        )
         await asyncio.to_thread(
             store.update,
             document_id,
             status="completed",
             progress=100,
             progress_text="审核完成",
-            findings_total=int(summary["findings_total"]),
-            findings_review=int(summary["findings_review"]),
+            findings_total=summary["findings_total"],
+            findings_review=summary["findings_review"],
             grade_summary=summary["grade_summary"],
             report_path=str(report_path),
-            report_name="audit-report.html",
+            report_name="audit-report.pdf",
             error_code="",
             error_message="",
         )
@@ -202,6 +233,173 @@ async def _run_document_audit(host: Any, store: DocumentStore, document: dict[st
         )
 
 
+def _llm_report_metadata(markdown: str, required_rule_ids: list[str] | tuple[str, ...]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Read explicit LLM verdict/coverage metadata from the main report only."""
+    main = re.split(r"(?m)^#\s*附录：分项目审核原文\s*$", markdown, maxsplit=1)[0]
+    verdict_match = re.search(
+        r"(?m)^\s*\*\*总评\s*[：:]\s*([^*\n]+?)\s*\*\*",
+        main,
+    )
+    if not verdict_match:
+        raise RuntimeError("LLM report is missing its explicit overall verdict")
+    verdict = verdict_match.group(1).strip()
+    if not verdict:
+        raise RuntimeError("LLM report is missing its explicit overall verdict")
+    coverage_match = re.search(r"(?ms)^#{1,2}\s*[^\n]*检查覆盖表[^\n]*\n(.*?)(?=^#{1,2}\s|\Z)", main)
+    if not coverage_match:
+        raise RuntimeError("LLM report is missing its main coverage table")
+    rows: list[dict[str, str]] = []
+    for line in coverage_match.group(1).splitlines():
+        if not line.lstrip().startswith("|"):
+            continue
+        cells = [re.sub(r"[`*_]", "", cell.strip()) for cell in line.strip().strip("|").split("|")]
+        if len(cells) < 6 or cells[0] not in required_rule_ids:
+            continue
+        if not re.match(r"^(通过|不通过|不适用|待复核|证据不足)", cells[4]):
+            continue
+        rows.append({"rule": cells[0], "name": cells[2], "severity": cells[3],
+                     "verdict": cells[4], "reason": cells[5]})
+    row_ids = [item["rule"] for item in rows]
+    duplicates = sorted({rule_id for rule_id in row_ids if row_ids.count(rule_id) > 1})
+    if duplicates:
+        raise RuntimeError(f"LLM report contains duplicate coverage rows: {', '.join(duplicates)}")
+    if not set(required_rule_ids).issubset(set(row_ids)):
+        missing = sorted(set(required_rule_ids) - set(row_ids))
+        raise RuntimeError(f"LLM report is missing coverage rows: {', '.join(missing)}")
+    rule_pattern = "|".join(
+        re.escape(rule_id) for rule_id in sorted(required_rule_ids, key=len, reverse=True)
+    )
+    counts = {"PASS": 0, "FAIL": 0, "REVIEW": 0, "NA": 0}
+    for row in rows:
+        raw_verdict = row["verdict"]
+        if raw_verdict.startswith("不通过"):
+            row["verdict"] = "FAIL"
+        elif raw_verdict.startswith("通过"):
+            row["verdict"] = "PASS"
+        elif raw_verdict.startswith("不适用"):
+            row["verdict"] = "NA"
+        else:
+            row["verdict"] = "REVIEW"
+        counts[row["verdict"]] += 1
+    finding_heads = list(re.finditer(r"(?m)^###\s+(F-[A-Za-z0-9-]+)(?:\s+\[([ABC])\])?\s+([^\n]+)", markdown))
+    findings_by_id: dict[str, dict[str, str]] = {}
+    for index, match in enumerate(finding_heads):
+        finding_id, severity, title = match.groups()
+        end = finding_heads[index + 1].start() if index + 1 < len(finding_heads) else len(markdown)
+        section = markdown[match.end():end]
+        rule_match = re.search(
+            rf"(?:规则号|规则)\*{{0,2}}\s*[：:]\s*[`*]*({rule_pattern})(?![A-Za-z0-9])",
+            section,
+        )
+        if not rule_match:
+            rule_match = re.search(r"[（(]([A-Z]\d{2,})[）)]", title)
+        page_match = re.search(r"(?:页码|页面)\*{0,2}\s*[：:]\s*([^\n|]+)", section)
+        summary_match = re.search(r"(?:不规范说明|问题摘要|问题)\*{0,2}\s*[：:]\s*([^\n]+)", section)
+        findings_by_id[finding_id] = {
+            "id": finding_id,
+            "rule": rule_match.group(1) if rule_match else "",
+            "severity": severity or "",
+            "title": re.sub(r"\s*[（(][A-Z]\d{2,}[）)]\s*$", "", title.strip()),
+            "page": page_match.group(1).strip() if page_match else "",
+            "problem": summary_match.group(1).strip(" `*_：:") if summary_match else title.strip(),
+        }
+    # The final LLM overview takes precedence over historical appendix grades.
+    grade_column: int | None = None
+    decision_column: int | None = None
+    reason_column: int | None = None
+    decisions: dict[str, tuple[str, str]] = {}
+    duplicate_ids: set[str] = set()
+    final_columns: dict[str, int] = {}
+    identity_column: int | None = None
+    disposition_table_seen = False
+    current_disposition_table = False
+    disposition_row_ids: set[str] = set()
+    for line in main.splitlines():
+        if not line.lstrip().startswith("|"):
+            grade_column = decision_column = reason_column = None
+            final_columns = {}
+            current_disposition_table = False
+            continue
+        cells = [re.sub(r"[`*_]", "", cell.strip()) for cell in line.strip().strip("|").split("|")]
+        decision_header = next((cell for cell in cells if re.fullmatch(r"复核结果(?:[（(][^）)]*[）)])?", cell)), None)
+        if "最终等级" in cells or "等级" in cells or decision_header is not None:
+            grade_column = cells.index("最终等级") if "最终等级" in cells else cells.index("等级") if "等级" in cells else None
+            decision_column = cells.index(decision_header) if decision_header is not None else None
+            reason_column = next((cells.index(label) for label in ("复核依据", "复核理由", "理由/依据") if label in cells), None)
+            current_disposition_table = decision_header is not None
+            disposition_table_seen = disposition_table_seen or current_disposition_table
+            identity_column = next((cells.index(label) for label in ("序号/FID", "FID", "问题编号", "问题ID", "候选编号") if label in cells), None)
+            if current_disposition_table and (identity_column is None or decision_column is None or grade_column is None):
+                raise RuntimeError("LLM report has a malformed final-disposition table schema")
+            final_columns = {
+                field: next(cells.index(label) for label in labels if label in cells)
+                for field, labels in {"rule": ("最终规则号", "规则号"), "title": ("问题摘要", "问题标题"), "page": ("页码", "PDF页码")}.items()
+                if any(label in cells for label in labels)
+            }
+            continue
+        finding_id = None
+        if current_disposition_table and identity_column is not None:
+            identity_value = cells[identity_column] if identity_column < len(cells) else ""
+            id_match = re.search(r"\bF-[A-Za-z0-9-]+\b", identity_value)
+            finding_id = id_match.group(0) if id_match else None
+            if finding_id and finding_id not in findings_by_id:
+                raise RuntimeError(f"LLM report has a final disposition without detailed evidence: {finding_id}")
+        elif not disposition_table_seen:
+            finding_id = next((cell for cell in cells if cell in findings_by_id), None)
+        if current_disposition_table and finding_id:
+            if finding_id in decisions:
+                raise RuntimeError(f"LLM report contains duplicate final dispositions: {finding_id}")
+            disposition_row_ids.add(finding_id)
+        if finding_id and decision_column is not None and decision_column < len(cells):
+            decision = cells[decision_column]
+            if current_disposition_table and not re.match(r"^(?:成立|待复核|撤回)(?:$|[（(：:\s])", decision):
+                raise RuntimeError(f"LLM report has an unrecognized final disposition for {finding_id}: {decision!r}")
+            if re.match(r"^(?:成立|待复核|撤回)(?:$|[（(：:\s])", decision):
+                reason = cells[reason_column] if reason_column is not None and reason_column < len(cells) else ""
+                decisions[finding_id] = (decision, reason)
+                grade_text = cells[grade_column] if grade_column is not None and grade_column < len(cells) else ""
+                valid_grade = re.match(r"^[ABC](?:$|\s*·|[（(])", grade_text)
+                no_grade = grade_text in {"—", "-"} and decision.startswith(("撤回", "待复核"))
+                if current_disposition_table and not (valid_grade or no_grade):
+                    raise RuntimeError(f"LLM report is missing a valid final grade for {finding_id}")
+                if (re.search(r"不另计|不再计|不重复计|合并计", decision + " " + grade_text)
+                        or re.fullmatch(r"成立[（(]重复[）)]", decision)
+                        or re.search(r"(?:本行|本条|该候选|该项)(?:不另计|不再计|不重复计)", reason)):
+                    duplicate_ids.add(finding_id)
+                for field, column in final_columns.items():
+                    if column < len(cells) and cells[column] not in {"", "—", "-"}:
+                        findings_by_id[finding_id][field] = cells[column]
+                        if field == "title":
+                            findings_by_id[finding_id]["problem"] = cells[column]
+        if finding_id and (current_disposition_table or not disposition_table_seen) and grade_column is not None and grade_column < len(cells):
+            grade = re.match(r"^([ABC])(?:$|\s*·|[（(])", cells[grade_column])
+            if grade:
+                findings_by_id[finding_id]["severity"] = grade.group(1)
+    if disposition_table_seen:
+        missing = sorted(set(findings_by_id) - set(decisions))
+        if missing:
+            raise RuntimeError(f"LLM report is missing final dispositions: {', '.join(missing)}")
+        unknown = sorted(disposition_row_ids - set(findings_by_id))
+        if unknown:
+            raise RuntimeError(f"LLM report has final dispositions without detailed evidence: {', '.join(unknown)}")
+    withdrawn_findings, review_findings, duplicate_findings = [], [], []
+    for finding_id, (decision, reason) in decisions.items():
+        if finding_id in duplicate_ids or decision.startswith(("撤回", "待复核")):
+            finding = findings_by_id.pop(finding_id)
+            finding.update({"review_status": decision, "review_reason": reason})
+            destination = duplicate_findings if finding_id in duplicate_ids else withdrawn_findings if decision.startswith("撤回") else review_findings
+            destination.append(finding)
+    ids = list(findings_by_id)
+    grade_summary = {grade: sum(1 for item in findings_by_id.values() if item["severity"] == grade) for grade in ("A", "B", "C")}
+    verification = {"verdict": verdict, "counts": counts, "results": rows,
+                    "findings": list(findings_by_id.values()), "finding_ids": ids}
+    if decisions:
+        verification.update({"withdrawn_findings": withdrawn_findings, "review_findings": review_findings,
+                             "duplicate_findings": duplicate_findings})
+    summary = {"findings_total": len(ids), "findings_review": counts["REVIEW"], "grade_summary": grade_summary}
+    return verification, summary
+
+
 async def _run_batch(
     host: Any,
     store: DocumentStore,
@@ -216,6 +414,11 @@ async def _run_batch(
     agent = getattr(host, "agent", None)
     if agent is None:
         raise ProviderError("Agent runtime is unavailable", status_code=503, code="agent_unavailable")
+    scripts_dir = str(_skill_dir() / "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    from audit_project_prompts import render_prompt_template
+
     collected: dict[str, batch_audit.Verdict] = {}
     retry_note = ""
     last_error = ""
@@ -228,23 +431,19 @@ async def _run_batch(
         )
         handle = await agent.start_run(
             prompt=prompt,
-            skills=(),
-            timeout_seconds=BATCH_TIMEOUT_SECONDS,
             metadata={"document_id": document_id, "rules": ",".join(rule.rule_id for rule in pending)},
         )
         await asyncio.to_thread(store.update, document_id, run_id=handle.run_id)
-        snapshot = await handle.wait(timeout=BATCH_TIMEOUT_SECONDS + 60)
+        snapshot = await handle.wait()
         if snapshot.get("status") != "succeeded":
             error = snapshot.get("error") or {}
             last_error = str(error.get("message") or error.get("code") or "run_failed")
-            retry_note = f"上一次运行失败（{last_error[:120]}），请只输出规定的 JSON 对象。"
+            retry_note = render_prompt_template("batch-error-retry.md", ERROR=last_error[:120])
         else:
             parsed = batch_audit.parse_answer(str(snapshot.get("final_answer") or ""), pending)
             collected.update({item.rule: item for item in parsed})
             last_error = "" if parsed else "model returned no parsable verdicts"
-            retry_note = (
-                "上一次输出缺少这些规则的结果或无法解析，请只输出规定 JSON，且 results 必须包含本次全部规则。"
-            )
+            retry_note = render_prompt_template("batch-missing-retry.md")
         if collected and len(collected) < len(rules):
             logger.warning(
                 "Audit batch missing rules for %s %s: %s",
@@ -281,10 +480,11 @@ async def _extract_document(document: dict[str, Any], extract_dir: Path) -> tupl
         stderr=asyncio.subprocess.PIPE,
     )
     try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=EXTRACT_TIMEOUT_SECONDS)
-    except asyncio.TimeoutError:
+        stdout, stderr = await proc.communicate()
+    except asyncio.CancelledError:
         proc.kill()
-        raise ProviderError("文档文本提取超时", status_code=504, code="extract_timeout") from None
+        await proc.communicate()
+        raise
     markdown_files = sorted(extract_dir.glob("*/document.md"), key=lambda item: item.stat().st_mtime)
     if proc.returncode != 0 or not markdown_files:
         detail = stderr.decode("utf-8", "replace").strip()[-300:] or stdout.decode("utf-8", "replace").strip()[-300:]
@@ -312,10 +512,11 @@ async def _render_report(source: Path, destination: Path) -> None:
         stderr=asyncio.subprocess.PIPE,
     )
     try:
-        _stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=RENDER_TIMEOUT_SECONDS)
-    except asyncio.TimeoutError:
+        _stdout, stderr = await proc.communicate()
+    except asyncio.CancelledError:
         proc.kill()
-        raise ProviderError("审核报告渲染超时", status_code=504, code="render_timeout") from None
+        await proc.communicate()
+        raise
     if proc.returncode != 0 or not destination.is_file():
         detail = stderr.decode("utf-8", "replace").strip()[-300:]
         raise ProviderError(f"审核报告渲染失败：{detail or 'no output'}", status_code=500, code="render_failed")

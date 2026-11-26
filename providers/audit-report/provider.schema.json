@@ -3,7 +3,7 @@
   "provider_type": "audit-report",
   "catalog": {
     "display_name": "文件审核",
-    "description": "上传检测/试验报告，执行 19 项合规审核并生成 HTML 报告。",
+    "description": "上传检测报告、检测标准和台账，由 AI 审核并下载脱敏 PDF 与审核 PDF。",
     "badge": "AUDIT",
     "icon": "AR",
     "icon_path": "assets/icon.svg",
@@ -36,6 +36,25 @@
     }
   },
   "config_schema": {
-    "fields": []
+    "fields": [
+      {
+        "name": "reports_dir",
+        "type": "text",
+        "required": false,
+        "scope": "instance",
+        "default": "",
+        "label": "Report storage directory",
+        "placeholder": "/opt/atlasclaw/documents/provider/audit-report/reports"
+      },
+      {
+        "name": "standards_dir",
+        "type": "text",
+        "required": false,
+        "scope": "instance",
+        "default": "",
+        "label": "Shared standards storage directory",
+        "placeholder": "/opt/atlasclaw/documents/provider/audit-report/standards"
+      }
+    ]
   }
 }

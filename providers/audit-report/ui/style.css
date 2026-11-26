@@ -11,6 +11,8 @@
   --audit-danger: #dc2626;
 }
 
+[hidden] { display: none !important; }
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -154,7 +156,7 @@ select {
   background: #fff;
   border: 1px solid var(--audit-border);
   border-radius: 10px;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .document-table {
@@ -199,6 +201,7 @@ select {
 
 .file-badge.docx { background: #2563eb; }
 .file-badge.md { background: #475569; }
+.file-badge.excel { background: #15803d; }
 
 .file-name {
   overflow: hidden;
@@ -233,14 +236,14 @@ select {
 
 .result-cell { color: #334155; white-space: nowrap; }
 
-.actions-cell { text-align: right; white-space: nowrap; }
+.actions-cell { text-align: right; white-space: normal; min-width: 210px; }
 
 .row-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 12px;
-  flex-wrap: nowrap;
+  gap: 6px 10px;
+  flex-wrap: wrap;
 }
 
 .action {
@@ -249,10 +252,11 @@ select {
   color: var(--audit-accent);
   font-size: 13px;
   cursor: pointer;
-  padding: 4px 2px;
+  padding: 5px 7px;
+  border-radius: 6px;
 }
 
-.action:hover { text-decoration: underline; }
+.action:hover { background: #eff6ff; text-decoration: underline; }
 
 .action.danger { color: var(--audit-danger); }
 
@@ -336,6 +340,7 @@ select {
 .modal-actions {
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: 20px;
 }
@@ -374,8 +379,14 @@ select {
 .toast[data-level="success"] { background: #15803d; }
 .toast[data-level="error"] { background: #b91c1c; }
 
-.result-card { max-width: 1000px; }
+.result-card { max-width: 1000px; max-height: calc(100vh - 48px); overflow-y: auto; }
 .result-body { max-height: 58vh; overflow: auto; margin-top: 12px; }
+.report-preview-section { margin: 14px 0 18px; }
+.report-preview-section h3 { margin: 0 0 8px; font-size: 14px; }
+.report-preview-section iframe { display: block; width: 100%; height: min(52vh, 560px); border: 1px solid var(--audit-border); border-radius: 8px; background: #fff; }
+.standard-name { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.standard-name small { color: var(--audit-muted); font-size: 11px; }
+.error-line { color: var(--audit-danger); }
 
 .result-overview { margin: 0 0 10px; font-size: 14px; font-weight: 600; }
 .result-overview.ok { color: #15803d; }
@@ -451,6 +462,10 @@ select {
   color: var(--audit-muted);
   font-size: 13px;
   line-height: 1.5;
+}
+
+@media (min-width: 861px) {
+  .standards-toolbar > .btn { flex-shrink: 0; white-space: nowrap; }
 }
 
 @media (max-width: 860px) {

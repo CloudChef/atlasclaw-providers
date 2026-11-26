@@ -4,14 +4,14 @@
 
 Checks:
 - exactly one coverage row per enabled rule (builtin R01..R19 + active packs)
-- each coverage result is one of: 通过 / 不通过 / 不适用
+- each coverage result is one of: 通过 / 不通过 / 不适用 / 待复核 / 证据不足
 - every finding heading has a valid severity ([A]/[B]/[C]) and a rule number
 - every finding has 页码, 位置, 原文上下文 and 不规范说明 fields
 - the 问题总表 lists every finding with page and line
-- every rule marked 不通过 has a corresponding finding, and every finding's rule is marked 不通过
+- every rule marked 不通过 has a corresponding finding, and every finding's rule is marked 不通过 or uncertain
 - 不适用 rows include a reason
 - severity summary counts match the findings and coverage rows
-- overall verdict is present and consistent with any findings (any finding requires 不通过)
+- overall verdict is present; a confirmed 不通过 row must not be described as a pass
 
 Usage:
     python check_coverage.py <audit-report.md> [...] [--rules <pack-dir-or-json>]
@@ -27,11 +27,17 @@ from pathlib import Path
 
 from _rules import RuleSet, RulesError, load_rules
 
-VALID_RESULTS = {"通过", "不通过", "不适用"}
-ROW_RE = re.compile(r"^\|\s*([A-Z]\d{2})\s*\|")
+VALID_RESULTS = {"通过", "不通过", "不适用", "待复核", "证据不足"}
+UNCERTAIN_RESULTS = {"待复核", "证据不足"}
+RESULT_ALIASES = {"不通过（不合格）": "不通过"}
+RULE_ID_PATTERN = r"[A-Z]\d{2,}"
+FINDING_ID_PATTERN = r"F-(?:\d+-\d+|\d+)"
+ROW_RE = re.compile(rf"^\|\s*({RULE_ID_PATTERN})\s*\|")
 SUMMARY_RE = re.compile(r"^\|\s*(A · 严重|B · 主要|C · 次要|不适用)\s*\|\s*`?(\d+)`?\s*\|")
-FINDING_RE = re.compile(r"^###\s+(F-\d+)\s+\[([ABC])\]\s+(.+?)[（(]\s*`?([A-Z]\d{2})`?\s*[）)]")
-OVERVIEW_RE = re.compile(r"^\|\s*(F-\d+)\s*\|")
+FINDING_RE = re.compile(
+    rf"^###\s+({FINDING_ID_PATTERN})\s+\[([ABC])\]\s+(.+?)[（(]\s*`?({RULE_ID_PATTERN})`?\s*[）)]"
+)
+OVERVIEW_RE = re.compile(rf"^\|\s*({FINDING_ID_PATTERN})\s*\|")
 VERDICT_RE = re.compile(r"\*\*总评[：:]\s*([^*]+?)\*\*")
 
 
@@ -44,9 +50,6 @@ def check_report(path: Path, ruleset: RuleSet) -> list[str]:
     problems: list[str] = []
     text = path.read_text(encoding="utf-8")
     lines = text.splitlines()
-    if "无法判定" in text:
-        problems.append("'无法判定' is not allowed; judge 不通过（不合格） instead")
-
     coverage: dict[str, str] = {}
     for line in lines:
         match = ROW_RE.match(line)
@@ -59,7 +62,8 @@ def check_report(path: Path, ruleset: RuleSet) -> list[str]:
             continue
         if rule in coverage:
             problems.append(f"{rule}: duplicate coverage row")
-        coverage[rule] = cells[4].replace("`", "").strip()
+        result = cells[4].replace("`", "").strip()
+        coverage[rule] = RESULT_ALIASES.get(result, result)
         if coverage[rule] == "不适用":
             reason = cells[5] if len(cells) > 5 else ""
             if not reason or reason in {"略", "—", "-", "无"}:
@@ -98,7 +102,7 @@ def check_report(path: Path, ruleset: RuleSet) -> list[str]:
         finding_rules.add(rule)
         if rule not in coverage:
             problems.append(f"{finding_id}: references {rule} which has no coverage row")
-        elif coverage[rule] != "不通过":
+        elif coverage[rule] not in {"不通过", *UNCERTAIN_RESULTS}:
             problems.append(
                 f"{finding_id}: {rule} coverage result is '{coverage[rule]}' but the finding implies 不通过"
             )
@@ -179,10 +183,10 @@ def check_report(path: Path, ruleset: RuleSet) -> list[str]:
         problems.append("missing '**总评：...**' verdict")
     else:
         verdict = verdict_match.group(1).strip()
-        total_findings = sum(severity_count.values())
-        if total_findings and "不通过" not in verdict:
+        has_confirmed_failure = any(result == "不通过" for result in coverage.values())
+        if has_confirmed_failure and "不通过" not in verdict:
             problems.append(
-                f"verdict '{verdict}' conflicts with {total_findings} finding(s); any finding requires 不通过"
+                f"verdict '{verdict}' conflicts with coverage marked 不通过"
             )
 
     return problems

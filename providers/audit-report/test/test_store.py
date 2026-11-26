@@ -89,5 +89,30 @@ def test_has_running_and_delete(tmp_path: Path) -> None:
     assert store.has_running("alice") is True
     assert store.has_running("bob") is False
     assert store.delete("doc-1", "bob") is False
+    assert store.delete("doc-1", "alice") is False
+    store.update("doc-1", status="failed")
     assert store.delete("doc-1", "alice") is True
     assert store.get("doc-1", "alice") is None
+
+
+def test_legacy_database_migrates_desensitized_columns_idempotently(tmp_path: Path) -> None:
+    import sqlite3
+
+    db_path = tmp_path / "audit.db"
+    connection = sqlite3.connect(db_path)
+    connection.execute("""CREATE TABLE audit_documents (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, tenant_id TEXT NOT NULL DEFAULT '',
+      file_name TEXT NOT NULL, file_path TEXT NOT NULL, extension TEXT NOT NULL,
+      size INTEGER NOT NULL, sha256 TEXT NOT NULL, pages INTEGER, report_no TEXT,
+      status TEXT NOT NULL, run_id TEXT, progress INTEGER NOT NULL DEFAULT 0,
+      progress_text TEXT NOT NULL DEFAULT '', findings_total INTEGER NOT NULL DEFAULT 0,
+      findings_review INTEGER NOT NULL DEFAULT 0, grade_summary TEXT, report_path TEXT,
+      report_name TEXT, error_code TEXT, error_message TEXT, created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL)""")
+    connection.commit()
+    connection.close()
+
+    store = DocumentStore(tmp_path)
+    store = DocumentStore(tmp_path)
+    columns = {row["name"] for row in store._connect().execute("PRAGMA table_info(audit_documents)")}
+    assert {"desensitized_path", "desensitized_name"}.issubset(columns)

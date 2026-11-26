@@ -31,7 +31,7 @@ from typing import Any, Iterable
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 RULES_DIR = SKILL_ROOT / "rules"
 
-RULE_ID_RE = re.compile(r"^[A-Z]\d{2}$")
+RULE_ID_RE = re.compile(r"^[A-Z]\d{2,}$")
 PACK_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
 SEVERITIES = {"A", "B", "C"}
@@ -258,7 +258,7 @@ def validate_pack(pack: dict[str, Any], pack_path: Path) -> tuple[list[str], lis
             continue
         rule_id = str(rule.get("id", "")).strip()
         if not RULE_ID_RE.match(rule_id):
-            errors.append(f"第 {index} 条规则号非法: {rule_id!r}（应为字母+两位数字，如 X01）")
+            errors.append(f"第 {index} 条规则号非法: {rule_id!r}（应为字母+至少两位数字，如 X01）")
         elif rule_id in seen:
             errors.append(f"规则号重复: {rule_id}")
         seen.add(rule_id)

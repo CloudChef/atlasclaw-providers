@@ -66,6 +66,29 @@ def test_missing_quote_falls_back_to_full_page(tmp_path: Path) -> None:
     assert '"search": ""' in meta
 
 
+def test_evidence_renders_all_findings_beyond_old_cap(tmp_path: Path) -> None:
+    source = pymupdf.open()
+    findings = []
+    for page_no in range(1, 31):
+        page = source.new_page()
+        page.insert_text((72, 120), f"Page {page_no}", fontname="helv")
+        rule_id = f"X{page_no:02d}"
+        rule = batch_audit.Rule(rule_id, f"Issue {page_no}", "B", "")
+        verdict = batch_audit.Verdict(rule_id, "FAIL", "B", page=str(page_no), quote="missing quote")
+        findings.append(batch_audit.RuleResult(rule, "FAIL", "B", [verdict]))
+    pdf_path = tmp_path / "many-findings.pdf"
+    source.save(pdf_path)
+    source.close()
+
+    images = evidence.render_evidence(
+        {"extension": ".pdf", "file_path": str(pdf_path)}, tmp_path, findings,
+    )
+
+    assert len(images) == len(findings) == 30
+    assert images["X30"] == "evidence/F-30_X30.png"
+    assert (tmp_path / images["X30"]).stat().st_size > 0
+
+
 def test_non_pdf_documents_skip_evidence(tmp_path: Path) -> None:
     assert evidence.render_evidence({"extension": ".docx", "file_path": "x.docx"}, tmp_path, [_finding()]) == {}
 

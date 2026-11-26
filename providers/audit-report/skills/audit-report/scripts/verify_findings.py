@@ -6,8 +6,8 @@ This is the deterministic half of the final finding check:
 - page number exists in the extracted document
 - at least one quoted excerpt actually occurs on that page
 - the screenshot exists and is a valid image
-- the rule exists and the severity matches the rule pack
-- the coverage table marks that rule as 不通过
+- the referenced rule exists in the enabled rule set
+- the coverage table marks that rule 不通过 or preserves uncertainty as REVIEW
 
 Semantic correctness (does the evidence really violate the rule?) still needs
 the checklist in references/finding-verification.md, plus human/multimodal
@@ -27,12 +27,20 @@ import sys
 import unicodedata
 from pathlib import Path
 
+import pymupdf
+
 from _rules import RulesError, load_rules
 
-FINDING_RE = re.compile(r"^###\s+(F-\d+)\s+\[([ABC])\]\s+(.+?)[（(]\s*`?([A-Z]\d{2})`?\s*[）)]")
-ROW_RE = re.compile(r"^\|\s*([A-Z]\d{2})\s*\|")
+RULE_ID_PATTERN = r"[A-Z]\d{2,}"
+FINDING_ID_PATTERN = r"F-(?:\d+-\d+|\d+)"
+FINDING_RE = re.compile(
+    rf"^###\s+({FINDING_ID_PATTERN})\s+\[([ABC])\]\s+(.+?)[（(]\s*`?({RULE_ID_PATTERN})`?\s*[）)]"
+)
+ROW_RE = re.compile(rf"^\|\s*({RULE_ID_PATTERN})\s*\|")
 IMAGE_RE = re.compile(r"!\[.*?\]\((.+?)\)")
 VISUAL_KEYWORDS = ("照片", "截图", "图像", "签章", "签名", "印章", "骑缝", "AI 生成", "水印", "空白")
+UNCERTAIN_COVERAGE = {"待复核", "证据不足"}
+COVERAGE_ALIASES = {"不通过（不合格）": "不通过"}
 
 
 def norm(text: str) -> str:
@@ -188,8 +196,6 @@ def main() -> int:
     except RulesError as exc:
         print(f"[ERROR] {exc}")
         return 2
-    rule_severity = ruleset.severity
-
     report_path = Path(args.report)
     text = report_path.read_text(encoding="utf-8")
     lines = text.splitlines()
@@ -204,16 +210,18 @@ def main() -> int:
         reasons = []
 
         rule = finding["rule"]
-        if rule not in rule_severity:
+        if rule not in ruleset.rules:
             status = "FAIL"
             reasons.append(f"未知规则 {rule}（已启用规则包：{ruleset.summary()}）")
-        elif finding["severity"] != rule_severity[rule]:
-            status = "FAIL"
-            reasons.append(f"等级 {finding['severity']} 与规则固定等级 {rule_severity[rule]} 不一致")
 
-        if coverage.get(rule) != "不通过":
+        coverage_result = COVERAGE_ALIASES.get(coverage.get(rule), coverage.get(rule))
+        if coverage_result in UNCERTAIN_COVERAGE:
+            if status != "FAIL":
+                status = "REVIEW"
+            reasons.append(f"覆盖表中 {rule} 标记为“{coverage_result}”，保留待复核状态")
+        elif coverage_result != "不通过":
             status = "FAIL"
-            reasons.append(f"覆盖表中 {rule} 不是“不通过”（实际 {coverage.get(rule, '缺失')}）")
+            reasons.append(f"覆盖表中 {rule} 不是“不通过”（实际 {coverage_result or '缺失'}）")
 
         if not finding["pages"]:
             status = "FAIL"
@@ -313,12 +321,17 @@ def main() -> int:
             if not image_path.is_file():
                 status = "FAIL"
                 reasons.append(f"截图文件不存在: {screenshot}")
-            elif image_path.stat().st_size < 1000:
-                status = "FAIL"
-                reasons.append("截图文件过小")
             else:
+                try:
+                    pixmap = pymupdf.Pixmap(str(image_path))
+                    image_is_valid = pixmap.width > 0 and pixmap.height > 0
+                except (pymupdf.FileDataError, pymupdf.mupdf.FzErrorBase, RuntimeError, ValueError, OSError):
+                    image_is_valid = False
+                if not image_is_valid:
+                    status = "FAIL"
+                    reasons.append("截图无法解码为有效图像")
                 sidecar = image_path.with_suffix(image_path.suffix + ".json")
-                if sidecar.is_file() and finding["pages"]:
+                if image_is_valid and sidecar.is_file() and finding["pages"]:
                     try:
                         meta = json.loads(sidecar.read_text(encoding="utf-8"))
                         if meta.get("page") and meta["page"] not in finding["pages"]:
@@ -364,10 +377,10 @@ def main() -> int:
     for result in results:
         out_lines.append(
             f"| {result['id']} | {result['rule']}/{result['severity']} | {result['page'] or '-'} | "
-            f"{'；'.join(result['reasons']) or '页码、引文、截图、规则等级均通过'} | {result['status']} |"
+            f"{'；'.join(result['reasons']) or '页码、引文、截图和规则编号均可核对'} | {result['status']} |"
         )
     out_lines.append("")
-    out_lines.append("> PASS 仅表示页码/引文/截图/规则/等级在文本层可核对；")
+    out_lines.append("> PASS 仅表示页码/引文/截图和规则编号在文本层可核对；")
     out_lines.append("> REVIEW 表示引文来自图像、部分引文未命中或视觉类问题，必须人工/多模态复核；")
     out_lines.append("> FAIL 表示存在页码错误、引文找不到、截图缺失、规则/等级不一致等硬错误，必须修正后重跑。")
 

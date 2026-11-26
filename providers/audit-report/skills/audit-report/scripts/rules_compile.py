@@ -33,7 +33,7 @@ import unicodedata
 from datetime import datetime
 from pathlib import Path
 
-from _rules import PACK_NAME_RE, RULES_DIR
+from _rules import PACK_NAME_RE, RULES_DIR, RULE_ID_RE
 from extract_report import extract_docx, extract_pdf
 
 SUPPORTED_INPUTS = {".md", ".txt", ".docx", ".pdf"}
@@ -52,12 +52,12 @@ NA_ALIASES = {"不适用条件", "不适用", "排除条件"}
 CHECK_ALIASES = {"检查类型", "检查方式", "执行方式", "check"}
 
 HEADING_RE = re.compile(r"^(#{2,4})\s+(.+?)\s*$")
-HEADING_ID_RE = re.compile(r"^([A-Z]\d{2})\s+(.*)$")
+HEADING_ID_RE = re.compile(r"^([A-Z]\d{2,})\s+(.*)$")
 SEVERITY_IN_TITLE_RE = re.compile(r"[（(]\s*([ABC])\s*(?:[·•][^）)]*)?[）)]")
 BULLET_RE = re.compile(r"^\s*[-*]\s*(?:\*\*)?([^：:*]+?)(?:\*\*)?\s*[：:]\s*(.+)$")
-PLAIN_RULE_RE = re.compile(r"^([A-Z]\d{2})\s+(\S.*)$")
+PLAIN_RULE_RE = re.compile(r"^([A-Z]\d{2,})\s+(\S.*)$")
 PLAIN_FIELD_RE = re.compile(r"^([^：:]{1,16})[：:]\s*(.+)$")
-AUTO_ID_RE = re.compile(r"^([A-Z])(\d{2})$")
+AUTO_ID_RE = re.compile(r"^([A-Z])(\d{2,})$")
 
 
 def clean_cell(value: str) -> str:
@@ -148,7 +148,7 @@ def next_auto_id(prefix: str, used: set[str], counter: int) -> tuple[str, int]:
 def rule_from_values(values: dict[str, str], prefix: str, used: set[str], counter: int) -> tuple[dict, int, list[str]]:
     warnings: list[str] = []
     rule_id = clean_cell(values.get("id", ""))
-    if not re.match(r"^[A-Z]\d{2}$", rule_id):
+    if not RULE_ID_RE.fullmatch(rule_id):
         rule_id, counter = next_auto_id(prefix, used, counter)
     elif rule_id in used:
         warnings.append(f"规则号 {rule_id} 重复，已自动改名")

@@ -63,7 +63,10 @@ def main() -> int:
         hits = page.search_for(args.search)
         if not hits:
             raise SystemExit(f"Search text not found on page {args.page}: {args.search!r}")
-        hit = hits[0]
+        # A wrapped quote returns separate rectangles for its lines/text spans.
+        hit = pymupdf.Rect(hits[0])
+        for fragment in hits[1:]:
+            hit |= fragment
         clip = pymupdf.Rect(
             max(page.rect.x0, hit.x0 - args.margin),
             max(page.rect.y0, hit.y0 - args.above),

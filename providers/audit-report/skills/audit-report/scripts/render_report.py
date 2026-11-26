@@ -17,17 +17,31 @@ import html
 import mimetypes
 import re
 import sys
+from string import Template
 from datetime import datetime
 from pathlib import Path
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 LIST_RE = re.compile(r"^(\s*)([-*]|\d+\.)\s+(.*)$")
 IMAGE_RE = re.compile(r"^!\[(.*?)\]\((.+?)\)$")
+SCRIPT_DIR = Path(__file__).resolve().parent
+TEMPLATE_DIR = SCRIPT_DIR.parent / "references" / "report"
+
+
+def load_template(name: str) -> str:
+    """Load a trusted UTF-8 presentation template beside this skill."""
+    path = TEMPLATE_DIR / name
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError(f"Unable to load report template {path}: {exc}") from exc
 
 
 def inline(text: str) -> str:
     """Render inline Markdown (code, bold, links) after escaping HTML."""
-    text = html.escape(text, quote=False)
+    # Inline links are emitted with a quoted href below, so escape quotes in
+    # the source before inserting any text into HTML attributes.
+    text = html.escape(text, quote=True)
     text = re.sub(r"`([^`]+)`", r"<code>\1</code>", text)
     text = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", text)
     text = re.sub(r"\[([^\]]+)\]\((https?://[^)]+)\)", r'<a href="\2">\1</a>', text)
@@ -51,11 +65,52 @@ def cell_html(cell: str) -> str:
     return f'<span class="{css}">{inner}</span>' if css else inner
 
 
-def render_table(lines: list[str]) -> str:
+def render_table(lines: list[str], base_dir: Path | None = None) -> str:
     rows = [[cell.strip() for cell in line.strip().strip("|").split("|")] for line in lines]
     if len(rows) < 2:
         return ""
     header, body = rows[0], rows[2:]
+    finding_table = "复核结果" in header and any(label in header for label in ("问题摘要", "问题标题"))
+    rule_table = all(label in header for label in ("检查项", "结果", "证据位置/说明"))
+    if finding_table or rule_table or len(header) > 6:
+        out = []
+        field_row_template = Template(load_template("field-row.html"))
+        check_point_template = Template(load_template("check-point.html"))
+        for number, row in enumerate(body, 1):
+            if len(row) != len(header):
+                raise ValueError("A report table has mismatched header and cell counts")
+            values = dict(zip(header, row))
+            fid = next((cell.strip("` ") for cell in row if re.fullmatch(r"`?F-(?:\d+-\d+|\d{2,})`?", cell)), None)
+            title = values.get("问题摘要", values.get("问题标题", values.get("检查项", " / ".join(row[:2]))))
+            identity = fid or row[0] or str(number)
+            kind = "finding-point" if finding_table else "rule-point" if rule_table else "record-point"
+            field_rows = "\n".join(
+                field_row_template.substitute(
+                    label=inline(label), value=cell_html(value),
+                )
+                for label, value in zip(header, row)
+            )
+            evidence_markup = ""
+            if finding_table and fid and base_dir is not None:
+                candidates = [base_dir / "evidence" / f"{fid}.png", *sorted((base_dir / "evidence").glob(f"{fid}-p*.png"))]
+                seen: set[bytes] = set()
+                for path in candidates:
+                    if path.is_file():
+                        data = path.read_bytes()
+                        if data not in seen:
+                            seen.add(data)
+                            page = re.search(r"-p(\d+)\.png$", path.name)
+                            label = f"{fid} · PDF物理页 {page.group(1)}" if page else f"{fid} · {values.get('页码', '报告原文')}"
+                            evidence_markup += render_image(label, str(path), base_dir)
+                if not seen:
+                    evidence_markup = Template(load_template("missing-evidence.html")).substitute(
+                        finding_id=inline(fid),
+                    )
+            out.append(check_point_template.substitute(
+                kind=kind, identity=inline(identity), title=inline(title), rows=field_rows,
+                evidence=evidence_markup,
+            ))
+        return "\n".join(out)
     out = ['<div class="table-wrap"><table>', "<thead><tr>"]
     out.extend(f"<th>{inline(cell)}</th>" for cell in header)
     out.append("</tr></thead><tbody>")
@@ -171,11 +226,9 @@ def render_image(alt: str, src: str, base_dir: Path) -> str:
         return f'<p class="missing-evidence">[缺少证据截图：{html.escape(src)}]</p>'
     mime = mimetypes.guess_type(path.name)[0] or "image/png"
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")
-    return (
-        '<figure class="evidence">'
-        f'<img src="data:{mime};base64,{encoded}" alt="{html.escape(alt)}">'
-        f"<figcaption>{inline(alt)}</figcaption>"
-        "</figure>"
+    return Template(load_template("evidence.html")).substitute(
+        mime=html.escape(mime, quote=True), encoded=encoded,
+        alt_attribute=html.escape(alt, quote=True), alt_text=inline(alt),
     )
 
 
@@ -205,7 +258,7 @@ def markdown_to_html(markdown: str, base_dir: Path) -> str:
             while index < len(lines) and lines[index].lstrip().startswith("|"):
                 table_lines.append(lines[index])
                 index += 1
-            body.append(render_table(table_lines))
+            body.append(render_table(table_lines, base_dir))
             continue
         image = IMAGE_RE.match(line.strip())
         if image:
@@ -225,186 +278,11 @@ def markdown_to_html(markdown: str, base_dir: Path) -> str:
     return "\n".join(body)
 
 
-CSS = """
-:root {
-  --ink: #1d2939;
-  --muted: #475467;
-  --line: #d0d5dd;
-  --blue: #175cd3;
-  --red: #b42318;
-  --orange: #b54708;
-  --green: #067647;
-  --bg: #eef2f6;
-}
-* { box-sizing: border-box; }
-html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--ink);
-  font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif;
-  font-size: 14px;
-  line-height: 1.75;
-}
-.page {
-  max-width: 1120px;
-  margin: 28px auto;
-  padding: 52px 58px 44px;
-  background: #fff;
-  border-radius: 6px;
-  box-shadow: 0 10px 30px rgba(16, 24, 40, .10);
-}
-h1, h2, h3, h4 { color: #101828; line-height: 1.35; }
-h1 {
-  margin: 0 0 24px;
-  padding-bottom: 14px;
-  font-size: 30px;
-  border-bottom: 2px solid #101828;
-  letter-spacing: .5px;
-}
-h2 {
-  margin: 38px 0 14px;
-  padding-left: 12px;
-  font-size: 21px;
-  border-left: 5px solid var(--blue);
-}
-h3 {
-  margin: 26px 0 10px;
-  font-size: 16px;
-}
-h3.finding {
-  padding: 10px 14px;
-  background: #f8fafc;
-  border: 1px solid #e4e7ec;
-  border-left: 5px solid var(--blue);
-  border-radius: 4px;
-}
-p { margin: 8px 0; }
-strong { color: #101828; }
-code {
-  padding: 1px 5px;
-  background: #f2f4f7;
-  border: 1px solid #eaecf0;
-  border-radius: 4px;
-  font-family: Consolas, "Courier New", monospace;
-  font-size: 12.5px;
-}
-hr { margin: 30px 0; border: 0; border-top: 1px solid var(--line); }
-blockquote {
-  margin: 16px 0;
-  padding: 10px 16px;
-  background: #f9fafb;
-  border-left: 4px solid #98a2b3;
-  color: var(--muted);
-}
-blockquote p { margin: 4px 0; }
-.verdict {
-  margin: 18px 0 22px;
-  padding: 14px 18px;
-  border-radius: 6px;
-  font-size: 18px;
-  font-weight: 700;
-}
-.verdict-fail { background: #fef3f2; border-left: 7px solid var(--red); color: var(--red); }
-.verdict-pass { background: #ecfdf3; border-left: 7px solid var(--green); color: var(--green); }
-.verdict-unknown { background: #fffaeb; border-left: 7px solid var(--orange); color: var(--orange); }
-.table-wrap { width: 100%; margin: 14px 0 22px; overflow-x: auto; }
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-  background: #fff;
-}
-th, td {
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  text-align: left;
-  vertical-align: top;
-}
-th { background: #f2f4f7; color: #344054; font-weight: 700; white-space: nowrap; }
-tbody tr:nth-child(even) { background: #fcfcfd; }
-tbody tr:hover { background: #f8fafc; }
-.sev, .result {
-  display: inline-block;
-  padding: 1px 9px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-.sev-a { background: #fee4e2; color: var(--red); }
-.sev-b { background: #fef0c7; color: var(--orange); }
-.sev-c { background: #d1e9ff; color: var(--blue); }
-.result-pass { background: #dcfae6; color: var(--green); }
-.result-fail { background: #fee4e2; color: var(--red); }
-.result-unknown { background: #f2f4f7; color: #475467; }
-.result-na { background: #f2f4f7; color: #667085; }
-ul, ol { margin: 8px 0 14px; padding-left: 24px; }
-li { margin: 4px 0; }
-li > ul, li > ol { margin: 4px 0; }
-figure.evidence {
-  margin: 14px 0 18px;
-  padding: 10px;
-  background: #fcfcfd;
-  border: 1px solid #e4e7ec;
-  border-radius: 6px;
-}
-figure.evidence img {
-  display: block;
-  max-width: 100%;
-  height: auto;
-  margin: 0 auto;
-  border: 1px solid #d0d5dd;
-}
-figure.evidence figcaption {
-  margin-top: 8px;
-  color: #475467;
-  font-size: 12px;
-  text-align: center;
-}
-.missing-evidence {
-  padding: 8px 12px;
-  color: var(--red);
-  background: #fef3f2;
-  border-left: 4px solid var(--red);
-}
-footer {
-  margin-top: 42px;
-  padding-top: 14px;
-  border-top: 1px solid var(--line);
-  color: #667085;
-  font-size: 12px;
-  text-align: right;
-}
-@media print {
-  body { background: #fff; }
-  .page { max-width: none; margin: 0; padding: 0; box-shadow: none; border-radius: 0; }
-  h2 { page-break-after: avoid; }
-  h3.finding { page-break-after: avoid; }
-  tr { page-break-inside: avoid; }
-  .table-wrap { overflow: visible; }
-  @page { size: A4; margin: 14mm; }
-}
-"""
-
-
 def build_html(title: str, body: str, footer: str) -> str:
-    return f"""<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{html.escape(title)}</title>
-<style>{CSS}</style>
-</head>
-<body>
-<main class="page">
-{body}
-<footer>{html.escape(footer)}</footer>
-</main>
-</body>
-</html>
-"""
+    return Template(load_template("document.html")).substitute(
+        title=html.escape(title), css=load_template("report.css"), body=body,
+        footer=html.escape(footer),
+    )
 
 
 def main() -> int:
