@@ -343,13 +343,12 @@ function resultText(document) {
   return '—';
 }
 
-function actionButtons(document) {
+function resultActions(document) {
   const actions = document.actions || [];
   const buttons = [];
   const add = (action, label, style = '') => buttons.push(
     `<button type="button" class="action ${style}" data-action="${action}" data-id="${escapeHtml(document.id)}">${escapeHtml(label)}</button>`
   );
-  if (actions.includes('start_audit')) add('audit', t('startAudit'));
   if (actions.includes('view_progress')) add('result', t('viewProgress'));
   if (actions.includes('view_result')) add('result', t('viewResult'));
   if (document.status === 'failed' && !actions.includes('view_progress') && !actions.includes('view_result')) {
@@ -361,9 +360,35 @@ function actionButtons(document) {
   if (document.report_available && serverUrl(document.urls?.report_download)) {
     add('download-report', document.report_format === 'pdf' ? t('downloadReportPdf') : t('downloadReport'));
   }
+  return buttons.join('');
+}
+
+function actionButtons(document) {
+  const actions = document.actions || [];
+  const buttons = [];
+  const add = (action, label, style = '') => buttons.push(
+    `<button type="button" class="action ${style}" data-action="${action}" data-id="${escapeHtml(document.id)}">${escapeHtml(label)}</button>`
+  );
+  if (actions.includes('start_audit')) add('audit', t('startAudit'));
   if (actions.includes('retry') || actions.includes('reaudit')) add('audit', t('retry'));
   if (actions.includes('delete')) add('delete', t('delete'), 'danger');
   return buttons.join('');
+}
+
+function renderDocumentRow(document) {
+  const extension = (document.file_name || '').toLowerCase().endsWith('.docx') ? 'DOCX' : 'PDF';
+  return `
+    <tr>
+      <td class="name-cell">
+        <span class="file-badge ${extension.toLowerCase()}">${extension}</span>
+        <span class="file-name" title="${escapeHtml(document.file_name)}">${escapeHtml(document.file_name)}</span>
+      </td>
+      <td>${escapeHtml(formatTime(document.created_at))}</td>
+      <td><span class="status status-${escapeHtml(document.status)}">${escapeHtml(statusLabel(document.status))}</span></td>
+      <td class="result-cell"><span class="result-summary">${escapeHtml(resultText(document))}</span><div class="result-actions">${resultActions(document)}</div></td>
+      <td class="actions-cell"><div class="row-actions">${actionButtons(document)}</div></td>
+    </tr>
+  `;
 }
 
 function filteredItems() {
@@ -385,21 +410,7 @@ function filteredItems() {
 
 function renderTable() {
   const items = filteredItems();
-  els.rows.innerHTML = items.map(document => {
-    const extension = (document.file_name || '').toLowerCase().endsWith('.docx') ? 'DOCX' : 'PDF';
-    return `
-      <tr>
-        <td class="name-cell">
-          <span class="file-badge ${extension.toLowerCase()}">${extension}</span>
-          <span class="file-name" title="${escapeHtml(document.file_name)}">${escapeHtml(document.file_name)}</span>
-        </td>
-        <td>${escapeHtml(formatTime(document.created_at))}</td>
-        <td><span class="status status-${escapeHtml(document.status)}">${escapeHtml(statusLabel(document.status))}</span></td>
-        <td class="result-cell">${escapeHtml(resultText(document))}</td>
-        <td class="actions-cell"><div class="row-actions">${actionButtons(document)}</div></td>
-      </tr>
-    `;
-  }).join('');
+  els.rows.innerHTML = items.map(renderDocumentRow).join('');
   els.emptyState.hidden = items.length > 0;
   els.table.hidden = items.length === 0;
   els.count.textContent = t('count', { count: items.length });
@@ -641,6 +652,7 @@ function switchView(view) {
   state.view = view;
   els.auditView.hidden = view !== 'audit';
   els.standardsView.hidden = view !== 'standards';
+  els.uploadButton.hidden = view !== 'audit';
   els.viewTabs.forEach(tab => {
     const active = tab.dataset.view === view;
     tab.classList.toggle('is-active', active);
