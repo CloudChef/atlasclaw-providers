@@ -234,7 +234,9 @@ select {
 .status-completed { background: #dcfce7; color: #15803d; }
 .status-failed { background: #fee2e2; color: #b91c1c; }
 
-.result-cell { color: #334155; white-space: nowrap; }
+.result-cell { color: #334155; min-width: 220px; }
+.result-summary { display: block; margin-bottom: 4px; }
+.result-actions { display: flex; align-items: center; gap: 2px 8px; flex-wrap: wrap; }
 
 .actions-cell { text-align: right; white-space: normal; min-width: 210px; }
 
@@ -472,7 +474,5 @@ select {
   .audit-page { padding: 16px; }
   .filters { grid-template-columns: 1fr; }
   .document-table th:nth-child(2),
-  .document-table td:nth-child(2),
-  .document-table th:nth-child(4),
-  .document-table td:nth-child(4) { display: none; }
+  .document-table td:nth-child(2) { display: none; }
 }
