@@ -144,20 +144,26 @@ async def test_configured_report_storage_runs_pipeline_and_publishes_external_pa
         prepare_report=prepare_report,
         prepare_visual_pdf=lambda source, _output: {"pdf": str(source)},
     )
+    metadata_inputs: list[str] = []
     async def audit_prepared(prepared_pdf, _materials, attempt_dir, _submit, **_kwargs):
         assert Path(prepared_pdf).is_relative_to(user_root)
         Path(attempt_dir, "audit-report.pdf").write_bytes(b"%PDF-report")
         Path(attempt_dir, "audit-raw.md").write_text("audited", encoding="utf-8")
+        Path(attempt_dir, "audit.md").write_text("published normalized report", encoding="utf-8")
 
     monkeypatch.setitem(sys.modules, "audit_preparation", preparation)
     monkeypatch.setitem(sys.modules, "run_document_audit", types.SimpleNamespace(audit_prepared=audit_prepared))
     monkeypatch.setattr(audit_service.standards_service, "snapshot_audit_library", lambda _host, target: {
         "material_paths": [], "rules_dir": target / "rules",
     })
-    monkeypatch.setattr(audit_service, "_llm_report_metadata", lambda *_args, **_kwargs: (
-        {"verdict": "通过", "results": [], "findings": []},
-        {"findings_total": 0, "findings_review": 0, "grade_summary": {}},
-    ))
+    def capture_metadata(markdown, *_args, **_kwargs):
+        metadata_inputs.append(markdown)
+        return (
+            {"verdict": "通过", "results": [], "findings": []},
+            {"findings_total": 0, "findings_review": 0, "grade_summary": {}},
+        )
+
+    monkeypatch.setattr(audit_service, "_llm_report_metadata", capture_metadata)
     context = SimpleNamespace(host=host, run_text=lambda **_kwargs: "ok", run_visual=_unused_visual)
     attempt = user_root / "documents" / "doc-2" / "runs" / "attempt"
 
@@ -167,6 +173,7 @@ async def test_configured_report_storage_runs_pipeline_and_publishes_external_pa
     assert updated["status"] == "completed"
     assert Path(updated["report_path"]) == attempt / "audit-report.pdf"
     assert Path(updated["desensitized_path"]).is_relative_to(user_root)
+    assert metadata_inputs == ["published normalized report"]
 
 
 @pytest.mark.asyncio
@@ -938,6 +945,60 @@ async def test_results_are_contained_and_pdf_without_llm_verdict_is_pending(tmp_
     with pytest.raises(ProviderError) as exc:
         await handlers.document_results(None, context)
     assert exc.value.code == "file_forbidden"
+
+
+@pytest.mark.asyncio
+async def test_document_results_refreshes_from_published_markdown_and_keeps_r20_evidence(tmp_path: Path) -> None:
+    report = tmp_path / "documents" / "doc-r20" / "runs" / "attempt" / "audit-report.pdf"
+    report.parent.mkdir(parents=True)
+    report.write_bytes(b"%PDF")
+    raw = (
+        "# 审核报告\n\n**总评：通过**\n\n## 检查覆盖表\n"
+        "| # | 模块 | 检查项 | 等级 | 结果 | 证据位置/说明 |\n"
+        "| --- | --- | --- | --- | --- | --- |\n"
+        "| R20 | 设备信息 | 外来设备信息一致性 | B | 待复核 | 模型覆盖行缺失、重复或格式不完整 |\n"
+    )
+    published = (
+        "# 审核报告\n\n**总评：通过**\n\n## 检查覆盖表\n"
+        "| # | 模块 | 检查项 | 等级 | 结果 | 证据位置/说明 |\n"
+        "| --- | --- | --- | --- | --- | --- |\n"
+        "| R20 | 设备信息 | 外来设备信息一致性 | B | 待复核 | 模型原始覆盖记录（保留原结论与依据）："
+        "&#124; R20 &#124; 设备信息 &#124; 外来设备信息一致性 &#124; B &#124; 通过/待复核 &#124; "
+        "S41 是否外来无法确认 &#124;。模型未给出可规范化的单一结论，相关规则列为待复核。 |\n"
+    )
+    (report.parent / "audit-raw.md").write_text(raw, encoding="utf-8")
+    (report.parent / "audit.md").write_text(published, encoding="utf-8")
+    (report.parent / "completion.json").write_text(json.dumps({
+        "completion_status": "needs_review", "warnings": ["coverage_row_missing:R20"],
+    }), encoding="utf-8")
+    verification_path = report.parent / "verification.json"
+    verification_path.write_text(json.dumps({
+        "verdict": "通过", "results": [{"rule": "R20", "verdict": "PASS"}], "findings": [],
+    }), encoding="utf-8")
+    store = DocumentStore(tmp_path)
+    store.create({
+        "id": "doc-r20", "user_id": "alice", "file_name": "source.pdf",
+        "file_path": str(tmp_path / "source.pdf"), "extension": ".pdf", "sha256": "",
+        "status": "completed", "report_path": str(report), "report_name": report.name,
+    })
+    context = SimpleNamespace(
+        user_id="alice", path_params={"document_id": "doc-r20"}, host=SimpleNamespace(data_dir=tmp_path),
+    )
+
+    first = await handlers.document_results(None, context)
+    first_rule = next(item for item in first["results"] if item["rule"] == "R20")
+    assert first_rule["verdict"] == "REVIEW"
+    assert "通过/待复核" in first_rule["reason"]
+    assert "S41 是否外来无法确认" in first_rule["reason"]
+    assert "&#124;" not in first_rule["reason"]
+    assert first["completion_status"] == "needs_review"
+
+    second = await handlers.document_results(None, context)
+    second_rule = next(item for item in second["results"] if item["rule"] == "R20")
+    assert second_rule["verdict"] == "REVIEW"
+    assert "通过/待复核" in second_rule["reason"]
+    assert "S41 是否外来无法确认" in second_rule["reason"]
+    assert second["completion_status"] == "needs_review"
 
 
 def test_build_verification_includes_evidence_image() -> None:

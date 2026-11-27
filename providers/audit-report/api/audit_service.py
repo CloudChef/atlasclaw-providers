@@ -9,6 +9,7 @@ then delegates business judgment to skill LLM calls and publishes its PDF.
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import logging
 import shutil
@@ -358,11 +359,10 @@ async def _run_document_audit(context: Any, store: DocumentStore, document: dict
             },
         )
         report_path = (attempt_dir / "audit-report.pdf").resolve()
-        raw_path = attempt_dir / "audit-raw.md"
+        published_markdown_path = attempt_dir / "audit.md"
+        raw_path = published_markdown_path if published_markdown_path.is_file() else attempt_dir / "audit-raw.md"
         if not report_path.is_file() or report_path.stat().st_size == 0:
             raise RuntimeError("Skill audit did not create a downloadable PDF")
-        if not raw_path.is_file():
-            raw_path = attempt_dir / "audit.md"
         if not raw_path.is_file():
             raise RuntimeError("Skill audit did not create report Markdown")
         raw_markdown = raw_path.read_text(encoding="utf-8")
@@ -456,7 +456,8 @@ def _llm_report_metadata(
     for line in coverage_match.group(1).splitlines() if coverage_match else []:
         if not line.lstrip().startswith("|"):
             continue
-        cells = [re.sub(r"[`*_]", "", cell.strip()) for cell in line.strip().strip("|").split("|")]
+        cells = [html.unescape(re.sub(r"[`*_]", "", cell.strip()))
+                 for cell in line.strip().strip("|").split("|")]
         if not cells or cells[0] not in required_ids:
             continue
         observed_rule_ids.append(cells[0])

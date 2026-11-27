@@ -23,6 +23,20 @@ table {
   font-size: 9pt;
 }
 
+.audit-object-table {
+  width: 510pt !important;
+}
+
+.audit-object-table th:first-child,
+.audit-object-table td:first-child {
+  width: 98.2pt !important;
+}
+
+.audit-object-table th:last-child,
+.audit-object-table td:last-child {
+  width: 383.8pt !important;
+}
+
 th,
 td {
   padding: 6pt 7pt;

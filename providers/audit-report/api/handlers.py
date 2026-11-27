@@ -399,11 +399,18 @@ async def document_results(request: Any, context: Any) -> dict[str, Any]:
         raise ProviderError(f"Audit results are unreadable: {exc}", status_code=500, code="results_unreadable") from exc
     if not isinstance(payload, dict):
         raise ProviderError("Audit results are unreadable", status_code=500, code="results_unreadable")
+    published_path = report_path.parent / "audit.md" if report_path is not None else None
     raw_path = report_path.parent / "audit-raw.md" if report_path is not None else None
-    if report_path is not None and report_path.suffix.lower() == ".pdf" and _owned_file_exists(context, str(raw_path)):
-        # Rebuild display metadata after parser fixes from the saved LLM output;
-        # do not rerun the audit or alter its Markdown/PDF.
-        raw_data, _ = _read_owned_file(context, str(raw_path))
+    metadata_path = None
+    if report_path is not None and report_path.suffix.lower() == ".pdf":
+        if _owned_file_exists(context, str(published_path)):
+            metadata_path = published_path
+        elif _owned_file_exists(context, str(raw_path)):
+            metadata_path = raw_path
+    if metadata_path is not None:
+        # Refresh display metadata from the published normalized report so
+        # preserved evidence and pending reasons remain visible in the results.
+        raw_data, _ = _read_owned_file(context, str(metadata_path))
         required_ids = [item["rule"] for item in payload.get("results") or [] if isinstance(item, dict) and item.get("rule")]
         refreshed, summary = _llm_report_metadata(raw_data.decode("utf-8"), required_ids, allow_incomplete=True)
         completion: dict[str, Any] | None = None
