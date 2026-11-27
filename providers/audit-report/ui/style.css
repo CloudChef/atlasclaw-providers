@@ -50,6 +50,7 @@ html, body {
   margin: 6px 0 0;
   color: var(--audit-muted);
   font-size: 13px;
+  line-height: 1.6;
 }
 
 .btn {
