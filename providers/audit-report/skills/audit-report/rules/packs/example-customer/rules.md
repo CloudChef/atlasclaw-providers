@@ -3,7 +3,7 @@
 - 规则包：`example-customer@1.0.0`
 - 状态：`draft`
 - 来源：`source/rules.md`
-- 编译时间：2026-11-24 16:38:13
+- 编译时间：2026-11-27 18:58:17
 
 > 本文件由 `rules_compile.py` 生成，供人阅读；执行以 `pack.json` 为准。
 

@@ -96,7 +96,7 @@ class RuleResult:
 
 
 def load_rules(rules_path: Path) -> list[Rule]:
-    """Parse the 19 fixed rule definitions from the skill reference."""
+    """Parse the built-in rule reference headings."""
     text = rules_path.read_text(encoding="utf-8")
     matches = list(RULE_HEADING.finditer(text))
     rules: list[Rule] = []
@@ -455,8 +455,9 @@ def build_markdown(
     """Render the audit markdown source that feeds render_report.py."""
     summary = summarize(results)
     total_rules = len(results)
+    builtin_count = sum(1 for item in results if item.rule.pack == "builtin")
     pack_label = " + ".join(rule_packs) or "builtin"
-    extra_rules = max(0, total_rules - len(RULE_MODULES))
+    extra_rules = max(0, total_rules - builtin_count)
     extra_note = f" + 附加 {extra_rules} 项" if extra_rules else ""
     basis = f"规则包：{pack_label}"
     findings = finding_list(results)
@@ -610,7 +611,7 @@ def _finding_detail(index: int, item: RuleResult, image: str = "") -> list[str]:
     return (markdown + "\n").split("\n")
 
 
-def _conclusion(summary: dict[str, Any], findings: Sequence[RuleResult], total_rules: int = 19) -> str:
+def _conclusion(summary: dict[str, Any], findings: Sequence[RuleResult], total_rules: int = 46) -> str:
     if not findings:
         return f"报告未发现不符合项，{total_rules} 项规则均判定通过或不适用。"
     rules = "、".join(item.rule.rule_id for item in findings)

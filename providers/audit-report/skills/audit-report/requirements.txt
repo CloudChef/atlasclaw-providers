@@ -2,3 +2,7 @@
 # Install into the AtlasClaw service virtual environment so skill_exec can use them.
 pymupdf>=1.24.0
 python-docx>=1.2.0
+openpyxl>=3.1.0
+httpx>=0.27.0
+python-dotenv>=1.0.0
+pywin32>=306; sys_platform == "win32"

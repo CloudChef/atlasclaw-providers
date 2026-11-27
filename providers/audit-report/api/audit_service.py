@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # Copyright 2026 Qianyun, Inc., www.cloudchef.io, All rights reserved.
-"""Run the audit-report skill through the AtlasClaw configured text model.
+"""Run the audit-report skill through AtlasClaw's configured model bridges.
 
 Each attempt prepares a private desensitized PDF and shared-library snapshot,
 then delegates business judgment to skill LLM calls and publishes its PDF.
@@ -34,22 +34,17 @@ logger = logging.getLogger(__name__)
 _TASKS: dict[tuple[Path, str], tuple[str, asyncio.Task]] = {}
 
 BATCH_ATTEMPTS = 3
+AUDIT_SKILL_ID = "audit-report:audit-report"
 
 
 def _require_model_bridges(context: Any) -> None:
-    """Fail before preparation when this scripted workflow lacks a model bridge."""
-    if not callable(getattr(context, "run_text", None)):
-        raise ProviderError(
-            "Text model bridge is unavailable",
-            status_code=503,
-            code="text_model_unavailable",
-        )
+    """Retained for compatibility; bridge absence is reported in the published report."""
+    return None
 
 
 async def start_document_audit(context: Any, store: DocumentStore, document: dict[str, Any]) -> None:
     """Start one isolated LLM audit attempt in the background."""
     host = getattr(context, "host", context)
-    _require_model_bridges(context)
     file_path = Path(str(document.get("file_path") or ""))
     if not file_path.is_file():
         raise ProviderError("Original report file is missing", status_code=404, code="file_not_found")
@@ -105,7 +100,6 @@ async def _run_document_audit(context: Any, store: DocumentStore, document: dict
     document_id = str(document["id"])
     host = getattr(context, "host", context)
     try:
-        _require_model_bridges(context)
         if attempt_dir is None:
             attempt_dir = report_data_dir(host) / "documents" / document_id / "runs" / uuid.uuid4().hex
         await asyncio.to_thread(attempt_dir.mkdir, parents=True, exist_ok=True)
@@ -133,6 +127,19 @@ async def _run_document_audit(context: Any, store: DocumentStore, document: dict
             desensitized_name=f"{Path(str(document.get('file_name') or 'report')).stem}_脱敏.pdf",
             progress=10, progress_text="脱敏 PDF 已就绪，正在读取共享资料",
         )
+        visual_prepare_error = None
+        try:
+            visual_source = await asyncio.to_thread(
+                audit_preparation.prepare_visual_pdf,
+                document["file_path"],
+                attempt_dir / "visual-source",
+            )
+            visual_pdf = Path(str(visual_source.get("pdf") or "")).resolve()
+            if not visual_pdf.is_file():
+                raise RuntimeError("visual source was not created")
+        except Exception as exc:  # noqa: BLE001 - publish text/partial results with a visible visual warning
+            visual_pdf = None
+            visual_prepare_error = type(exc).__name__
 
         library_dir = attempt_dir / "library"
         snapshot = await asyncio.to_thread(standards_service.snapshot_audit_library, host, library_dir)
@@ -151,7 +158,7 @@ async def _run_document_audit(context: Any, store: DocumentStore, document: dict
             answer = await runner(
                 prompt=prompt,
                 system_prompt=text_system_prompt,
-                skill_id="audit-report:audit-report",
+                skill_id=AUDIT_SKILL_ID,
             )
             answer = str(answer or "")
             if not answer.strip():
@@ -159,6 +166,30 @@ async def _run_document_audit(context: Any, store: DocumentStore, document: dict
                     "Text model bridge returned an empty response",
                     status_code=502,
                     code="text_model_empty",
+                )
+            return answer
+
+        async def submit_visual(prompt: str, images: list[dict[str, Any]]) -> str:
+            runner = getattr(context, "run_visual", None)
+            if not callable(runner):
+                raise ProviderError(
+                    "Visual model bridge is unavailable",
+                    status_code=503,
+                    code="visual_model_unavailable",
+                )
+            answer = await runner(
+                prompt=prompt,
+                system_prompt=text_system_prompt,
+                timeout_seconds=None,
+                skill_id=AUDIT_SKILL_ID,
+                images=images,
+            )
+            answer = str(answer or "")
+            if not answer.strip():
+                raise ProviderError(
+                    "Visual model bridge returned an empty response",
+                    status_code=502,
+                    code="visual_model_empty",
                 )
             return answer
 
@@ -185,14 +216,35 @@ async def _run_document_audit(context: Any, store: DocumentStore, document: dict
         await run_document_audit.audit_prepared(
             prepared_pdf, material_paths, attempt_dir, submit,
             on_progress=on_progress, rules_dir=rules_dir,
+            visual_pdf=visual_pdf, submit_visual=submit_visual, require_visual=True,
+            visual_prepare_error=visual_prepare_error,
         )
         report_path = (attempt_dir / "audit-report.pdf").resolve()
         raw_path = attempt_dir / "audit-raw.md"
-        if not report_path.is_file() or report_path.stat().st_size == 0 or not raw_path.is_file():
-            raise RuntimeError("Skill audit did not create complete PDF and Markdown outputs")
+        if not report_path.is_file() or report_path.stat().st_size == 0:
+            raise RuntimeError("Skill audit did not create a downloadable PDF")
+        if not raw_path.is_file():
+            raw_path = attempt_dir / "audit.md"
+        if not raw_path.is_file():
+            raise RuntimeError("Skill audit did not create report Markdown")
         raw_markdown = raw_path.read_text(encoding="utf-8")
         from _rules import load_rules
-        verification, summary = _llm_report_metadata(raw_markdown, load_rules(rules_dir).ids)
+        verification, summary = _llm_report_metadata(
+            raw_markdown, load_rules(rules_dir).ids, allow_incomplete=True,
+        )
+        completion_path = attempt_dir / "completion.json"
+        if completion_path.is_file():
+            completion = json.loads(completion_path.read_text(encoding="utf-8"))
+            if completion.get("completion_status") == "needs_review":
+                verification["completion_status"] = "needs_review"
+                verification["warnings"] = list(dict.fromkeys([
+                    *verification.get("warnings", []),
+                    *completion.get("warnings", []),
+                ]))
+                verification["completeness"] = {
+                    **verification.get("completeness", {}),
+                    "pipeline_status": "needs_review",
+                }
         (attempt_dir / "verification.json").write_text(
             json.dumps(verification, ensure_ascii=False, indent=2), encoding="utf-8",
         )
@@ -201,7 +253,8 @@ async def _run_document_audit(context: Any, store: DocumentStore, document: dict
             document_id,
             status="completed",
             progress=100,
-            progress_text="审核完成",
+            progress_text=("报告已生成，部分结果待复核"
+                           if verification.get("completion_status") == "needs_review" else "审核完成"),
             findings_total=summary["findings_total"],
             findings_review=summary["findings_review"],
             grade_summary=summary["grade_summary"],
@@ -234,27 +287,42 @@ async def _run_document_audit(context: Any, store: DocumentStore, document: dict
         )
 
 
-def _llm_report_metadata(markdown: str, required_rule_ids: list[str] | tuple[str, ...]) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Read explicit LLM verdict/coverage metadata from the main report only."""
+def _llm_report_metadata(
+    markdown: str,
+    required_rule_ids: list[str] | tuple[str, ...],
+    *,
+    allow_incomplete: bool = False,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Read explicit report metadata, optionally retaining incomplete output for review."""
     main = re.split(r"(?m)^#\s*附录：分项目审核原文\s*$", markdown, maxsplit=1)[0]
+    required_ids = list(dict.fromkeys(required_rule_ids))
+    warnings: list[str] = []
     verdict_match = re.search(
         r"(?m)^\s*\*\*总评\s*[：:]\s*([^*\n]+?)\s*\*\*",
         main,
     )
-    if not verdict_match:
-        raise RuntimeError("LLM report is missing its explicit overall verdict")
-    verdict = verdict_match.group(1).strip()
-    if not verdict:
-        raise RuntimeError("LLM report is missing its explicit overall verdict")
+    verdict = verdict_match.group(1).strip() if verdict_match else ""
+    overall_verdict_complete = bool(verdict) and re.fullmatch(r"<[^<>]*>", verdict) is None
+    if not overall_verdict_complete:
+        if not allow_incomplete:
+            raise RuntimeError("LLM report is missing its explicit overall verdict")
+        verdict = "待复核（模型未给出结论）"
+        warnings.append("overall_verdict_missing")
     coverage_match = re.search(r"(?ms)^#{1,2}\s*[^\n]*检查覆盖表[^\n]*\n(.*?)(?=^#{1,2}\s|\Z)", main)
     if not coverage_match:
-        raise RuntimeError("LLM report is missing its main coverage table")
+        if not allow_incomplete:
+            raise RuntimeError("LLM report is missing its main coverage table")
+        warnings.append("coverage_table_missing")
     rows: list[dict[str, str]] = []
-    for line in coverage_match.group(1).splitlines():
+    observed_rule_ids: list[str] = []
+    for line in coverage_match.group(1).splitlines() if coverage_match else []:
         if not line.lstrip().startswith("|"):
             continue
         cells = [re.sub(r"[`*_]", "", cell.strip()) for cell in line.strip().strip("|").split("|")]
-        if len(cells) < 6 or cells[0] not in required_rule_ids:
+        if not cells or cells[0] not in required_ids:
+            continue
+        observed_rule_ids.append(cells[0])
+        if len(cells) < 6:
             continue
         if not re.match(r"^(通过|不通过|不适用|待复核|证据不足)", cells[4]):
             continue
@@ -262,14 +330,27 @@ def _llm_report_metadata(markdown: str, required_rule_ids: list[str] | tuple[str
                      "verdict": cells[4], "reason": cells[5]})
     row_ids = [item["rule"] for item in rows]
     duplicates = sorted({rule_id for rule_id in row_ids if row_ids.count(rule_id) > 1})
-    if duplicates:
+    if allow_incomplete:
+        duplicates = sorted(set(duplicates) | {
+            rule_id for rule_id in observed_rule_ids if observed_rule_ids.count(rule_id) > 1
+        })
+    if duplicates and not allow_incomplete:
         raise RuntimeError(f"LLM report contains duplicate coverage rows: {', '.join(duplicates)}")
-    if not set(required_rule_ids).issubset(set(row_ids)):
-        missing = sorted(set(required_rule_ids) - set(row_ids))
-        raise RuntimeError(f"LLM report is missing coverage rows: {', '.join(missing)}")
+    if duplicates:
+        rows = [row for row in rows if row["rule"] not in duplicates]
+        row_ids = [row["rule"] for row in rows]
+        warnings.append(f"coverage_rows_duplicated:{','.join(duplicates)}")
+    missing_rules = [rule_id for rule_id in required_ids if rule_id not in set(row_ids)]
+    if missing_rules and not allow_incomplete:
+        raise RuntimeError(f"LLM report is missing coverage rows: {', '.join(sorted(missing_rules))}")
+    if missing_rules and coverage_match:
+        warnings.append(f"coverage_rows_missing:{','.join(missing_rules)}")
+    for rule_id in missing_rules:
+        rows.append({"rule": rule_id, "name": "", "severity": "", "verdict": "REVIEW",
+                     "reason": "模型未提供此规则结论"})
     rule_pattern = "|".join(
-        re.escape(rule_id) for rule_id in sorted(required_rule_ids, key=len, reverse=True)
-    )
+        re.escape(rule_id) for rule_id in sorted(required_ids, key=len, reverse=True)
+    ) or r"(?!)"
     counts = {"PASS": 0, "FAIL": 0, "REVIEW": 0, "NA": 0}
     for row in rows:
         raw_verdict = row["verdict"]
@@ -331,7 +412,11 @@ def _llm_report_metadata(markdown: str, required_rule_ids: list[str] | tuple[str
             disposition_table_seen = disposition_table_seen or current_disposition_table
             identity_column = next((cells.index(label) for label in ("序号/FID", "FID", "问题编号", "问题ID", "候选编号") if label in cells), None)
             if current_disposition_table and (identity_column is None or decision_column is None or grade_column is None):
-                raise RuntimeError("LLM report has a malformed final-disposition table schema")
+                if not allow_incomplete:
+                    raise RuntimeError("LLM report has a malformed final-disposition table schema")
+                warnings.append("final_disposition_table_malformed")
+                current_disposition_table = False
+                continue
             final_columns = {
                 field: next(cells.index(label) for label in labels if label in cells)
                 for field, labels in {"rule": ("最终规则号", "规则号"), "title": ("问题摘要", "问题标题"), "page": ("页码", "PDF页码")}.items()
@@ -344,25 +429,40 @@ def _llm_report_metadata(markdown: str, required_rule_ids: list[str] | tuple[str
             id_match = re.search(r"\bF-[A-Za-z0-9-]+\b", identity_value)
             finding_id = id_match.group(0) if id_match else None
             if finding_id and finding_id not in findings_by_id:
-                raise RuntimeError(f"LLM report has a final disposition without detailed evidence: {finding_id}")
+                if not allow_incomplete:
+                    raise RuntimeError(f"LLM report has a final disposition without detailed evidence: {finding_id}")
+                warnings.append(f"final_disposition_without_evidence:{finding_id}")
+                finding_id = None
         elif not disposition_table_seen:
             finding_id = next((cell for cell in cells if cell in findings_by_id), None)
         if current_disposition_table and finding_id:
-            if finding_id in decisions:
-                raise RuntimeError(f"LLM report contains duplicate final dispositions: {finding_id}")
+            if finding_id in disposition_row_ids:
+                if not allow_incomplete:
+                    raise RuntimeError(f"LLM report contains duplicate final dispositions: {finding_id}")
+                decisions.pop(finding_id, None)
+                warning = f"final_disposition_duplicated:{finding_id}"
+                if warning not in warnings:
+                    warnings.append(warning)
+                continue
             disposition_row_ids.add(finding_id)
         if finding_id and decision_column is not None and decision_column < len(cells):
             decision = cells[decision_column]
             if current_disposition_table and not re.match(r"^(?:成立|待复核|撤回)(?:$|[（(：:\s])", decision):
-                raise RuntimeError(f"LLM report has an unrecognized final disposition for {finding_id}: {decision!r}")
+                if not allow_incomplete:
+                    raise RuntimeError(f"LLM report has an unrecognized final disposition for {finding_id}: {decision!r}")
+                warnings.append(f"final_disposition_unrecognized:{finding_id}")
+                continue
             if re.match(r"^(?:成立|待复核|撤回)(?:$|[（(：:\s])", decision):
                 reason = cells[reason_column] if reason_column is not None and reason_column < len(cells) else ""
-                decisions[finding_id] = (decision, reason)
                 grade_text = cells[grade_column] if grade_column is not None and grade_column < len(cells) else ""
                 valid_grade = re.match(r"^[ABC](?:$|\s*·|[（(])", grade_text)
                 no_grade = grade_text in {"—", "-"} and decision.startswith(("撤回", "待复核"))
                 if current_disposition_table and not (valid_grade or no_grade):
-                    raise RuntimeError(f"LLM report is missing a valid final grade for {finding_id}")
+                    if not allow_incomplete:
+                        raise RuntimeError(f"LLM report is missing a valid final grade for {finding_id}")
+                    warnings.append(f"final_disposition_grade_missing:{finding_id}")
+                    continue
+                decisions[finding_id] = (decision, reason)
                 if (re.search(r"不另计|不再计|不重复计|合并计", decision + " " + grade_text)
                         or re.fullmatch(r"成立[（(]重复[）)]", decision)
                         or re.search(r"(?:本行|本条|该候选|该项)(?:不另计|不再计|不重复计)", reason)):
@@ -376,13 +476,18 @@ def _llm_report_metadata(markdown: str, required_rule_ids: list[str] | tuple[str
             grade = re.match(r"^([ABC])(?:$|\s*·|[（(])", cells[grade_column])
             if grade:
                 findings_by_id[finding_id]["severity"] = grade.group(1)
+    missing_dispositions: list[str] = []
     if disposition_table_seen:
-        missing = sorted(set(findings_by_id) - set(decisions))
-        if missing:
-            raise RuntimeError(f"LLM report is missing final dispositions: {', '.join(missing)}")
+        missing_dispositions = sorted(set(findings_by_id) - set(decisions))
+        if missing_dispositions:
+            if not allow_incomplete:
+                raise RuntimeError(f"LLM report is missing final dispositions: {', '.join(missing_dispositions)}")
+            warnings.append(f"missing_final_dispositions:{','.join(missing_dispositions)}")
         unknown = sorted(disposition_row_ids - set(findings_by_id))
         if unknown:
-            raise RuntimeError(f"LLM report has final dispositions without detailed evidence: {', '.join(unknown)}")
+            if not allow_incomplete:
+                raise RuntimeError(f"LLM report has final dispositions without detailed evidence: {', '.join(unknown)}")
+            warnings.append(f"final_dispositions_without_evidence:{','.join(unknown)}")
     withdrawn_findings, review_findings, duplicate_findings = [], [], []
     for finding_id, (decision, reason) in decisions.items():
         if finding_id in duplicate_ids or decision.startswith(("撤回", "待复核")):
@@ -390,13 +495,33 @@ def _llm_report_metadata(markdown: str, required_rule_ids: list[str] | tuple[str
             finding.update({"review_status": decision, "review_reason": reason})
             destination = duplicate_findings if finding_id in duplicate_ids else withdrawn_findings if decision.startswith("撤回") else review_findings
             destination.append(finding)
+    if allow_incomplete:
+        for finding_id in missing_dispositions:
+            finding = findings_by_id.pop(finding_id)
+            finding.update({
+                "review_status": "待复核",
+                "review_reason": "模型未提供最终复核结论",
+            })
+            review_findings.append(finding)
     ids = list(findings_by_id)
     grade_summary = {grade: sum(1 for item in findings_by_id.values() if item["severity"] == grade) for grade in ("A", "B", "C")}
     verification = {"verdict": verdict, "counts": counts, "results": rows,
                     "findings": list(findings_by_id.values()), "finding_ids": ids}
-    if decisions:
+    if decisions or missing_dispositions:
         verification.update({"withdrawn_findings": withdrawn_findings, "review_findings": review_findings,
                              "duplicate_findings": duplicate_findings})
+    if allow_incomplete:
+        verification.update({
+            "completion_status": "needs_review" if warnings else "complete",
+            "warnings": warnings,
+            "completeness": {
+                "overall_verdict": overall_verdict_complete,
+                "coverage_table": coverage_match is not None,
+                "required_rules": len(required_ids),
+                "reported_rules": len(required_ids) - len(missing_rules),
+                "missing_rules": missing_rules,
+            },
+        })
     summary = {"findings_total": len(ids), "findings_review": counts["REVIEW"], "grade_summary": grade_summary}
     return verification, summary
 

@@ -6,7 +6,8 @@
 rules/
 |-- config.json                 # 启用哪些规则包；默认只启用 builtin
 |-- builtin/
-|   `-- rules.json              # 内置 19 项（唯一执行事实源，不要直接改）
+|   |-- rules.json              # 内置规则（唯一执行事实源，当前 46 条）
+|   `-- source/                 # 内置规则原始工作簿（AI报告审核规则_final.xlsx）
 |-- packs/
 |   |-- example-customer/       # 示例包（draft，未启用）
 |   |   |-- pack.json           # 编译产物
@@ -22,7 +23,7 @@ rules/
 
 ## 加一份新规则的标准流程
 
-1. 把规则文档放进 `rules/_inbox/`（支持 `.md` / `.txt` / `.docx` / `.pdf`）。
+1. 把规则文档放进 `rules/_inbox/`（支持 `.md` / `.txt` / `.docx` / `.pdf` / `.xlsx`）。
 2. 编译：
 
    ```bash
@@ -39,7 +40,7 @@ rules/
 
    校验不通过时不会启用；`--activate` 会把规则包写进 `config.json`。
 
-4. 之后每次审核都会自动加载内置 19 项 + 已启用的规则包；也可临时指定：
+4. 之后每次审核都会自动加载内置规则 + 已启用的规则包；也可临时指定：
 
    ```bash
    python scripts/check_coverage.py report.md --rules rules/packs/<包名>
@@ -59,7 +60,7 @@ rules/
 | X01 | 客户要求 | 温度曲线 | 未附试验箱温度曲线原始记录 | B | 试验记录页、附件 | 含环境试验 |
 | X02 | 客户要求 | 分包实验室 | 有分包但未注明分包实验室名称和资质 | B | 声明页 | 始终适用 |
 
-列名可用同义词：`规则编号`/`ID`、`检查项`/`规则名称`/`标题`、`不通过条件`/`判定条件`/`规则内容`、`等级`/`级别`、`证据位置`/`检查位置`。
+列名可用同义词：`规则编号`/`ID`、`检查项`/`规则名称`/`标题`、`不通过条件`/`判定条件`/`规则内容`、`等级`/`级别`/`建议修改的风险等级`、`证据位置`/`检查位置`。`高/中/低` 会映射为 `A/B/C`。
 
 ### 方式二：一条规则一节
 
@@ -78,7 +79,7 @@ rules/
 
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
-| `id` | 是 | 内置 `R01–R19`；附加规则用 `X01`、`C01`、`Q01`，**不得占用 R 段** |
+| `id` | 是 | 内置规则用 `R` 段（当前 `R01–R46`）；附加规则用 `X01`、`C01`、`Q01`，**不得占用任何已启用的内置 ID** |
 | `module` | 否 | 缺省为“客户要求” |
 | `title` | 是 | 检查项名称 |
 | `severity` | 是 | `A`/`B`/`C`，锁定，模型不能自行调整 |
@@ -95,8 +96,8 @@ rules/
 - 自定义 `python` 检查脚本默认不执行，需要显式 `--allow-plugins`（当前版本未开放）。
 - 规则包改动必须升 `version`，不能原地改已发布版本。
 
-## 内置 19 项
+## 内置规则
 
-`builtin/rules.json` 与 `references/audit-rules.md`、`SKILL.md` 速查表保持一致。修改内置规则需同时改这三处，并运行 `python -m pytest test/` 验证。
+`builtin/rules.json` 来自 `AI报告审核规则_final.xlsx`（Sheet1，46 条），由 `scripts/import_builtin_rules.py` 生成；原始工作簿保存在 `builtin/source/`。`rules/builtin/rules.md` 和 `references/audit-rules.md` 是同一 JSON 的可读版本，不得手改。
 
 网页端“文件审核”在每次审核开始时读取 `config.json` 中启用的规则包；新增或修改规则后必须 `--activate`，不需要重启服务，但 `_inbox/` 中未编译的文档不会生效。

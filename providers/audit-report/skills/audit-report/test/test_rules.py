@@ -3,11 +3,14 @@
 """Contracts for the rules directory and rule-pack compile/validate flow."""
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = SKILL_ROOT / "scripts"
@@ -15,6 +18,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 import _rules  # noqa: E402
 import check_coverage  # noqa: E402
+import import_builtin_rules  # noqa: E402
 import verify_findings  # noqa: E402
 from rules_compile import compile_pack, slugify  # noqa: E402
 
@@ -30,14 +34,96 @@ def _pack_markdown() -> str:
     )
 
 
-def test_builtin_pack_matches_fallback_severity():
+def test_builtin_pack_has_official_46_rules():
     path = SKILL_ROOT / "rules" / "builtin" / "rules.json"
     pack = json.loads(path.read_text(encoding="utf-8"))
     ids = [rule["id"] for rule in pack["rules"]]
-    assert ids == [f"R{i:02d}" for i in range(1, 20)]
-    assert {rule["id"]: rule["severity"] for rule in pack["rules"]} == _rules.FALLBACK_SEVERITY
+    assert ids == [f"R{i:02d}" for i in range(1, 47)]
+    assert all(rule["severity"] in {"A", "B", "C"} for rule in pack["rules"])
     errors, _warnings = _rules.validate_pack(pack, path)
     assert errors == []
+
+
+def test_builtin_import_loads_all_source_rows_with_matching_provenance():
+    source = SKILL_ROOT / "rules" / "builtin" / "source" / "AI报告审核规则_final.xlsx"
+    pack_path = SKILL_ROOT / "rules" / "builtin" / "rules.json"
+    pack = json.loads(pack_path.read_text(encoding="utf-8"))
+    imported_rules, source_meta = import_builtin_rules.read_rules(source, "Sheet1")
+    loaded = _rules.load_rules(SKILL_ROOT / "rules")
+
+    assert import_builtin_rules.DEFAULT_XLSX == source
+    assert source_meta == {"sheet": "Sheet1", "rows": 48, "header_row": 2}
+    assert len(imported_rules) == 46
+    assert [rule["source_row"] for rule in imported_rules] == list(range(3, 49))
+    assert pack["rules"] == imported_rules
+    assert pack["version"] == "2.0.0"
+    assert pack["compiled_from"]["source"] == "source/AI报告审核规则_final.xlsx"
+    assert pack["compiled_from"]["sheet"] == "Sheet1"
+    assert pack["compiled_from"]["sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
+    assert imported_rules[17]["severity"] == "B"
+    assert imported_rules[17]["severity_source"] == ""
+    assert loaded.builtin_ids == [f"R{index:02d}" for index in range(1, 47)]
+    assert loaded.ids == loaded.builtin_ids
+    assert loaded.severity == {rule["id"]: rule["severity"] for rule in imported_rules}
+    expected_markdown = import_builtin_rules.build_markdown(pack)
+    assert (
+        SKILL_ROOT / "rules" / "builtin" / "rules.md"
+    ).read_text(encoding="utf-8") == expected_markdown
+    assert (
+        SKILL_ROOT / "references" / "audit-rules.md"
+    ).read_text(encoding="utf-8") == expected_markdown
+
+
+def test_builtin_import_check_rejects_compiled_rule_drift_with_matching_source_hash(
+    tmp_path, monkeypatch
+):
+    source = SKILL_ROOT / "rules" / "builtin" / "source" / "AI报告审核规则_final.xlsx"
+    rules_dir = tmp_path / "rules"
+    builtin_dir = rules_dir / "builtin"
+    builtin_dir.mkdir(parents=True)
+    pack = json.loads(
+        (SKILL_ROOT / "rules" / "builtin" / "rules.json").read_text(encoding="utf-8")
+    )
+    pack["rules"][0]["severity"] = "A" if pack["rules"][0]["severity"] != "A" else "C"
+    (builtin_dir / "rules.json").write_text(json.dumps(pack, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(import_builtin_rules, "RULES_DIR", rules_dir)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["import_builtin_rules.py", "--check", "--xlsx", str(source)],
+    )
+
+    with pytest.raises(SystemExit, match="工作簿规则内容"):
+        import_builtin_rules.main()
+
+
+def test_builtin_import_rejects_a_missing_source_severity_header(tmp_path):
+    from openpyxl import Workbook
+
+    source = tmp_path / "rules.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["序号", "审核模块", "检查项", "判定规则"])
+    sheet.append([1, "检测照片", "照片日期", "照片日期不一致"])
+    workbook.save(source)
+
+    with pytest.raises(SystemExit, match="未找到完整规则表头"):
+        import_builtin_rules.read_rules(source, "Sheet")
+
+
+def test_builtin_import_rejects_unrecognized_nonempty_severity():
+    with pytest.raises(ValueError, match="无法识别风险等级"):
+        import_builtin_rules.severity_of("critical")
+
+
+def test_builtin_json_matches_source_workbook():
+    source = SKILL_ROOT / "rules" / "builtin" / "source" / "AI报告审核规则_final.xlsx"
+    result = subprocess.run(
+        [sys.executable, str(SCRIPTS / "import_builtin_rules.py"), "--check", "--xlsx", str(source)],
+        capture_output=True, encoding="utf-8", errors="replace", timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "matches" in result.stdout
 
 
 def test_compile_table_document_creates_draft_pack(tmp_path):
@@ -89,6 +175,22 @@ def test_compile_heading_document(tmp_path):
     assert pack["rules"][0]["title"] == "温度曲线"
 
 
+def test_compile_excel_rule_document(tmp_path):
+    from openpyxl import Workbook
+
+    source = tmp_path / "rules.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["规则ID", "模块", "检查项", "判定规则（不通过条件）", "建议等级", "取证位置"])
+    sheet.append(["X01", "客户要求", "温度曲线", "未附曲线原始记录", "高", "附件"])
+    workbook.save(source)
+
+    pack = compile_pack(source, "excel-test", tmp_path / "excel")
+    assert [rule["id"] for rule in pack["rules"]] == ["X01"]
+    assert pack["rules"][0]["severity"] == "A"
+    assert pack["rules"][0]["fail_when"] == "未附曲线原始记录"
+
+
 def test_validate_rejects_builtin_id_in_extra_pack(tmp_path):
     pack = {
         "pack": "bad",
@@ -105,7 +207,7 @@ def test_validate_rejects_builtin_id_in_extra_pack(tmp_path):
             }
         ],
     }
-    errors, _warnings = _rules.validate_pack(pack, tmp_path / "pack.json")
+    errors, _warnings = _rules.validate_pack(pack, tmp_path / "pack.json", builtin_ids={"R05"})
     assert any("不得占用内置规则号" in error for error in errors)
 
 
@@ -150,9 +252,11 @@ def test_extra_pack_requires_coverage_row(tmp_path):
     )
 
     ruleset = _rules.load_rules(rules_dir)
+    assert ruleset.builtin_ids == [f"R{index:02d}" for index in range(1, 47)]
+    assert ruleset.extra_ids == ["X01"]
     assert "X01" in ruleset.ids
     rows = "\n".join(
-        f"| {rule_id} | 模块 | 检查项 | B | 通过 | - |" for rule_id in _rules.BUILTIN_IDS
+        f"| {rule_id} | 模块 | 检查项 | B | 通过 | - |" for rule_id in ruleset.builtin_ids
     )
     report = tmp_path / "report.md"
     report.write_text("**总评：通过**\n\n" + rows + "\n", encoding="utf-8")
@@ -218,7 +322,7 @@ def test_rule_ids_over_99_compile_load_and_appear_in_coverage(tmp_path):
 def test_coverage_checker_preserves_review_without_forcing_failure(tmp_path):
     ruleset = _rules.load_rules()
     coverage = [
-        f"| {rule_id} | 模块 | 检查项 | {_rules.FALLBACK_SEVERITY[rule_id]} | "
+        f"| {rule_id} | 模块 | 检查项 | {ruleset.severity[rule_id]} | "
         f"{'证据不足' if rule_id == 'R01' else '通过'} | 证据 |"
         for rule_id in ruleset.ids
     ]
@@ -263,13 +367,13 @@ def test_coverage_checker_preserves_review_without_forcing_failure(tmp_path):
 
     duplicate_and_missing = [
         line for line in report.read_text(encoding="utf-8").splitlines()
-        if not line.startswith("| R19 |")
+        if not line.startswith("| R46 |")
     ]
     duplicate_and_missing.append("| R01 | 模块 | 重复项 | B | 通过 | 证据 |")
     report.write_text("\n".join(duplicate_and_missing), encoding="utf-8")
     problems = check_coverage.check_report(report, ruleset)
     assert any("R01: duplicate coverage row" in problem for problem in problems)
-    assert any("missing coverage rows" in problem and "R19" in problem for problem in problems)
+    assert any("missing coverage rows" in problem and "R46" in problem for problem in problems)
 
 
 def test_finding_verifier_keeps_uncertain_coverage_as_review_and_decodes_small_image(

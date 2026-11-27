@@ -67,18 +67,63 @@ def skill_root() -> Path:
     return Path(__file__).resolve().parents[1] / "skills" / "audit-report"
 
 
+def _is_builtin_pack(payload: dict[str, Any]) -> bool:
+    """Recognize a versioned package-owned built-in rules payload."""
+    return payload.get("pack") == "builtin" and isinstance(payload.get("rules"), list) and bool(payload["rules"])
+
+
+def _version_tuple(value: Any) -> tuple[int, int, int] | None:
+    """Parse a numeric semantic version for built-in update comparisons."""
+    match = re.fullmatch(r"\s*(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?\s*", str(value or ""))
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
+def _builtin_subtree_matches(source: Path, target: Path) -> bool:
+    """Return whether every shipped file under builtin exists byte-for-byte at target."""
+    return all(
+        (target / path.relative_to(source)).is_file()
+        and (target / path.relative_to(source)).read_bytes() == path.read_bytes()
+        for path in source.rglob("*")
+        if path.is_file()
+    )
+
+
+def _refresh_bundled_builtin(source: Path, target: Path) -> None:
+    """Refresh only package-owned builtin files while leaving other shared data alone."""
+    source_rules = read_json(source / "rules.json")
+    if not _is_builtin_pack(source_rules):
+        raise ValueError(f"bundled built-in rules are invalid: {source / 'rules.json'}")
+    target_rules_path = target / "rules.json"
+    if target_rules_path.is_file():
+        target_rules = read_json(target_rules_path)
+        if not _is_builtin_pack(target_rules):
+            return
+        target_version = _version_tuple(target_rules.get("version"))
+        source_version = _version_tuple(source_rules.get("version"))
+        if target_version and source_version and target_version > source_version:
+            return
+        if _builtin_subtree_matches(source, target):
+            return
+    shutil.copytree(source, target, dirs_exist_ok=True)
+
+
 def ensure_rules_config(host: Any) -> Path:
     """Create the shared rules config and store its default builtin with the library."""
     root = rules_root(host)
     root.mkdir(parents=True, exist_ok=True)
     config_path = root / "config.json"
-    bundled_builtin = (skill_root() / "rules" / "builtin" / "rules.json").resolve()
+    bundled_builtin_dir = skill_root() / "rules" / "builtin"
+    bundled_builtin = (bundled_builtin_dir / "rules.json").resolve()
     builtin = root / "builtin" / "rules.json"
     configured_root = has_configured_shared_data_dir(host)
     with _LIBRARY_LOCK:
-        if configured_root and not builtin.exists():
-            builtin.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(bundled_builtin, builtin)
+        config = read_json(config_path) if config_path.is_file() else {}
+        configured_builtin = Path(str(config.get("builtin") or "builtin/rules.json"))
+        if not configured_builtin.is_absolute():
+            configured_builtin = root / configured_builtin
+        local_builtin_selected = config_path.is_file() and configured_builtin.resolve() == builtin.resolve()
+        if configured_root or builtin.exists() or local_builtin_selected:
+            _refresh_bundled_builtin(bundled_builtin_dir, builtin.parent)
         if not config_path.is_file():
             write_json(config_path, {
                 "version": 1,
@@ -87,7 +132,6 @@ def ensure_rules_config(host: Any) -> Path:
                 "allow_overrides": False,
             })
         elif configured_root:
-            config = read_json(config_path)
             configured = Path(str(config.get("builtin") or ""))
             if configured.resolve() == bundled_builtin and builtin.is_file():
                 config["builtin"] = str(builtin.resolve())

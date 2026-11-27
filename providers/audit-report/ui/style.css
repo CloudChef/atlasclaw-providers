@@ -394,6 +394,7 @@ select {
 .result-overview { margin: 0 0 10px; font-size: 14px; font-weight: 600; }
 .result-overview.ok { color: #15803d; }
 .result-overview.bad { color: #b91c1c; }
+.result-incomplete-note { margin: 0 0 10px; color: #7c2d12; font-size: 13px; }
 
 .result-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .result-table th,

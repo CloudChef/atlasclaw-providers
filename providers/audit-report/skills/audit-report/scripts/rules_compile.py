@@ -36,7 +36,7 @@ from pathlib import Path
 from _rules import PACK_NAME_RE, RULES_DIR, RULE_ID_RE
 from extract_report import extract_docx, extract_pdf
 
-SUPPORTED_INPUTS = {".md", ".txt", ".docx", ".pdf"}
+SUPPORTED_INPUTS = {".md", ".txt", ".docx", ".pdf", ".xlsx", ".xlsm"}
 
 ID_ALIASES = {"规则id", "规则编号", "规则号", "id", "编号"}
 MODULE_ALIASES = {"模块", "类别", "分类", "规则模块"}
@@ -121,7 +121,12 @@ def iter_tables(lines: list[str]) -> list[list[list[str]]]:
 
 
 def severity_of(value: str) -> str:
-    match = re.search(r"(?<![A-Za-z])([ABC])(?![A-Za-z])", value or "")
+    text = (value or "").strip()
+    mapping = {"高": "A", "中": "B", "低": "C", "严重": "A", "主要": "B", "次要": "C"}
+    for label, severity in mapping.items():
+        if label in text:
+            return severity
+    match = re.search(r"(?<![A-Za-z])([ABC])(?![A-Za-z])", text)
     return match.group(1) if match else ""
 
 
@@ -298,10 +303,12 @@ def parse_heading_rules(lines: list[str], prefix: str) -> tuple[list[dict], list
     return rules, warnings
 
 
-def read_source_text(path: Path, workdir: Path) -> str:
+def read_source_text(path: Path, workdir: Path, sheet: str | None = None) -> str:
     suffix = path.suffix.lower()
     if suffix in {".md", ".txt"}:
         return path.read_text(encoding="utf-8", errors="replace")
+    if suffix in {".xlsx", ".xlsm"}:
+        return _read_excel_text(path, sheet)
     if suffix == ".docx":
         extract_docx(path, workdir, render=False, convert=False)
         return (workdir / "document.md").read_text(encoding="utf-8")
@@ -315,7 +322,45 @@ def read_source_text(path: Path, workdir: Path) -> str:
         if document.is_file():
             parts.append(document.read_text(encoding="utf-8"))
         return "\n\n".join(parts)
-    raise SystemExit(f"不支持的规则文档类型: {path.suffix}（支持 .md/.txt/.docx/.pdf）")
+    raise SystemExit(f"不支持的规则文档类型: {path.suffix}（支持 .md/.txt/.docx/.pdf/.xlsx）")
+
+
+def _read_excel_text(path: Path, sheet: str | None) -> str:
+    try:
+        from openpyxl import load_workbook
+    except ImportError as exc:
+        raise SystemExit("读取 Excel 规则文档需要 openpyxl: pip install openpyxl") from exc
+    workbook = load_workbook(path, data_only=True, read_only=True)
+    try:
+        names = list(workbook.sheetnames)
+        target = sheet or names[0]
+        if target not in names:
+            raise SystemExit(f"Excel 中不存在工作表 {target!r}；可选: {', '.join(names)}")
+        worksheet = workbook[target]
+        rows: list[list[str]] = []
+        for row in worksheet.iter_rows(values_only=True):
+            cells = [clean_cell("" if value is None else str(value)).replace("|", "\\|") for value in row]
+            if any(cells):
+                rows.append(cells)
+    finally:
+        workbook.close()
+    if not rows:
+        return ""
+    header_index = next(
+        (index for index, row in enumerate(rows) if is_rule_table(map_header(row))),
+        0,
+    )
+    header = rows[header_index]
+    width = max(len(row) for row in rows)
+    header += [""] * (width - len(header))
+    lines = [
+        "| " + " | ".join(header) + " |",
+        "| " + " | ".join(["---"] * width) + " |",
+    ]
+    for row in rows[header_index + 1:]:
+        row = row + [""] * (width - len(row))
+        lines.append("| " + " | ".join(row) + " |")
+    return "\n".join(lines)
 
 
 def parse_rules(text: str, prefix: str) -> tuple[list[dict], list[str]]:
@@ -378,6 +423,7 @@ def compile_pack(
     title: str = "",
     version: str = "1.0.0",
     copy_source: bool = True,
+    sheet: str | None = None,
 ) -> dict:
     """Compile one rule document into ``<out_dir>/pack.json``."""
     if not PACK_NAME_RE.match(pack_name):
@@ -394,7 +440,7 @@ def compile_pack(
         source = target
 
     with tempfile.TemporaryDirectory(prefix="rules-extract-") as tmp:
-        text = read_source_text(source, Path(tmp))
+        text = read_source_text(source, Path(tmp), sheet)
     rules, warnings = parse_rules(text, prefix)
     if not rules:
         raise SystemExit(
@@ -440,6 +486,7 @@ def main() -> int:
     parser.add_argument("--title", default="", help="Human-readable pack title")
     parser.add_argument("--version", default="1.0.0", help="Semantic version (default: 1.0.0)")
     parser.add_argument("--no-copy", action="store_true", help="Do not copy the source into source/")
+    parser.add_argument("--sheet", help="Excel worksheet name (default: first sheet)")
     args = parser.parse_args()
 
     source = Path(args.source)
@@ -452,6 +499,7 @@ def main() -> int:
         title=args.title,
         version=args.version,
         copy_source=not args.no_copy,
+        sheet=args.sheet,
     )
 
     print(f"[OK] {out_dir / 'pack.json'}")

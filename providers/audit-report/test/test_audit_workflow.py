@@ -33,9 +33,14 @@ def _project(project_id: str, issue_id: str, filenames: tuple[str, ...]) -> str:
 def _summary() -> str:
     from _rules import load_rules
 
-    rows = ["# 审核报告", "## 全局规则覆盖", "| 规则 | 模块 | 检查项 | 等级 | 结论 | 依据 |", "| --- | --- | --- | --- | --- | --- |"]
+    rows = [
+        "# 审核报告", "**总评：通过**", "## 检查覆盖表",
+        "| # | 模块 | 检查项 | 等级 | 结果 | 证据位置/说明 |", "| --- | --- | --- | --- | --- | --- |",
+    ]
     rows.extend(f"| {rule} | 模块 | 检查项 | B | 通过 | 证据 |" for rule in load_rules().ids)
-    rows.extend(["## 全局问题", "### F-000001 [B] 全局问题（R01）",
+    rows.extend([
+        "## 复核结果", "| FID | 复核结果 | 最终等级 | 理由/依据 |", "| --- | --- | --- | --- |",
+        "| F-000001 | 成立 | B | 已核实 |", "## 全局问题", "### F-000001 [B] 全局问题（R01）",
                  "- **规则号**：`R01`", "- **等级**：`B · 主要`", "详情。"])
     return "\n".join(rows)
 
@@ -141,7 +146,8 @@ async def test_all_projects_run_without_local_concurrency_cap_and_keep_full_sour
     )
 
     assert peak == 3
-    assert result.startswith("# 审核报告")
+    assert result.startswith("> 报告未完成：模型未提供部分候选处置结论")
+    assert all(f"| F-00{index}001 | 待复核 | — |" in result for index in (1, 2, 3))
     assert "# 附录：分项目审核原文" in result
     assert "Page two full" in prompts[1] and "Page three full" in prompts[1]
     assert "Page four full" in prompts[2]
@@ -243,7 +249,9 @@ async def test_long_index_scans_all_pages_in_order_and_merges_cross_chunk_projec
     report = "\n\n".join(f"## Page {page}\nsource page {page}" for page in range(1, 71))
     result = await audit_workflow.execute_audit(report, [], 70, submit, tmp_path)
 
-    assert result.startswith("# 审核报告")
+    assert result.startswith("> 报告未完成：模型未提供部分候选处置结论")
+    assert "| F-001001 | 待复核 | — |" in result
+    assert "### F-001001 [A]" in result
     assert [prompt["formal_pages"] for prompt in chunk_prompts] == [list(range(1, 33)), list(range(33, 65)), list(range(65, 71))]
     assert chunk_prompts[0]["context_pages"] == [33]
     assert chunk_prompts[1]["context_pages"] == [32, 65]
@@ -939,7 +947,6 @@ async def test_global_format_retry_includes_previous_raw_without_losing_ids_or_m
     _install_builders(monkeypatch)
     no_projects = '{"projects":[],"no_projects_reason":"全文没有独立检测项目"}'
     first_summary = _summary().replace("| R01 | 模块 | 检查项 | B | 通过 | 证据 |\n", "")
-    valid_summary = _summary()
     prompts: list[str] = []
     summary_calls = 0
 
@@ -949,19 +956,21 @@ async def test_global_format_retry_includes_previous_raw_without_losing_ids_or_m
         if prompt.startswith("INDEX"):
             return no_projects
         summary_calls += 1
-        return first_summary if summary_calls == 1 else valid_summary
+        return first_summary
 
-    await audit_workflow.execute_audit(
+    result = await audit_workflow.execute_audit(
         "## Page 1\n报告正文", [{"filename": "台账.xlsx", "kind": "ledger", "content": "M01来源"}],
         1, submit, tmp_path,
     )
 
-    retry_prompt = prompts[-1]
-    assert "<PREVIOUS_SUMMARY_RAW>" in retry_prompt
-    assert first_summary in retry_prompt
-    assert "F-000001" in retry_prompt and "M01" in retry_prompt and "台账.xlsx" in retry_prompt
+    assert len([prompt for prompt in prompts if prompt.startswith("SUMMARY")]) == 1
+    assert "报告未完成" in result
+    assert "报告正文" in prompts[-1]
+    assert "| R01 | 页码 | 页码连续完整 | C | 待复核 | 模型未提供此规则结论 |" in result
+    assert "| R01 | 页码 | 页码连续完整 | C | 通过 | 证据 |" not in result
+    assert "F-000001" in result and "M01" in prompts[-1] and "台账.xlsx" in prompts[-1]
     assert (tmp_path / "audit-main-raw.md").read_text(encoding="utf-8") == first_summary
-    assert (tmp_path / "audit-main-retry-raw.md").read_text(encoding="utf-8") == valid_summary
+    assert not (tmp_path / "audit-main-retry-raw.md").exists()
 
 
 @pytest.mark.asyncio
@@ -1042,7 +1051,7 @@ async def test_text_model_incomplete_request_retries_same_prompt_once_then_saves
         1, submit, tmp_path,
     )
 
-    assert result.startswith("# 审核报告")
+    assert result.startswith("> 报告未完成：模型未提供部分候选处置结论")
     project_requests = [item for item in json.loads(
         (tmp_path / "workflow.json").read_text(encoding="utf-8")
     )["requests"] if item["stage"] == "project-review:6.1"]
@@ -1259,10 +1268,15 @@ def test_legacy_six_digit_project_and_global_ids_remain_accepted(monkeypatch):
 def test_global_coverage_accepts_and_preserves_qualified_model_results() -> None:
     markdown = (
         "# 审核报告\n**总评：需补充材料**\n\n## 检查覆盖表\n"
+        "| # | 模块 | 检查项 | 等级 | 结果 | 证据位置/说明 |\n| --- | --- | --- | --- | --- | --- |\n"
         "| R07 | 标准 | 年代号 | B | 通过（仅年代号形式） | 未提供标准正文，不表示条款符合 |\n"
         "| R13 | 日期 | 日期链 | A | 通过（已读日期） | 生产日期为N/A，保留证据限制 |\n"
     )
-    assert audit_workflow._check_global(markdown, ["R07", "R13"]) == markdown.strip()
+    normalized = audit_workflow._check_global(markdown, ["R07", "R13"])
+    assert "报告未完成" not in normalized
+    assert "**总评：需补充材料**" in normalized
+    assert "| R07 | 标准 | 年代号 | B | 通过（仅年代号形式） | 未提供标准正文，不表示条款符合 |" in normalized
+    assert "| R13 | 日期 | 日期链 | A | 通过（已读日期） | 生产日期为N/A，保留证据限制 |" in normalized
 
 
 def test_global_repeated_project_detail_is_preserved_as_reference_without_id_collision():
@@ -1277,14 +1291,17 @@ def test_global_repeated_project_detail_is_preserved_as_reference_without_id_col
     assert "### F-000-001 [C] 全局新问题" in normalized
 
 
-def test_global_final_table_cannot_omit_project_candidate_disposition():
+def test_global_final_table_marks_missing_project_candidate_pending_without_blocking():
     markdown = (
         "# 审核报告\n**总评：不通过**\n\n"
         "| FID | 复核结果 | 最终等级 | 理由/依据 |\n|---|---|---|---|\n"
         "| F-001-001 | 成立 | B | 已确认 |\n"
     )
-    with pytest.raises(ValueError, match="missing final dispositions.*F-001-002"):
-        audit_workflow._check_global(markdown, [], project_finding_ids={"F-001-001", "F-001-002"})
+    normalized = audit_workflow._check_global(markdown, [], project_finding_ids={"F-001-001", "F-001-002"})
+    assert "| F-001-001 | 成立 | B | 已确认 |" in normalized
+    assert "| F-001-002 | 待复核 | — | 模型未给出明确处置；保留待复核，不推断成立或撤回。 |" in normalized
+    assert "报告未完成：模型未提供部分候选处置结论" in normalized
+    assert "F-001-002" in normalized
 
 
 def test_global_new_table_finding_requires_its_detail_for_evidence_capture():

@@ -15,7 +15,7 @@ keywords:
 
 capabilities:
   - Upload PDF/Word inspection reports
-  - Run the builtin 19-rule compliance audit plus any active rule packs through the audit-report skill
+  - Run the builtin AI-rule compliance audit (46 rules) plus any active rule packs through the audit-report skill
   - Track audit progress and review findings
   - Share locally parsed test standards and equipment ledgers
   - Preview and download the desensitized PDF and audit PDF
@@ -41,15 +41,13 @@ It contributes:
 - a backend HTTP API declared in `runtime-api.json`;
 - the `audit-report` skill under `skills/audit-report/`. The provider prepares
   a desensitized PDF, snapshots the shared references and enabled rules, and
-  calls the skill's `audit_prepared()` workflow. Scripted directory, project,
-  and summary requests use the configured Core model through
-  `context.run_text(prompt, system_prompt, timeout_seconds)`; the system prompt
-  is loaded from `skills/audit-report/references/audit-system.md`. The workflow
-  submits extracted text and parsed materials only, not page images. These
-  internal callbacks do not go through the
-  Agent Host capability selector. Ordinary Host agent runs and their user-enabled
-  skills remain available to separate tool-using workflows. The Provider neither
-  reads nor forwards model credentials.
+  calls the skill's `audit_prepared()` workflow. Directory, project, and summary
+  requests use `context.run_text`; page-image requests use `context.run_visual`
+  with the canonical `audit-report:audit-report` Skill ID. Both bridges use the
+  configured Core binding for this Provider Skill, and the visual bridge enforces
+  image capability only for page-image requests. Text stages use the prepared,
+  desensitized PDF; visual pages are rendered from the original report file. The
+  Provider neither reads nor forwards model credentials.
 
 The provider owns its SQLite index under its report data root and never writes
 to core tables. By default, the report data root is `context.host.data_dir`.
@@ -76,7 +74,8 @@ shared.
    Business decisions, including dates, measurements, standards, and ledger
    comparisons, are made by the LLM. Local code validates structure and fixed
    rule metadata.
-6. Capture the model-cited source pages locally, insert screenshots, and render a PDF.
+6. Capture the model-cited pages from the prepared, desensitized PDF locally,
+   insert screenshots, and render a PDF.
    Markdown originals, provenance, and intermediate HTML stay available locally
    for traceability. Legacy HTML reports remain readable.
 
@@ -90,9 +89,11 @@ Rule packs are data, not code: add the rule document to
 `rules_validate.py <pack.json> --activate`. Draft packs are not loaded by the
 provider until activated.
 
-Page images do not accompany the model request. For matters that cannot be
-verified from text and parsed materials, the report states the evidence
-limitation; desensitization or extraction gaps do not prove that the original
+Text-model requests contain extracted text and parsed materials, without page
+pixels. The separate visual stage receives page images rendered from the
+original report file and its failure prevents the report from completing.
+For matters that cannot be verified from available evidence, the report states
+the limitation; desensitization or extraction gaps do not prove that the original
 document is missing content. Missing, incomplete, or truncated model responses
 fail the task; they are never published as a pass.
 

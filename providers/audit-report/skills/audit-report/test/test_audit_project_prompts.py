@@ -19,6 +19,7 @@ from audit_project_prompts import (  # noqa: E402
     build_index_merge_prompt,
     build_project_prompt,
     build_summary_prompt,
+    build_visual_prompt,
     render_prompt_template,
 )
 import audit_project_prompts as prompts_module  # noqa: E402
@@ -131,7 +132,8 @@ def test_project_prompt_contains_complete_rules_native_text_all_materials_and_ta
     assert "视觉核查原始结果" not in prompt
     assert "小页组数值核查原始记录" not in prompt
     assert "待复核候选" not in prompt and "INITIAL_DRAFT" not in prompt
-    assert {f"R{i:02d}" for i in range(1, 20)} <= {rule["id"] for rule in pack["rules"]}
+    assert [rule["id"] for rule in pack["rules"]] == [f"R{i:02d}" for i in range(1, 47)]
+    assert all(f'"id": "{rule["id"]}"' in prompt for rule in pack["rules"])
 
 
 def test_summary_prompt_keeps_all_source_materials_reviews_and_reference_index():
@@ -212,7 +214,7 @@ def test_rules_config_can_point_to_absolute_builtin_pack_path(tmp_path):
         encoding="utf-8",
     )
     prompt = build_project_prompt({"id": "P", "title": "T", "page_start": 1, "page_end": 1}, "text", "front", [], 1, rules_dir=rules_dir)
-    assert "R19" in prompt and "完整内置 JSON 规则源" not in prompt
+    assert "R46" in prompt and "完整内置 JSON 规则源" not in prompt
 
 
 def test_default_rules_root_honours_audit_rules_dir_environment(tmp_path, monkeypatch):
@@ -225,3 +227,13 @@ def test_default_rules_root_honours_audit_rules_dir_environment(tmp_path, monkey
     monkeypatch.setenv("AUDIT_RULES_DIR", str(rules_dir))
     prompt = build_project_prompt({"id": "P", "title": "T", "page_start": 1, "page_end": 1}, "text", "front", [], 1)
     assert "environment-root R01 title" in prompt
+
+
+def test_visual_prompt_includes_visual_rules_and_page_contract():
+    prompt = build_visual_prompt(
+        "## Page 1\n\nSynthetic text", [1], [], page_count=1,
+    )
+    assert "R14" in prompt and "R30" in prompt and "R34" in prompt
+    assert "audit-visual-review" in prompt or "页面组视觉核查合同" in prompt
+    assert "### Page N" in prompt
+    assert "R01" not in prompt  # non-visual page-number rule is not sent

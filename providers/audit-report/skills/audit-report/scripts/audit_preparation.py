@@ -17,6 +17,56 @@ import pymupdf
 PREPARATION_VERSION = 8
 
 
+def _convert_docx_with_word(source: Path, target: Path) -> Path:
+    """Convert DOCX to PDF with local Microsoft Word when LibreOffice is absent."""
+    try:
+        import win32com.client  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError("Neither LibreOffice nor pywin32 is available for DOCX to PDF conversion") from exc
+    target.parent.mkdir(parents=True, exist_ok=True)
+    word = win32com.client.DispatchEx("Word.Application")
+    word.Visible = False
+    word.DisplayAlerts = 0
+    document = None
+    try:
+        document = word.Documents.Open(
+            FileName=str(source), ConfirmConversions=False, ReadOnly=True,
+            AddToRecentFiles=False, Visible=False,
+        )
+        document.SaveAs2(str(target), FileFormat=17)
+    finally:
+        if document is not None:
+            document.Close(False)
+        word.Quit()
+    if not target.is_file():
+        raise RuntimeError("Word did not produce the visual PDF")
+    return target
+
+
+def prepare_visual_pdf(source: str | Path, output_dir: str | Path) -> dict:
+    """Return an original-page PDF for the separately authorized visual review."""
+    source, output_dir = Path(source).resolve(), Path(output_dir).resolve()
+    if source.suffix.lower() not in {".pdf", ".docx"} or not source.is_file():
+        raise ValueError("A readable PDF or DOCX report is required for visual review")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if source.suffix.lower() == ".pdf":
+        pdf = source
+    else:
+        pdf = output_dir / "visual-source.pdf"
+        if not pdf.is_file() or pdf.stat().st_mtime < source.stat().st_mtime:
+            from extract_report import convert_office
+            converted, _note = convert_office(source, output_dir, "pdf")
+            if converted is None:
+                _convert_docx_with_word(source, pdf)
+            else:
+                converted.replace(pdf)
+    with pymupdf.open(pdf) as document:
+        if document.needs_pass or document.page_count < 1:
+            raise ValueError("Visual PDF is empty or encrypted")
+        page_count = document.page_count
+    return {"pdf": str(pdf), "page_count": page_count, "source_sha256": file_digest(source)}
+
+
 def file_digest(path: Path) -> str:
     """Hash a file without retaining its bytes in memory."""
     digest = hashlib.sha256()
@@ -30,7 +80,8 @@ def prepare_report(source: str | Path, output_dir: str | Path) -> dict:
     """Desensitize a PDF/DOCX and return its checked PDF and local provenance.
 
     A valid prior preparation in the same directory can be reused. Exceptions
-    stop the workflow before any model request. Original documents stay local.
+    stop the text workflow before any model request. The original document is
+    kept local and used only by the separately authorized visual review.
     """
     source, output_dir = Path(source).resolve(), Path(output_dir).resolve()
     if source.suffix.lower() not in {".pdf", ".docx"} or not source.is_file():
@@ -60,7 +111,7 @@ def prepare_report(source: str | Path, output_dir: str | Path) -> dict:
         from extract_report import convert_office
         pdf, note = convert_office(sanitized, stage, "pdf")
         if pdf is None:
-            raise RuntimeError("Local Word to PDF conversion failed: " + note)
+            pdf = _convert_docx_with_word(sanitized, stage / (sanitized.stem + ".pdf"))
     else:
         pdf = sanitized
     with pymupdf.open(pdf) as document:

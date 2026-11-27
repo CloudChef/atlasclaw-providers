@@ -59,6 +59,25 @@ def _host(tmp_path: Path) -> SimpleNamespace:
     return SimpleNamespace(data_dir=str(data_dir), shared_data_dir=data_dir.parents[1] / "_shared")
 
 
+def _legacy_builtin_pack() -> dict:
+    bundled = json.loads(
+        (standards_service.skill_root() / "rules" / "builtin" / "rules.json").read_text(encoding="utf-8")
+    )
+    bundled["version"] = "1.0.0"
+    bundled["title"] = "Legacy 19-rule built-in"
+    bundled["rules"] = bundled["rules"][:19]
+    bundled.pop("compiled_from", None)
+    return bundled
+
+
+def _file_tree(root: Path) -> dict[str, bytes]:
+    return {
+        str(path.relative_to(root)): path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+
+
 def _create(host: SimpleNamespace, standard_id: str = "std-1") -> dict:
     directory = standards_service.standard_dir(host, standard_id)
     directory.mkdir(parents=True, exist_ok=True)
@@ -139,6 +158,87 @@ def test_configured_library_repoints_bundled_builtin_without_losing_config(tmp_p
     assert updated["packs"] == ["packs/custom"]
     assert updated["allow_overrides"] is True
     assert (rules / "builtin" / "rules.json").is_file()
+
+
+def test_existing_shared_builtin_refresh_preserves_user_library_content(tmp_path: Path) -> None:
+    host = _host(tmp_path)
+    configured = tmp_path / "configured-standards"
+    host.config = {"standards_dir": str(configured)}
+    rules = configured / "rules"
+    builtin_dir = rules / "builtin"
+    builtin_dir.mkdir(parents=True)
+    (builtin_dir / "rules.json").write_text(
+        json.dumps(_legacy_builtin_pack(), ensure_ascii=False), encoding="utf-8"
+    )
+    (builtin_dir / "rules.md").write_text("legacy bundled reference", encoding="utf-8")
+    (builtin_dir / "source").mkdir()
+    (builtin_dir / "source" / "old-source.xlsx").write_bytes(b"old bundled source")
+
+    custom_pack = rules / "packs" / "customer-upload"
+    custom_pack.mkdir(parents=True)
+    (custom_pack / "pack.json").write_text(json.dumps({
+        "pack": "customer-upload", "version": "1.0.0", "status": "active",
+        "rules": [{"id": "X01", "title": "Customer rule", "severity": "B", "fail_when": "x"}],
+    }), encoding="utf-8")
+    config_path = rules / "config.json"
+    standards_service.write_json(config_path, {
+        "version": 1,
+        "builtin": str((builtin_dir / "rules.json").resolve()),
+        "packs": ["packs/customer-upload"],
+        "allow_overrides": True,
+        "customer_setting": "keep",
+    })
+    _create_excel(host, "ledger-1", "设备台账.xlsx")
+    preserved_config = config_path.read_bytes()
+    preserved_packs = _file_tree(rules / "packs")
+    preserved_standards = _file_tree(configured / "standards")
+
+    config = standards_service.ensure_rules_config(host)
+
+    shipped_builtin = standards_service.skill_root() / "rules" / "builtin"
+    assert standards_service.read_json(builtin_dir / "rules.json") == standards_service.read_json(
+        shipped_builtin / "rules.json"
+    )
+    assert len(standards_service.read_json(builtin_dir / "rules.json")["rules"]) == 46
+    assert (builtin_dir / "rules.md").read_bytes() == (shipped_builtin / "rules.md").read_bytes()
+    assert (builtin_dir / "source" / "AI报告审核规则_final.xlsx").read_bytes() == (
+        shipped_builtin / "source" / "AI报告审核规则_final.xlsx"
+    ).read_bytes()
+    assert Path(standards_service.read_json(config)["builtin"]) == (builtin_dir / "rules.json").resolve()
+    assert config_path.read_bytes() == preserved_config
+    assert _file_tree(rules / "packs") == preserved_packs
+    assert _file_tree(configured / "standards") == preserved_standards
+    loaded, _labels = standards_service.load_audit_rules(host)
+    assert [rule.rule_id for rule in loaded][:46] == [f"R{number:02d}" for number in range(1, 47)]
+    assert "X01" in {rule.rule_id for rule in loaded}
+
+
+def test_refresh_changes_new_snapshots_but_keeps_historical_rules_pinned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    host = _host(tmp_path)
+    configured = tmp_path / "configured-standards"
+    host.config = {"standards_dir": str(configured)}
+    old_package = tmp_path / "old-package"
+    old_rules = old_package / "rules" / "builtin"
+    old_rules.mkdir(parents=True)
+    (old_rules / "rules.json").write_text(
+        json.dumps(_legacy_builtin_pack(), ensure_ascii=False), encoding="utf-8"
+    )
+    monkeypatch.setattr(standards_service, "skill_root", lambda: old_package)
+    historical = standards_service.snapshot_audit_library(host, tmp_path / "run-old")
+    historical_json = historical["rules_dir"] / "builtin" / "rules.json"
+    historical_hash = hashlib.sha256(historical_json.read_bytes()).hexdigest()
+    assert len(json.loads(historical_json.read_text(encoding="utf-8"))["rules"]) == 19
+
+    bundled_skill = Path(__file__).resolve().parents[1] / "skills" / "audit-report"
+    monkeypatch.setattr(standards_service, "skill_root", lambda: bundled_skill)
+    current = standards_service.snapshot_audit_library(host, tmp_path / "run-new")
+    current_json = current["rules_dir"] / "builtin" / "rules.json"
+
+    assert len(json.loads(current_json.read_text(encoding="utf-8"))["rules"]) == 46
+    assert hashlib.sha256(historical_json.read_bytes()).hexdigest() == historical_hash
+    assert len(json.loads(historical_json.read_text(encoding="utf-8"))["rules"]) == 19
 
 
 def test_configured_library_preserves_custom_builtin_pointer(tmp_path: Path) -> None:
@@ -234,7 +334,7 @@ def test_compile_standard_activates_rule_pack(tmp_path: Path) -> None:
     rules, packs = batch_audit.load_rule_set(ROOT / "skills" / "audit-report", rules_dir=standards_service.rules_root(host))
     ids = [rule.rule_id for rule in rules]
     assert "R01" in ids and "X01" in ids and "X02" in ids
-    assert len(ids) == 21
+    assert len(ids) == 48
     assert any(pack.startswith(record["pack"]) for pack in packs)
 
 

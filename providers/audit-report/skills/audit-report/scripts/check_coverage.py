@@ -3,7 +3,7 @@
 """Validate the Markdown source of an audit report before HTML rendering.
 
 Checks:
-- exactly one coverage row per enabled rule (builtin R01..R19 + active packs)
+- exactly one coverage row per enabled rule (builtin JSON + active packs)
 - each coverage result is one of: 通过 / 不通过 / 不适用 / 待复核 / 证据不足
 - every finding heading has a valid severity ([A]/[B]/[C]) and a rule number
 - every finding has 页码, 位置, 原文上下文 and 不规范说明 fields

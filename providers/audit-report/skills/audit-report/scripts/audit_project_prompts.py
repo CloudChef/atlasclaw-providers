@@ -44,18 +44,15 @@ def render_report_template(name: str, **values: str) -> str:
 
 
 def _rule_context(rules_dir: Path | None = None) -> tuple[str, str]:
-    """Load the full built-in and enabled rules without making audit decisions."""
+    """Load the complete built-in and enabled rules without making audit decisions."""
     scripts = str(SCRIPT_DIR)
     if scripts not in sys.path:
         sys.path.insert(0, scripts)
     from _rules import load_rules
 
     ruleset = load_rules(root=rules_dir)
-    builtin_ids = {f"R{number:02d}" for number in range(1, 20)}
-    if not builtin_ids.issubset(ruleset.rules) or any(
-        pack["version"] == "0.0.0-fallback" for pack in ruleset.packs
-    ):
-        raise ValueError("The complete built-in R01-R19 JSON rule pack is required")
+    if not ruleset.rules:
+        raise ValueError("The built-in rule JSON is empty")
     resolved_json = json.dumps(
         {
             "packs": [{key: pack[key] for key in ("pack", "version", "status")} for pack in ruleset.packs],
@@ -64,7 +61,14 @@ def _rule_context(rules_dir: Path | None = None) -> tuple[str, str]:
         ensure_ascii=False,
         indent=2,
     )
-    explanatory_rules = (REFERENCE_DIR / "audit-rules.md").read_text(encoding="utf-8")
+    rules_markdown = SKILL_ROOT / "rules" / "builtin" / "rules.md"
+    reference_markdown = REFERENCE_DIR / "audit-rules.md"
+    if rules_markdown.is_file():
+        explanatory_rules = rules_markdown.read_text(encoding="utf-8")
+    elif reference_markdown.is_file():
+        explanatory_rules = reference_markdown.read_text(encoding="utf-8")
+    else:
+        explanatory_rules = ""
     rule_bundle = render_prompt_template(
         "rule-bundle.md", RESOLVED_JSON=resolved_json, EXPLANATORY_RULES=explanatory_rules
     )
@@ -169,6 +173,53 @@ def build_project_prompt(
         PROJECT_TEXT=project_text, TEXT_EVIDENCE=text_evidence_contract,
         PROJECT_CONTRACT=project_contract, MATERIALS_CONTRACT=materials_contract,
         MATERIAL_MANIFEST=json.dumps(material_manifest, ensure_ascii=False, indent=2))
+
+
+def build_visual_prompt(
+    page_text: str,
+    pages: list[int],
+    context_pages: list[int],
+    *,
+    page_count: int = 0,
+    rules_dir: Path | None = None,
+) -> str:
+    """Build a page-image visual review prompt for the image-capable model."""
+    from _rules import load_rules
+
+    ruleset = load_rules(root=rules_dir)
+    visual_rules = [
+        rule for rule in ruleset.rules.values()
+        if (rule.get("check") or {}).get("type") == "visual" or "image" in (rule.get("requires") or [])
+    ]
+    if not visual_rules:
+        raise ValueError("No visual rules are enabled")
+    resolved = json.dumps(
+        {
+            "packs": [{key: pack[key] for key in ("pack", "version", "status")} for pack in ruleset.packs],
+            "rules": visual_rules,
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    contract = (REFERENCE_DIR / "audit-visual-review.md").read_text(encoding="utf-8")
+    return render_prompt_template(
+        "visual.md",
+        SYSTEM=_system_text(),
+        PAGES=json.dumps(pages),
+        CONTEXT_PAGES=json.dumps(context_pages),
+        PAGE_COUNT=str(page_count or max(pages or [0])),
+        RULES=resolved,
+        PAGE_TEXT=page_text,
+        VISUAL_CONTRACT=contract,
+    )
+
+
+def build_visual_retry_prompt(base_prompt: str, format_error: str, previous_response: str = "") -> str:
+    """Append the reference-backed correction request after a visual format error."""
+    retry = render_prompt_template(
+        "visual-repair.md", FORMAT_ERROR=format_error, PREVIOUS_RESPONSE=previous_response,
+    )
+    return f"{base_prompt}\n\n{retry}"
 
 
 def build_summary_prompt(

@@ -42,16 +42,27 @@ def main() -> int:
         "python": sys.version.split()[0],
         "pymupdf": _module_available("pymupdf", "fitz"),
         "python_docx": _module_available("docx"),
+        "openpyxl": _module_available("openpyxl"),
+        "httpx": _module_available("httpx"),
+        "dotenv": _module_available("dotenv"),
+        "win32com": _module_available("win32com"),
         "libreoffice": _binary_available("soffice", "libreoffice"),
         "skill_dir": str(__file__),
     }
     payload["ready"] = payload["pymupdf"]
     payload["full_ready"] = payload["pymupdf"] and payload["python_docx"]
+    payload["visual_ready"] = payload["pymupdf"] and payload["httpx"] and (
+        bool(payload["libreoffice"]) or payload["win32com"]
+    )
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     if not payload["pymupdf"]:
         print("Missing PyMuPDF: pip install pymupdf", file=sys.stderr)
     if not payload["python_docx"]:
         print("Missing python-docx: pip install python-docx", file=sys.stderr)
+    if not payload["openpyxl"]:
+        print("Missing openpyxl: pip install openpyxl (Excel rules/materials)", file=sys.stderr)
+    if not payload["visual_ready"]:
+        print("Visual review needs httpx plus LibreOffice or Windows Word (pywin32)", file=sys.stderr)
     return 0 if payload["ready"] else 1
 
 

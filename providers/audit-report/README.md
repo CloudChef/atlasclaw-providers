@@ -6,7 +6,7 @@ Provider-owned document workspace for third-party inspection reports.
 - UI: `ui/` (iframe page served by AtlasClaw)
 - Backend API: `runtime-api.json` → `api/handlers.py`
 - Skill: `skills/audit-report/` (rule references + rule packs + extract/render scripts)
-- Rules: `skills/audit-report/rules/` (builtin 19 + active packs from `config.json`)
+- Rules: `skills/audit-report/rules/` (builtin 46 AI rules + active packs from `config.json`)
 - Pipeline: `api/audit_service.py` → skill `scripts/run_document_audit.py`
 - Legacy `api/batch_audit.py` utilities remain for existing rule-pack and
   historical-result compatibility; new audits use the skill workflow above.
@@ -47,7 +47,7 @@ Prefix: `/api/providers/audit-report/default`
 - Shared library: `context.host.shared_data_dir` by default, or the configured `standards_dir`
   - `standards/<id>/original.*` + `standard.json` (reference, read state, and optional legacy compile state)
   - `rules/config.json` (active packs) and `rules/packs/<pack>/` (compiled rules)
-  - With a configured shared root, `rules/builtin/rules.json` stores the builtin 19 rules; an existing file is kept.
+  - With a configured shared root, `rules/builtin/rules.json` stores the builtin 46 AI rules; an existing file is kept.
 - The shared library is visible to every user who can open the provider; it is
   never stored under a user directory.
 
@@ -96,8 +96,10 @@ CJK fonts support Chinese PDF output. The Provider does not install packages.
   source positions only; it does not submit report-page images. Findings that
   require visual evidence are marked as evidence-limited, without claiming the
   original lacks content merely because it was redacted or not extracted.
-  Incomplete or failed calls prevent report publication; no page or rule is
-  silently skipped to produce a pass.
+  If a model call or processing stage cannot finish, the provider preserves its
+  available raw responses and publishes a clearly marked incomplete PDF. Missing
+  conclusions and coverage remain pending review; no page or rule is silently
+  treated as passed.
 - Each uploaded standard owns its compiled pack. A failed recompile preserves the
   previously active pack. Recompile legacy same-name uploads to restore their
   individual rule sets if an earlier upload overwrote the original pack.

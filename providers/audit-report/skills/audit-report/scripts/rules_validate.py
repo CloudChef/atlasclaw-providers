@@ -80,6 +80,17 @@ def main() -> int:
     report = []
     failed = False
     seen_rules: dict[str, tuple[str, str]] = {}
+    builtin_path = rules_dir / "builtin" / "rules.json"
+    builtin_ids: set[str] = set()
+    if builtin_path.is_file():
+        try:
+            builtin_ids = {
+                str(rule.get("id") or "").strip()
+                for rule in (read_json(builtin_path).get("rules") or [])
+                if isinstance(rule, dict) and rule.get("id")
+            }
+        except ValueError:
+            builtin_ids = set()
     for path in paths:
         if not path.is_file():
             print(f"[FAIL] {path}: 文件不存在")
@@ -91,7 +102,7 @@ def main() -> int:
             print(f"[FAIL] {path}: {exc}")
             failed = True
             continue
-        errors, warnings = validate_pack(pack, path)
+        errors, warnings = validate_pack(pack, path, builtin_ids)
         pack_name = str(pack.get("pack", path.parent.name))
         pack_status = str(pack.get("status", "active"))
         for rule in pack.get("rules") or []:
