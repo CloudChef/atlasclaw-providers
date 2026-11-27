@@ -151,6 +151,7 @@ async def _run_document_audit(context: Any, store: DocumentStore, document: dict
             answer = await runner(
                 prompt=prompt,
                 system_prompt=text_system_prompt,
+                skill_id="audit-report:audit-report",
             )
             answer = str(answer or "")
             if not answer.strip():

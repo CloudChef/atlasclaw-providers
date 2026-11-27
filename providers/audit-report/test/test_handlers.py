@@ -281,7 +281,8 @@ async def test_skill_pipeline_uses_only_core_text_bridge_without_host_selector(
     system_prompt = (ROOT / "skills" / "audit-report" / "references" / "audit-system.md").read_text(encoding="utf-8")
     assert len(text_calls) == 3
     assert all(call["system_prompt"] == system_prompt for call in text_calls)
-    assert all(set(call) == {"prompt", "system_prompt"} for call in text_calls)
+    assert all(set(call) == {"prompt", "system_prompt", "skill_id"} for call in text_calls)
+    assert all(call["skill_id"] == "audit-report:audit-report" for call in text_calls)
     stage_progress = [(value, text) for value, text in progress_updates if "准备逐项目审核" in text or "审核检测项目" in text]
     assert stage_progress[0][0] == 61
     assert stage_progress[1][0] is None
