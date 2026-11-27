@@ -191,8 +191,8 @@ def _render_pdf(html_path: Path, output_pdf: Path) -> None:
         if font else "body {font-family: china-s;}"
     )
     css = _pdf_css(font_css)
-    # The HTML is the canonical visual artifact; PDF-only adjustments avoid a
-    # clipped flowing footer and broken table row backgrounds in Story layout.
+    # The HTML keeps its color styling; PDF-only CSS avoids Story's repeated
+    # background fragments and maps unsupported field-table percentages to points.
     html = html_path.read_text(encoding="utf-8")
     html = re.sub(r"<footer\b[^>]*>.*?</footer>", "", html, flags=re.I | re.S)
     story = pymupdf.Story(html=html, user_css=css)

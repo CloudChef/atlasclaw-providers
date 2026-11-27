@@ -222,7 +222,7 @@ async def test_required_visual_stage_missing_becomes_pending_report(tmp_path: Pa
     report = (tmp_path / "output" / "audit.md").read_text(encoding="utf-8")
     assert result["completion_status"] == "needs_review"
     assert "视觉阶段未能完整执行" in report
-    assert "报告未完成" in report
+    assert "报告已生成，部分结果待复核" in report
 
 
 @pytest.mark.asyncio

@@ -146,7 +146,7 @@ async def test_all_projects_run_without_local_concurrency_cap_and_keep_full_sour
     )
 
     assert peak == 3
-    assert result.startswith("> 报告未完成：模型未提供部分候选处置结论")
+    assert result.startswith("> 报告已生成，部分结果待复核：模型未提供部分候选处置结论")
     assert all(f"| F-00{index}001 | 待复核 | — |" in result for index in (1, 2, 3))
     assert "# 附录：分项目审核原文" in result
     assert "Page two full" in prompts[1] and "Page three full" in prompts[1]
@@ -249,7 +249,7 @@ async def test_long_index_scans_all_pages_in_order_and_merges_cross_chunk_projec
     report = "\n\n".join(f"## Page {page}\nsource page {page}" for page in range(1, 71))
     result = await audit_workflow.execute_audit(report, [], 70, submit, tmp_path)
 
-    assert result.startswith("> 报告未完成：模型未提供部分候选处置结论")
+    assert result.startswith("> 报告已生成，部分结果待复核：模型未提供部分候选处置结论")
     assert "| F-001001 | 待复核 | — |" in result
     assert "### F-001001 [A]" in result
     assert [prompt["formal_pages"] for prompt in chunk_prompts] == [list(range(1, 33)), list(range(33, 65)), list(range(65, 71))]
@@ -964,7 +964,7 @@ async def test_global_format_retry_includes_previous_raw_without_losing_ids_or_m
     )
 
     assert len([prompt for prompt in prompts if prompt.startswith("SUMMARY")]) == 1
-    assert "报告未完成" in result
+    assert "报告已生成，部分结果待复核" in result
     assert "报告正文" in prompts[-1]
     assert "| R01 | 页码 | 页码连续完整 | C | 待复核 | 模型未提供此规则结论 |" in result
     assert "| R01 | 页码 | 页码连续完整 | C | 通过 | 证据 |" not in result
@@ -1051,7 +1051,7 @@ async def test_text_model_incomplete_request_retries_same_prompt_once_then_saves
         1, submit, tmp_path,
     )
 
-    assert result.startswith("> 报告未完成：模型未提供部分候选处置结论")
+    assert result.startswith("> 报告已生成，部分结果待复核：模型未提供部分候选处置结论")
     project_requests = [item for item in json.loads(
         (tmp_path / "workflow.json").read_text(encoding="utf-8")
     )["requests"] if item["stage"] == "project-review:6.1"]
@@ -1300,7 +1300,7 @@ def test_global_final_table_marks_missing_project_candidate_pending_without_bloc
     normalized = audit_workflow._check_global(markdown, [], project_finding_ids={"F-001-001", "F-001-002"})
     assert "| F-001-001 | 成立 | B | 已确认 |" in normalized
     assert "| F-001-002 | 待复核 | — | 模型未给出明确处置；保留待复核，不推断成立或撤回。 |" in normalized
-    assert "报告未完成：模型未提供部分候选处置结论" in normalized
+    assert "报告已生成，部分结果待复核：模型未提供部分候选处置结论" in normalized
     assert "F-001-002" in normalized
 
 

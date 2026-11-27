@@ -638,7 +638,7 @@ def _check_global(markdown: str, rule_ids: list[str] | None,
                 insert_at = (table_end + 1) if table_end is not None else len(lines)
                 lines[insert_at:insert_at] = additions
             markdown = "\n".join(lines) + ("\n" if markdown.endswith("\n") else "")
-        if "报告未完成：模型未提供部分候选处置结论" not in markdown:
+        if "模型未提供部分候选处置结论" not in markdown:
             markdown = incomplete_notice + "\n\n" + markdown.lstrip()
 
     disposition_ids = {fid for fid in rows} | set(unresolved)

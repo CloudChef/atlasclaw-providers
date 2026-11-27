@@ -22,7 +22,10 @@ _API_DIR = Path(__file__).resolve().parent
 if str(_API_DIR) not in sys.path:
     sys.path.insert(0, str(_API_DIR))
 
-from audit_service import _llm_report_metadata, reconcile_document, start_document_audit
+from audit_service import (
+    _llm_report_metadata, reconcile_document, start_document_audit,
+    start_report_regeneration,
+)
 from errors import ProviderError
 from report_no import extract_report_no
 import standards_service
@@ -314,6 +317,15 @@ async def start_audit(request: Any, context: Any) -> dict[str, Any]:
     document = _require_document(context, store)
     await start_document_audit(context, store, document)
     updated = store.get(document["id"], _user_id(context)) or document
+    return _document_response(context, updated)
+
+
+async def regenerate_report(request: Any, context: Any) -> dict[str, Any]:
+    """Regenerate the PDF from an owned document's saved model output."""
+    store = _store(context)
+    document = _require_document(context, store)
+    await start_report_regeneration(context, store, document)
+    updated = await asyncio.to_thread(store.get, document["id"], _user_id(context)) or document
     return _document_response(context, updated)
 
 

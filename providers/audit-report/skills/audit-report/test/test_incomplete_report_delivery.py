@@ -28,7 +28,7 @@ def test_publishable_report_marks_missing_conclusions_without_inventing_passes()
     assert "| R01 | 页码 | 页码连续完整 | C | 通过 | 第 1 页 |" in normalized
     assert "| R02 |" in normalized
     assert "| 待复核 | 模型未提供此规则结论 |" in normalized
-    assert "报告未完成" in normalized
+    assert "报告已生成，部分结果待复核" in normalized
     assert "通过 | 模型未提供" not in normalized
     assert run_document_audit.validate_markdown(normalized, ["R01", "R02"])
     from render_report import markdown_to_html
@@ -59,7 +59,7 @@ def test_missing_candidate_disposition_is_a_completeness_warning() -> None:
         "| # | 模块 | 检查项 | 等级 | 结果 | 证据位置/说明 |\n"
         "| --- | --- | --- | --- | --- | --- |\n"
         "| R01 | 页码 | 页码连续完整 | C | 通过 | 第 1 页 |\n\n"
-        "> 报告未完成：模型未提供部分候选处置结论；相关项已标为待复核。待复核不代表通过。\n"
+        "> 报告已生成，部分结果待复核：模型未提供部分候选处置结论；相关项已标为待复核。待复核不代表通过。\n"
     )
 
     warnings = run_document_audit._report_completeness_warnings(markdown, ["R01"])
@@ -75,6 +75,37 @@ def test_placeholder_overall_is_replaced_with_pending_status() -> None:
     assert normalized.count("**总评：") == 1
     assert "**总评：待复核（模型未给出结论）**" in normalized
     assert "<通过 / 不通过>" not in normalized
+
+
+def test_malformed_duplicate_rule_rows_keep_their_original_evidence() -> None:
+    report = (
+        "# 审核报告\n**总评：通过**\n\n## 检查覆盖表\n"
+        "| # | 模块 | 检查项 | 等级 | 结果 | 证据位置/说明 |\n"
+        "| --- | --- | --- | --- | --- | --- |\n"
+        "| R20 | 设备信息 | 外来设备一致性 | B | 通过/待复核 | S41 是否外来无法确认 |\n"
+        "| R20 | 设备信息 | 外来设备一致性 | B | 待复核 | 未提供外来属性 |\n"
+    )
+
+    normalized = run_document_audit.normalize_publishable_report(report, ["R20"])
+
+    assert normalized.count("| R20 |") == 1
+    assert "模型原始覆盖记录" in normalized
+    assert "通过/待复核" in normalized
+    assert "S41 是否外来无法确认" in normalized
+    assert "未提供外来属性" in normalized
+
+
+def test_source_identity_adds_a_well_formed_object_section_when_missing() -> None:
+    report = "# Report title\n\nBody.\n"
+
+    normalized = run_document_audit._apply_source_identity(report, {
+        "file_name": "known.pdf", "size": 1024, "sha256": "abc123",
+    })
+
+    assert normalized.startswith("# Report title\n\n## 1. 审核对象")
+    assert "| 文件名 | `known.pdf` |" in normalized
+    assert "| 文件大小 | 1,024 bytes |" in normalized
+    assert "| SHA-256 | `abc123` |" in normalized
 
 
 @pytest.mark.asyncio
@@ -118,7 +149,7 @@ async def test_audit_prepared_publishes_partial_report_after_model_failure(
     assert (tmp_path / "out" / "audit-incomplete.md").is_file()
     report = (tmp_path / "out" / "audit.md").read_text(encoding="utf-8")
     assert "待复核" in report
-    assert "报告未完成" in report
+    assert "报告已生成，部分结果待复核" in report
     assert "RuntimeError" in report
     assert "private upstream detail" not in report
     assert "project-raw.md" in report

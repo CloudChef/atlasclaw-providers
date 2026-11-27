@@ -56,6 +56,55 @@ def test_pdf_stylesheet_rejects_unknown_template_placeholders(monkeypatch):
         audit_delivery._pdf_css("body {font-family: test;}")
 
 
+def test_pdf_css_suppresses_repeated_story_backgrounds_and_fixes_field_columns(
+    tmp_path: Path,
+) -> None:
+    report_css = (SCRIPT.parent.parent / "references" / "report" / "report.css").read_text(
+        encoding="utf-8"
+    )
+    field_value = (
+        "FIELD_VALUE report 2025-06-17; register 2027-06-14; all source text "
+        "must remain visible in this report cell"
+    )
+    html = f'''<!doctype html>
+<html><head><meta charset="utf-8"><style>{report_css}</style></head>
+<body><main class="page">
+<p class="verdict verdict-fail">Summary outcome</p>
+<div class="table-wrap"><table><thead><tr><th>Grade</th><th>Count</th><th>Rules</th></tr></thead>
+<tbody>
+<tr><td><span class="sev sev-a">A severe</span></td><td>2</td><td>R01, R02</td></tr>
+<tr><td><span class="sev sev-b">B major</span></td><td>3</td><td>R03, R04, R05</td></tr>
+<tr><td><span class="sev sev-c">C minor</span></td><td>1</td><td>R06</td></tr>
+</tbody></table></div>
+<section class="check-point finding-point"><h3>F-TEST-001 · Finding</h3>
+<table class="field-table"><colgroup><col width="22%"><col width="78%"></colgroup><tbody>
+<tr><th scope="row" width="22%" style="width:22%">FIELD_LABEL</th>
+<td width="78%" style="width:78%">{field_value}</td></tr>
+</tbody></table></section>
+</main></body></html>'''
+    html_path = tmp_path / "fragmented-table.html"
+    pdf_path = tmp_path / "fragmented-table.pdf"
+    html_path.write_text(html, encoding="utf-8")
+
+    audit_delivery._render_pdf(html_path, pdf_path)
+
+    with pymupdf.open(pdf_path) as document:
+        field_page = next(page for page in document if "FIELD_LABEL" in page.get_text())
+        page_text = re.sub(r"\s+", " ", field_page.get_text().replace("\xa0", " "))
+        assert field_value in page_text
+        broad_fills = [
+            drawing
+            for drawing in field_page.get_drawings()
+            if drawing.get("fill")
+            and drawing["rect"].width > 1.5
+            and drawing["rect"].height > 1.5
+        ]
+        assert not broad_fills
+        label = field_page.search_for("FIELD_LABEL")[0]
+        value = field_page.search_for("FIELD_VALUE")[0]
+        assert 110 < value.x0 - label.x0 < 120
+
+
 def _finding(fid: str, page: str, quote: str, rule: str = "R05") -> str:
     return f"""### {fid} [A] 标识问题（{rule}）
 

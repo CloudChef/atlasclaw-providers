@@ -83,6 +83,139 @@ async def start_document_audit(context: Any, store: DocumentStore, document: dic
             _TASKS.pop(key)
 
 
+async def start_report_regeneration(
+    context: Any, store: DocumentStore, document: dict[str, Any],
+) -> None:
+    """Queue a local-only PDF regeneration from the user's saved audit output."""
+    key = (store.db_path.resolve(), str(document["id"]))
+    active = _TASKS.get(key)
+    if (active is not None and not active[1].done()) or document.get("status") == "running":
+        raise ProviderError(
+            "An audit is already running for this document.", status_code=409, code="audit_already_running",
+        )
+    host = getattr(context, "host", context)
+    data_root = report_data_dir(host).resolve()
+    doc_root = (data_root / "documents" / str(document["id"])).resolve()
+    report_path = Path(str(document.get("report_path") or "")).resolve()
+    try:
+        report_path.relative_to(doc_root / "runs")
+    except ValueError as exc:
+        raise ProviderError("A saved audit report is not available for regeneration.",
+                            status_code=409, code="report_not_regenerable") from exc
+    source_attempt = report_path.parent
+    if report_path.name != "audit-report.pdf" or not report_path.is_file():
+        raise ProviderError("A saved audit report is not available for regeneration.",
+                            status_code=409, code="report_not_regenerable")
+    if not (source_attempt / "audit-raw.md").is_file() or not (source_attempt / "audit-main-raw.md").is_file():
+        raise ProviderError("Saved model output is incomplete; rerun the audit before regenerating.",
+                            status_code=409, code="report_not_regenerable")
+    prepared_pdf = Path(str(document.get("desensitized_path") or "")).resolve()
+    try:
+        prepared_pdf.relative_to(data_root)
+    except ValueError as exc:
+        raise ProviderError("The prepared report is outside provider storage.",
+                            status_code=409, code="report_not_regenerable") from exc
+    if not prepared_pdf.is_file():
+        raise ProviderError("The prepared report is unavailable for local delivery.",
+                            status_code=409, code="report_not_regenerable")
+
+    new_attempt = source_attempt.parent / uuid.uuid4().hex
+    previous_status = str(document.get("status") or "completed")
+
+    async def run() -> None:
+        try:
+            await asyncio.to_thread(
+                store.update, document["id"], status="running", progress=96,
+                progress_text="正在从已保存的审核结果重新生成 PDF",
+            )
+            await _run_saved_report_regeneration(
+                context, store, document, source_attempt, new_attempt, prepared_pdf,
+            )
+        except Exception as exc:  # noqa: BLE001 - keep the prior downloadable report on local render failure
+            logger.exception("Saved report regeneration failed for %s", document["id"])
+            await asyncio.to_thread(
+                store.update, document["id"], status=previous_status, progress=100,
+                progress_text="报告重新生成失败，原报告仍可下载",
+                error_code="report_regeneration_failed", error_message=str(exc)[:500],
+            )
+        finally:
+            if _TASKS.get(key) is not None and _TASKS[key][1] is asyncio.current_task():
+                _TASKS.pop(key, None)
+
+    task = asyncio.create_task(run())
+    _TASKS[key] = (str(document["id"]), task)
+    await asyncio.sleep(0)
+
+
+async def _run_saved_report_regeneration(
+    context: Any, store: DocumentStore, document: dict[str, Any],
+    source_attempt: Path, new_attempt: Path, prepared_pdf: Path,
+) -> None:
+    """Copy an owned attempt and regenerate its report without invoking model bridges."""
+    host = getattr(context, "host", context)
+    data_root = report_data_dir(host).resolve()
+    new_attempt.parent.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(shutil.copytree, source_attempt, new_attempt)
+    raw_markdown = await asyncio.to_thread(
+        (new_attempt / "audit-raw.md").read_text, encoding="utf-8",
+    )
+    rules_dir = new_attempt / "library" / "rules"
+    skill_dir = _skill_dir()
+    scripts_dir = skill_dir / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    import run_document_audit
+    from _rules import load_rules
+
+    await run_document_audit.render_saved_report(
+        raw_markdown, new_attempt, prepared_pdf, load_rules(rules_dir).ids,
+        rules_dir=rules_dir,
+        source_metadata={
+            "file_name": document.get("file_name"),
+            "size": document.get("size"),
+            "sha256": document.get("sha256"),
+        },
+    )
+    rendered_markdown = await asyncio.to_thread(
+        (new_attempt / "audit.md").read_text, encoding="utf-8",
+    )
+    verification, summary = _llm_report_metadata(
+        rendered_markdown, load_rules(rules_dir).ids, allow_incomplete=True,
+    )
+    completion_path = new_attempt / "completion.json"
+    completion = json.loads(completion_path.read_text(encoding="utf-8")) if completion_path.is_file() else {}
+    if completion.get("completion_status") == "needs_review":
+        verification["completion_status"] = "needs_review"
+        verification["warnings"] = list(dict.fromkeys([
+            *verification.get("warnings", []), *completion.get("warnings", []),
+        ]))
+        verification["completeness"] = {
+            **verification.get("completeness", {}),
+            "pipeline_status": "needs_review",
+            "pipeline_warnings": completion.get("warnings", []),
+        }
+    await asyncio.to_thread(
+        (new_attempt / "verification.json").write_text,
+        json.dumps(verification, ensure_ascii=False, indent=2), encoding="utf-8",
+    )
+    report_path = (new_attempt / "audit-report.pdf").resolve()
+    try:
+        report_path.relative_to(data_root)
+    except ValueError as exc:
+        raise ProviderError("Generated report is outside provider storage.",
+                            status_code=500, code="report_path_invalid") from exc
+    if not report_path.is_file() or report_path.stat().st_size == 0:
+        raise RuntimeError("Local report regeneration did not produce a downloadable PDF")
+    await asyncio.to_thread(
+        store.update, document["id"], status="completed", progress=100,
+        progress_text=("报告已生成，部分结果待复核"
+                       if verification.get("completion_status") == "needs_review" else "报告已重新生成"),
+        findings_total=summary["findings_total"], findings_review=summary["findings_review"],
+        grade_summary=summary["grade_summary"], report_path=str(report_path),
+        report_name="audit-report.pdf", error_code="", error_message="",
+    )
+
+
 async def reconcile_document(store: DocumentStore, document: dict[str, Any]) -> dict[str, Any]:
     """Recover a document whose owning pipeline is no longer running."""
     if document.get("status") != "running":
@@ -218,6 +351,11 @@ async def _run_document_audit(context: Any, store: DocumentStore, document: dict
             on_progress=on_progress, rules_dir=rules_dir,
             visual_pdf=visual_pdf, submit_visual=submit_visual, require_visual=True,
             visual_prepare_error=visual_prepare_error,
+            source_metadata={
+                "file_name": document.get("file_name"),
+                "size": document.get("size"),
+                "sha256": document.get("sha256"),
+            },
         )
         report_path = (attempt_dir / "audit-report.pdf").resolve()
         raw_path = attempt_dir / "audit-raw.md"

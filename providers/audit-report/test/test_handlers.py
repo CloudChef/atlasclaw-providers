@@ -287,8 +287,10 @@ async def test_skill_pipeline_uses_core_model_bridges_without_host_selector(
 
     async def call_submit(_pdf, _materials, _out, submit, **kwargs):
         assert set(kwargs) == {
-            "on_progress", "rules_dir", "visual_pdf", "submit_visual", "require_visual", "visual_prepare_error",
+            "on_progress", "rules_dir", "visual_pdf", "submit_visual", "require_visual",
+            "visual_prepare_error", "source_metadata",
         }
+        assert kwargs["source_metadata"]["file_name"] == "source.pdf"
         assert Path(kwargs["visual_pdf"]) == visual_source
         assert callable(kwargs["submit_visual"]) and kwargs["require_visual"] is True
         await kwargs["on_progress"]({"stage": "projects", "completed": 1, "total": 2})

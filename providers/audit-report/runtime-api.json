@@ -49,6 +49,18 @@
       "timeout_seconds": 30
     },
     {
+      "id": "documents.report_regenerate",
+      "method": "POST",
+      "path": "documents/{document_id}/report/regenerate",
+      "module": "api/handlers.py",
+      "handler": "regenerate_report",
+      "capability": "audit",
+      "access": "user",
+      "success_status": 202,
+      "response": "json",
+      "timeout_seconds": 30
+    },
+    {
       "id": "documents.file",
       "method": "GET",
       "path": "documents/{document_id}/file",

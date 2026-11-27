@@ -109,5 +109,5 @@ def test_pending_disposition_is_preserved_by_publishable_report_normalizer():
 
     row = _disposition_rows(result, "F-001-001")[0]
     assert "| 待复核 | — | 模型未给出明确处置" in row
-    assert "报告未完成" in result
+    assert "报告已生成，部分结果待复核" in result
     assert "待复核不代表通过" in result
