@@ -5,6 +5,7 @@
 
 const MESSAGES = {
   'zh-CN': {
+    pageDescription: '您可以上传检测或试验报告，平台将依据标准库中的审核规范、检测标准和设备台账审核文档，并生成包含审核结论、问题说明及定位依据的审核报告，供您核查和下载。',
     upload: '上传文档',
     search: '搜索文档名称',
     allStatus: '全部状态',
@@ -101,6 +102,7 @@ const MESSAGES = {
     timeFilter: '上传时间',
   },
   'en-US': {
+    pageDescription: 'Upload a test report. The platform checks it against the audit requirements, test standards and equipment ledger in the standards library, then generates an audit report with conclusions, findings and supporting references for you to review and download.',
     upload: 'Upload',
     search: 'Search document name',
     allStatus: 'All statuses',
@@ -942,6 +944,10 @@ function bindEvents() {
 }
 
 function applyLocale() {
+  document.documentElement.lang = state.locale;
+  document.title = t('viewAudit');
+  document.querySelector('.page-header h1').textContent = t('viewAudit');
+  document.querySelector('.page-subtitle').textContent = t('pageDescription');
   els.uploadButton.querySelector('span:last-child').textContent = t('upload');
   els.searchInput.placeholder = t('search');
   els.statusFilter.options[0].textContent = t('allStatus');
