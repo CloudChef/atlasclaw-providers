@@ -379,7 +379,7 @@ async def test_audit_prepared_uses_text_only_workflow_and_keeps_full_materials(
     assert execution["report"] == report_text_value
     assert execution["count"] == 1
     assert execution["materials"][0]["content"] == "full workbook body"
-    assert set(execution["kwargs"]) == {"on_progress", "rules_dir"}
+    assert set(execution["kwargs"]) == {"on_progress", "rules_dir", "ruleset"}
     submission = json.loads((tmp_path / "submission.json").read_text(encoding="utf-8"))
     assert submission["materials"][0]["characters"] == len("full workbook body")
     assert not any(key.startswith("visual_") or "image" in key for key in submission)
@@ -408,7 +408,10 @@ async def test_audit_prepared_publishes_pdf_for_incomplete_evidence_delivery(
 
     async def execute(*_args, **_kwargs):
         rows = "\n".join(
-            f"| {rule} | 模块 | 检查项 | B | 通过 | 来源依据 |" for rule in load_rules().ids
+            (f"| {rule_id} | 模块 | 检查项 | B | 不适用 | 没有对应输入 |"
+             if set(rule.get("requires") or []) & {"standard", "ledger", "materials"}
+             else f"| {rule_id} | 模块 | 检查项 | B | 通过 | 来源依据 |")
+            for rule_id, rule in load_rules().rules.items()
         )
         return f"# 报告\n\n**总评：通过**\n\n## 5. 检查覆盖表\n{rows}\n"
 

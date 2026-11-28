@@ -50,7 +50,7 @@ def _install_builders(monkeypatch: pytest.MonkeyPatch) -> None:
         audit_workflow,
         "_load_builders",
         lambda: (
-            lambda report, count: f"INDEX {count}\n{report}",
+            lambda report, count, **kwargs: f"INDEX {count}\n{report}",
             lambda project, text, frontmatter, materials, index, **kwargs: (
                 f"PROJECT {index} {project['id']}\n{text}\nFRONT\n{frontmatter}\n"
                 + "\n".join(item["reference_id"] + " " + item["filename"] + "\n" + item["content"] for item in materials)
@@ -1190,7 +1190,7 @@ async def test_project_failure_cancels_all_sibling_project_tasks(
         audit_workflow,
         "_load_builders",
         lambda: (
-            lambda report, count: "INDEX",
+            lambda report, count, **kwargs: "INDEX",
             lambda project, *args, **kwargs: f"PROJECT {project['id']}",
             lambda *args, **kwargs: "SUMMARY",
         ),

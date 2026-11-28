@@ -82,6 +82,20 @@ def test_external_document_template_escapes_title_and_footer():
     assert "<p>safe body</p>" in result
 
 
+def test_pending_publication_keeps_model_pass_verdict_neutral_but_complete_pass_stays_green(tmp_path: Path):
+    notice = render_report.load_template("incomplete-notice.md").strip()
+    pending_html = markdown_to_html(notice + "\n\n# 审核报告\n\n**总评：通过**\n", tmp_path)
+    complete_html = markdown_to_html("# 审核报告\n\n**总评：通过**\n", tmp_path)
+
+    assert 'class="verdict verdict-pending"' in pending_html
+    assert "模型原始总评：通过" in pending_html
+    assert "不表示审核已完整确认" in pending_html
+    assert 'class="verdict verdict-pass"' not in pending_html
+    assert 'class="verdict verdict-pass"' in complete_html
+    assert "模型原始总评" not in complete_html
+    assert "不表示审核已完整确认" not in complete_html
+
+
 def test_template_load_error_names_missing_asset(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(render_report, "TEMPLATE_DIR", tmp_path)
     try:

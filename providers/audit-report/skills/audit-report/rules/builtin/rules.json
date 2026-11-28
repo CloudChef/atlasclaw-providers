@@ -7,7 +7,7 @@
     "source": "source/AI报告审核规则_final.xlsx",
     "sheet": "Sheet1",
     "sha256": "a760af10fc50698979e00c7f3c4f3d43266abdd677c89559bfa081af6300d0df",
-    "imported_at": "2026-11-27 17:55:48",
+    "imported_at": "2026-11-28 13:40:25",
     "importer": "import_builtin_rules.py"
   },
   "rules": [
@@ -557,10 +557,11 @@
       ],
       "scope": "single",
       "stage": "project",
-      "applies_when": "始终适用",
-      "na_when": "",
+      "applies_when": "提供了设备表或设备台账",
+      "na_when": "未提供设备表/台账（按待复核处理）",
       "requires": [
-        "text"
+        "text",
+        "ledger"
       ],
       "check": {
         "type": "date_chain",

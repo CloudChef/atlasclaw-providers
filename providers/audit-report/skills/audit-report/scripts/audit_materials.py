@@ -19,9 +19,32 @@ def classify_material(filename: str) -> str:
     """Classify a material by its filename, giving ledger names precedence."""
     if "台账" in filename:
         return "ledger"
-    if "检测标准" in filename:
+    if "检测标准" in filename or "标准库" in filename:
         return "standard"
     return "supplement"
+
+
+def material_availability(materials: list[dict[str, Any]] | None) -> dict[str, Any]:
+    """Describe supplied input kinds without deciding their business applicability."""
+    kinds: set[str] = set()
+    supporting: list[str] = []
+    support_terms = ("试验大纲", "测试大纲", "测试计划", "测试方案", "原始记录", "委托单", "配套材料")
+    for item in materials or []:
+        filename = str(item.get("filename") or "")
+        kind = str(item.get("kind") or classify_material(filename))
+        purpose = str(item.get("purpose") or item.get("用途") or "")
+        if kind in {"standard", "ledger", "materials", "visual", "visual-facts"}:
+            kinds.add(kind)
+        elif purpose and (any(term in purpose for term in support_terms)
+                          or any(term in purpose.lower() for term in ("r46", "support", "cross-file"))):
+            kinds.add("materials")
+            supporting.append(filename or purpose)
+        elif any(term in filename for term in support_terms):
+            kinds.add("materials")
+            supporting.append(filename)
+        # Generic supplement content is deliberately not treated as proof of an R46 source.
+    return {"kinds": kinds, "supports_materials": "materials" in kinds,
+            "supporting_files": supporting}
 
 
 def _cell_text(value: Any, number_format: str | None = None) -> str:
@@ -35,7 +58,7 @@ def _cell_text(value: Any, number_format: str | None = None) -> str:
     return str(value)
 
 
-def _read_excel(path: Path) -> tuple[str, list[dict[str, Any]]]:
+def _read_excel(path: Path) -> tuple[str, list[dict[str, Any]], str]:
     try:
         from openpyxl import load_workbook
         from openpyxl.utils import get_column_letter
@@ -47,6 +70,7 @@ def _read_excel(path: Path) -> tuple[str, list[dict[str, Any]]]:
     blocks: list[str] = []
     positions: list[dict[str, Any]] = []
     has_values = False
+    header_kinds: set[str] = set()
     try:
         for sheet, cached_sheet in zip(workbook.worksheets, cached_workbook.worksheets):
             blocks.append(f"## Sheet: {sheet.title}")
@@ -64,6 +88,11 @@ def _read_excel(path: Path) -> tuple[str, list[dict[str, Any]]]:
                 if not any(values):
                     continue
                 has_values = True
+                row_text = "".join(values).replace(" ", "")
+                if "校准有效期" in row_text and ("内部编号" in row_text or "设备编号" in row_text):
+                    header_kinds.add("ledger")
+                if "标准编号" in row_text and ("最新版本号" in row_text or "标准名称" in row_text):
+                    header_kinds.add("standard")
                 columns = [index + 1 for index, value in enumerate(values) if value]
                 line = " | ".join(
                     f"{get_column_letter(index + 1)}{row_no}={values[index]}"
@@ -76,7 +105,8 @@ def _read_excel(path: Path) -> tuple[str, list[dict[str, Any]]]:
         cached_workbook.close()
     if not has_values:
         raise ValueError("workbook contains no usable cell values")
-    return "\n".join(blocks), positions
+    kind = "ledger" if "ledger" in header_kinds else "standard" if "standard" in header_kinds else "supplement"
+    return "\n".join(blocks), positions, kind
 
 
 def _extractor() -> Any:
@@ -129,15 +159,19 @@ def read_material(path: str | Path, output_dir: str | Path | None = None) -> dic
         if not source.is_file():
             raise FileNotFoundError("file does not exist")
         if source.suffix.lower() in (".xlsx", ".xlsm"):
-            content, positions = _read_excel(source)
+            content, positions, excel_header_kind = _read_excel(source)
         else:
             content, positions = _read_document(source, Path(output_dir) if output_dir else None)
+            excel_header_kind = "supplement"
         digest = hashlib.sha256(source.read_bytes()).hexdigest()
     except Exception as exc:
         raise ValueError(f"Failed to read material {source.name}: {exc}") from exc
+    kind = classify_material(source.name)
+    if kind == "supplement" and source.suffix.lower() in (".xlsx", ".xlsm"):
+        kind = excel_header_kind
     return {
         "filename": source.name,
-        "kind": classify_material(source.name),
+        "kind": kind,
         "content": content,
         "sha256": digest,
         "source_position": positions,

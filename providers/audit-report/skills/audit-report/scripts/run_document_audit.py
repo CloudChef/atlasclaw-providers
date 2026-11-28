@@ -20,6 +20,7 @@ import inspect
 import subprocess
 from pathlib import Path
 from typing import Any, Callable, Awaitable
+from urllib.parse import quote, unquote
 
 import httpx
 from dotenv import dotenv_values
@@ -307,6 +308,26 @@ def _report_completeness_warnings(markdown: str, required_rule_ids: list[str]) -
     return warnings
 
 
+def _input_dependency_warnings(markdown: str, ruleset: Any,
+                               materials: list[dict[str, Any]] | None) -> list[str]:
+    """Flag model PASS rows whose declared material dependency was not supplied."""
+    if materials is None:
+        return []
+    from audit_materials import material_availability
+    available = material_availability(materials)["kinds"]
+    rows = _coverage_rows(markdown, ruleset.ids)
+    warnings = []
+    for rule_id, rule in ruleset.rules.items():
+        raw_requires = rule.get("requires") or []
+        requires = {raw_requires} if isinstance(raw_requires, str) else set(raw_requires)
+        missing = sorted(requires & {"standard", "ledger", "materials"} - available)
+        if missing and len(rows[rule_id]) == 1:
+            cells = [cell.strip().strip("`* ") for cell in rows[rule_id][0].rstrip().rstrip("|").split("|")[2:]]
+            if len(cells) >= 4 and cells[3].startswith("通过"):
+                warnings.append(f"input_dependency_missing:{rule_id}:{','.join(missing)}")
+    return warnings
+
+
 def _report_resource(name: str, **values: str) -> str:
     from audit_project_prompts import render_report_template
     return render_report_template(name, **values).strip()
@@ -349,6 +370,8 @@ def normalize_publishable_report(
     rules_dir: Path | None = None,
     *,
     preserved_source_markdown: str | None = None,
+    materials: list[dict[str, Any]] | None = None,
+    ruleset: Any = None,
 ) -> str:
     """Preserve model conclusions and mark every absent or malformed conclusion pending."""
     text = markdown.strip()
@@ -360,7 +383,9 @@ def normalize_publishable_report(
         text = outer_fence.group(2).strip()
 
     from _rules import load_rules
-    rule_set = load_rules(rules_dir) if rules_dir is not None else load_rules()
+    rule_set = ruleset or (load_rules(rules_dir) if rules_dir is not None else load_rules())
+    from audit_materials import material_availability
+    available_kinds = material_availability(materials)["kinds"] if materials is not None else None
     original = text
     if not re.search(r"(?m)^#{1,6}[ \t]+\S", text):
         text = _report_resource("incomplete-title.md") + "\n\n" + text
@@ -407,7 +432,15 @@ def normalize_publishable_report(
         evidence_rows = source_rows if source_incomplete else (
             rows if rows and not _coverage_row_complete(rows) else []
         )
-        valid = not source_incomplete and (
+        raw_requires = rule_set.rules.get(rule_id, {}).get("requires") or []
+        requires = {raw_requires} if isinstance(raw_requires, str) else set(raw_requires)
+        missing_dependencies = sorted(
+            requires
+            & {"standard", "ledger", "materials"} - (available_kinds or set())
+        ) if available_kinds is not None else []
+        dependency_blocked = bool(missing_dependencies and len(rows) == 1 and len(cells) >= 4
+                                  and cells[3].startswith("通过"))
+        valid = not source_incomplete and not dependency_blocked and (
             len(rows) == 1 and len(cells) >= 5
             and bool(re.match(r"^(?:不通过|通过|不适用|待复核|证据不足)(?:$|[（(：:,，\s])", cells[3]))
             and bool(cells[4]) and not re.search(r"<[^>]+>", "|".join(cells))
@@ -422,7 +455,16 @@ def normalize_publishable_report(
         name = str((row_cells[1] if len(row_cells) > 1 else "") or rule.get("name") or rule.get("title") or _report_resource("pending-rule-name.md"))
         severity = str((row_cells[2] if len(row_cells) > 2 else "") or rule.get("severity") or _report_resource("pending-rule-severity.md"))
         status = _report_resource("pending-rule-status.md")
-        if evidence_rows:
+        if dependency_blocked:
+            evidence_rows = rows
+        if dependency_blocked:
+            input_labels = {"standard": "检测标准", "ledger": "设备台账", "materials": "配套材料"}
+            reason = _report_resource(
+                "pending-reason-input-missing.md",
+                ORIGINAL_ROWS=_source_rows_as_table_data(evidence_rows),
+                MISSING_INPUTS=", ".join(input_labels.get(kind, kind) for kind in missing_dependencies),
+            )
+        elif evidence_rows:
             reason = _report_resource(
                 "pending-reason-preserved.md", ORIGINAL_ROWS=_source_rows_as_table_data(evidence_rows),
             )
@@ -547,6 +589,7 @@ async def render_saved_report(
     *,
     rules_dir: Path | None = None,
     source_metadata: dict[str, Any] | None = None,
+    ruleset: Any = None,
 ) -> dict[str, Any]:
     """Regenerate a saved audit report using local formatting and delivery only."""
     from audit_delivery import deliver_report
@@ -568,9 +611,24 @@ async def render_saved_report(
         if isinstance(prior_warnings, list):
             warnings.extend(item for item in prior_warnings if isinstance(item, str))
     warnings = list(dict.fromkeys(warnings))
+    materials_path = output_dir / "materials-used.json"
+    try:
+        saved_materials = json.loads(materials_path.read_text(encoding="utf-8")) if materials_path.is_file() else None
+    except (OSError, UnicodeDecodeError, ValueError):
+        saved_materials = None
+    active_rules = ruleset
+    if active_rules is None:
+        from _rules import load_rules
+        active_rules = load_rules(rules_dir) if rules_dir is not None else load_rules()
+    warnings.extend(_input_dependency_warnings(raw_markdown, active_rules, saved_materials))
+    if summary_markdown:
+        warnings.extend(_input_dependency_warnings(summary_markdown, active_rules, saved_materials))
+    warnings = list(dict.fromkeys(warnings))
     normalized = normalize_publishable_report(
         raw_markdown, required_rule_ids, rules_dir=rules_dir,
         preserved_source_markdown=summary_markdown,
+        materials=saved_materials,
+        ruleset=active_rules,
     )
     normalized = _apply_source_identity(normalized, source_metadata)
     normalized = normalized.replace("报告未完成", "报告已生成，部分结果待复核")
@@ -707,6 +765,30 @@ def _pipeline_incomplete_block(
             detail = _report_resource("pipeline-detail-overall.md")
         elif warning.startswith("coverage_row_missing:"):
             detail = _report_resource("pipeline-detail-coverage.md", RULE_ID=warning.split(":", 1)[1])
+        elif warning.startswith("input_dependency_missing:"):
+            _, rule_id, dependencies = warning.split(":", 2)
+            input_labels = {"standard": "检测标准", "ledger": "设备台账", "materials": "配套材料"}
+            dependency_labels = ", ".join(
+                input_labels.get(kind, kind) for kind in dependencies.split(",")
+            )
+            detail = _report_resource("pipeline-detail-input-dependency.md", RULE_ID=rule_id,
+                                      DEPENDENCIES=dependency_labels)
+        elif warning.startswith(("project_rule_missing:", "project_rule_malformed:",
+                                 "project_rule_input_missing:")):
+            parts = warning.split(":")
+            rule_id = parts[1] if len(parts) > 1 else "未知规则"
+            project_id = unquote(parts[2]) if len(parts) > 2 else "项目"
+            resource = ("pipeline-project-rule-missing.md" if warning.startswith("project_rule_missing:") else
+                        "pipeline-project-rule-malformed.md" if warning.startswith("project_rule_malformed:") else
+                        "pipeline-project-rule-input-missing.md")
+            values = {"PROJECT": project_id, "RULE_ID": rule_id}
+            if warning.startswith("project_rule_input_missing:"):
+                input_labels = {"standard": "检测标准", "ledger": "设备台账", "materials": "配套材料"}
+                values["DEPENDENCIES"] = ", ".join(
+                    input_labels.get(kind, kind)
+                    for kind in (parts[3].split(",") if len(parts) > 3 else [])
+                ) or "未提供"
+            detail = _report_resource(resource, **values)
         elif warning == "coverage_table_missing":
             detail = _report_resource("pipeline-detail-coverage-all.md")
         elif warning == "candidate_disposition_missing":
@@ -887,7 +969,8 @@ async def audit_prepared(pdf_path: Path, material_paths: list[Path], output_dir:
         for index, item in enumerate(materials, start=1)
     ], ensure_ascii=False, indent=2), encoding="utf-8")
     from _rules import load_rules
-    required_rule_ids = load_rules(rules_dir).ids if rules_dir is not None else load_rules().ids
+    active_rules = load_rules(rules_dir) if rules_dir is not None else load_rules()
+    required_rule_ids = active_rules.ids
     submission = {
         "page_count": count, "report_characters": len(text),
         "rule_ids": required_rule_ids,
@@ -903,11 +986,11 @@ async def audit_prepared(pdf_path: Path, material_paths: list[Path], output_dir:
 
     save_submission()
     print(f"Prepared {count} pages and {len(materials)} reference files.", flush=True)
-    active_rules = load_rules(rules_dir) if rules_dir is not None else load_rules()
     raw = output_dir / "audit-raw.md"
     try:
         markdown = await execute_audit(
-            text, materials, count, submit, output_dir, on_progress=on_progress, rules_dir=rules_dir,
+            text, materials, count, submit, output_dir, on_progress=on_progress,
+            rules_dir=rules_dir, ruleset=active_rules,
         )
         raw.write_text(markdown, encoding="utf-8")
     except Exception as exc:  # noqa: BLE001 - preserve partial stage files and publish a review shell
@@ -916,7 +999,27 @@ async def audit_prepared(pdf_path: Path, material_paths: list[Path], output_dir:
         markdown = _incomplete_report_shell(output_dir, partial_failure_type, required_rule_ids, rules_dir)
         (output_dir / "audit-incomplete.md").write_text(markdown, encoding="utf-8")
 
+    workflow_path = output_dir / "workflow.json"
+    if workflow_path.is_file():
+        try:
+            workflow_state = json.loads(workflow_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, ValueError):
+            workflow_state = {}
+        for project_warning in workflow_state.get("project_rule_warnings", []):
+            if isinstance(project_warning, dict):
+                project_id = str(project_warning.get("project_id") or "未知项目")
+                for item in project_warning.get("warnings", []):
+                    if not isinstance(item, str):
+                        continue
+                    match = re.match(r"project_rule_(missing|malformed|input_missing):([^:]+)(?::(.*))?$", item)
+                    if match:
+                        incomplete_reasons.append(
+                            f"project_rule_{match.group(1)}:{match.group(2)}:{quote(project_id, safe='')}"
+                            + (f":{match.group(3)}" if match.group(3) else "")
+                        )
+
     initial_warnings = _report_completeness_warnings(markdown, required_rule_ids)
+    initial_warnings.extend(_input_dependency_warnings(markdown, active_rules, materials))
     summary_raw = output_dir / "audit-main-raw.md"
     summary_markdown = None
     if summary_raw.is_file():
@@ -926,6 +1029,8 @@ async def audit_prepared(pdf_path: Path, material_paths: list[Path], output_dir:
     normalized = normalize_publishable_report(
         markdown, required_rule_ids, rules_dir=rules_dir,
         preserved_source_markdown=summary_markdown,
+        materials=materials,
+        ruleset=active_rules,
     )
     normalized = _apply_source_identity(normalized, source_metadata)
     normalized = normalized.replace("报告未完成", "报告已生成，部分结果待复核")

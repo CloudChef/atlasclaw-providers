@@ -5,6 +5,7 @@ import shutil
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -65,6 +66,20 @@ def test_index_prompt_is_json_only_complete_and_text_only():
     assert "不得声称看过图片" in prompt
     for rule in pack["rules"]:
         assert rule["title"] in prompt
+
+
+def test_index_prompt_uses_the_supplied_rule_snapshot(tmp_path: Path):
+    snapshot_rules = SimpleNamespace(
+        packs=[{"pack": "builtin", "version": "snapshot", "status": "active",
+                "path": str(tmp_path / "builtin" / "rules.json")}],
+        rules={"X99": {"id": "X99", "title": "Snapshot-only index rule", "severity": "C"}},
+    )
+
+    prompt = build_index_prompt("## Page 1\nReport", 1, ruleset=snapshot_rules)
+
+    assert "Snapshot-only index rule" in prompt
+    assert '"id": "X99"' in prompt
+    assert "R07 检测标准与标准库登记的内容不一致" not in prompt
 
 
 def test_chunk_prompt_keeps_bounded_text_context_and_previous_scan_only():
