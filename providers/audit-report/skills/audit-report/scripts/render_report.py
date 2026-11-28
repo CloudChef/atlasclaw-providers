@@ -161,7 +161,7 @@ def render_quote(lines: list[str], start: int) -> tuple[str, int]:
     return "\n".join(out), index
 
 
-def render_paragraph(lines: list[str], start: int) -> tuple[str, int]:
+def render_paragraph(lines: list[str], start: int, *, pending_publication: bool = False) -> tuple[str, int]:
     buffer: list[str] = []
     index = start
     while index < len(lines):
@@ -180,14 +180,24 @@ def render_paragraph(lines: list[str], start: int) -> tuple[str, int]:
         index += 1
     text = " ".join(buffer)
     css = ""
+    pending_verdict = False
     if text.startswith("**总评："):
-        if "不通过" in text:
+        if pending_publication:
+            label = load_template("pending-verdict-label.md").strip()
+            note = load_template("pending-verdict-note.md").strip()
+            text = text.replace("**总评：", f"**{label}：", 1)
+            css = ' class="verdict verdict-pending"'
+            pending_verdict = True
+        elif "不通过" in text:
             css = ' class="verdict verdict-fail"'
         elif "通过" in text:
             css = ' class="verdict verdict-pass"'
         else:
             css = ' class="verdict verdict-unknown"'
-    return f"<p{css}>{inline(text)}</p>", index
+    content = f"<p{css}>{inline(text)}</p>"
+    if pending_verdict:
+        content += f'<p class="verdict-note">{inline(note)}</p>'
+    return content, index
 
 
 def strip_sections(markdown: str, keywords: list[str]) -> str:
@@ -234,6 +244,8 @@ def render_image(alt: str, src: str, base_dir: Path) -> str:
 
 def markdown_to_html(markdown: str, base_dir: Path) -> str:
     lines = markdown.splitlines()
+    pending_marker = load_template("pending-publication-marker.md").strip()
+    pending_publication = any(line.strip().startswith(pending_marker) for line in lines)
     body: list[str] = []
     index = 0
     while index < len(lines):
@@ -273,7 +285,7 @@ def markdown_to_html(markdown: str, base_dir: Path) -> str:
             block, index = render_quote(lines, index)
             body.append(block)
             continue
-        block, index = render_paragraph(lines, index)
+        block, index = render_paragraph(lines, index, pending_publication=pending_publication)
         body.append(block)
     return "\n".join(body)
 

@@ -5,6 +5,7 @@ import shutil
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -19,6 +20,7 @@ from audit_project_prompts import (  # noqa: E402
     build_index_merge_prompt,
     build_project_prompt,
     build_summary_prompt,
+    build_visual_prompt,
     render_prompt_template,
 )
 import audit_project_prompts as prompts_module  # noqa: E402
@@ -64,6 +66,20 @@ def test_index_prompt_is_json_only_complete_and_text_only():
     assert "不得声称看过图片" in prompt
     for rule in pack["rules"]:
         assert rule["title"] in prompt
+
+
+def test_index_prompt_uses_the_supplied_rule_snapshot(tmp_path: Path):
+    snapshot_rules = SimpleNamespace(
+        packs=[{"pack": "builtin", "version": "snapshot", "status": "active",
+                "path": str(tmp_path / "builtin" / "rules.json")}],
+        rules={"X99": {"id": "X99", "title": "Snapshot-only index rule", "severity": "C"}},
+    )
+
+    prompt = build_index_prompt("## Page 1\nReport", 1, ruleset=snapshot_rules)
+
+    assert "Snapshot-only index rule" in prompt
+    assert '"id": "X99"' in prompt
+    assert "R07 检测标准与标准库登记的内容不一致" not in prompt
 
 
 def test_chunk_prompt_keeps_bounded_text_context_and_previous_scan_only():
@@ -131,7 +147,8 @@ def test_project_prompt_contains_complete_rules_native_text_all_materials_and_ta
     assert "视觉核查原始结果" not in prompt
     assert "小页组数值核查原始记录" not in prompt
     assert "待复核候选" not in prompt and "INITIAL_DRAFT" not in prompt
-    assert {f"R{i:02d}" for i in range(1, 20)} <= {rule["id"] for rule in pack["rules"]}
+    assert [rule["id"] for rule in pack["rules"]] == [f"R{i:02d}" for i in range(1, 47)]
+    assert all(f'"id": "{rule["id"]}"' in prompt for rule in pack["rules"])
 
 
 def test_summary_prompt_keeps_all_source_materials_reviews_and_reference_index():
@@ -212,7 +229,7 @@ def test_rules_config_can_point_to_absolute_builtin_pack_path(tmp_path):
         encoding="utf-8",
     )
     prompt = build_project_prompt({"id": "P", "title": "T", "page_start": 1, "page_end": 1}, "text", "front", [], 1, rules_dir=rules_dir)
-    assert "R19" in prompt and "完整内置 JSON 规则源" not in prompt
+    assert "R46" in prompt and "完整内置 JSON 规则源" not in prompt
 
 
 def test_default_rules_root_honours_audit_rules_dir_environment(tmp_path, monkeypatch):
@@ -225,3 +242,13 @@ def test_default_rules_root_honours_audit_rules_dir_environment(tmp_path, monkey
     monkeypatch.setenv("AUDIT_RULES_DIR", str(rules_dir))
     prompt = build_project_prompt({"id": "P", "title": "T", "page_start": 1, "page_end": 1}, "text", "front", [], 1)
     assert "environment-root R01 title" in prompt
+
+
+def test_visual_prompt_includes_visual_rules_and_page_contract():
+    prompt = build_visual_prompt(
+        "## Page 1\n\nSynthetic text", [1], [], page_count=1,
+    )
+    assert "R14" in prompt and "R30" in prompt and "R34" in prompt
+    assert "audit-visual-review" in prompt or "页面组视觉核查合同" in prompt
+    assert "### Page N" in prompt
+    assert "R01" not in prompt  # non-visual page-number rule is not sent

@@ -80,6 +80,8 @@ blockquote p { margin: 4px 0; }
 .verdict-fail { background: #fef3f2; border-left: 7px solid #b42318; color: #b42318; }
 .verdict-pass { background: #ecfdf3; border-left: 7px solid #067647; color: #067647; }
 .verdict-unknown { background: #fffaeb; border-left: 7px solid #b54708; color: #b54708; }
+.verdict-pending { background: #fffaeb; border-left: 7px solid #b54708; color: #475467; }
+.verdict-note { margin: -14px 0 22px; color: #475467; font-size: 12px; }
 .table-wrap { width: 100%; margin: 14px 0 22px; overflow-x: auto; }
 table {
   width: 100%;

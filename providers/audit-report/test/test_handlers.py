@@ -25,6 +25,10 @@ from report_no import extract_report_no  # noqa: E402
 from store import DocumentStore  # noqa: E402
 
 
+async def _unused_visual(**_kwargs) -> str:
+    return "### Page 1\nVisual observation"
+
+
 @pytest.mark.asyncio
 async def test_configured_report_storage_upload_and_download_are_user_scoped(tmp_path: Path) -> None:
     class Upload:
@@ -90,7 +94,7 @@ async def test_configured_report_storage_places_audit_attempts_under_user_root(t
         "id": "doc-1", "user_id": "alice", "file_name": "source.pdf",
         "file_path": str(source), "extension": ".pdf", "sha256": "",
     })
-    context = SimpleNamespace(host=host, run_text=lambda **_kwargs: None)
+    context = SimpleNamespace(host=host, run_text=lambda **_kwargs: None, run_visual=_unused_visual)
     started = asyncio.Event()
     observed: list[Path] = []
 
@@ -135,22 +139,32 @@ async def test_configured_report_storage_runs_pipeline_and_publishes_external_pa
         prepared.write_bytes(b"%PDF-prepared")
         return {"pdf": str(prepared)}
 
-    preparation = types.SimpleNamespace(PREPARATION_VERSION=1, prepare_report=prepare_report)
+    preparation = types.SimpleNamespace(
+        PREPARATION_VERSION=1,
+        prepare_report=prepare_report,
+        prepare_visual_pdf=lambda source, _output: {"pdf": str(source)},
+    )
+    metadata_inputs: list[str] = []
     async def audit_prepared(prepared_pdf, _materials, attempt_dir, _submit, **_kwargs):
         assert Path(prepared_pdf).is_relative_to(user_root)
         Path(attempt_dir, "audit-report.pdf").write_bytes(b"%PDF-report")
         Path(attempt_dir, "audit-raw.md").write_text("audited", encoding="utf-8")
+        Path(attempt_dir, "audit.md").write_text("published normalized report", encoding="utf-8")
 
     monkeypatch.setitem(sys.modules, "audit_preparation", preparation)
     monkeypatch.setitem(sys.modules, "run_document_audit", types.SimpleNamespace(audit_prepared=audit_prepared))
     monkeypatch.setattr(audit_service.standards_service, "snapshot_audit_library", lambda _host, target: {
         "material_paths": [], "rules_dir": target / "rules",
     })
-    monkeypatch.setattr(audit_service, "_llm_report_metadata", lambda *_args: (
-        {"verdict": "通过", "results": [], "findings": []},
-        {"findings_total": 0, "findings_review": 0, "grade_summary": {}},
-    ))
-    context = SimpleNamespace(host=host, run_text=lambda **_kwargs: "ok")
+    def capture_metadata(markdown, *_args, **_kwargs):
+        metadata_inputs.append(markdown)
+        return (
+            {"verdict": "通过", "results": [], "findings": []},
+            {"findings_total": 0, "findings_review": 0, "grade_summary": {}},
+        )
+
+    monkeypatch.setattr(audit_service, "_llm_report_metadata", capture_metadata)
+    context = SimpleNamespace(host=host, run_text=lambda **_kwargs: "ok", run_visual=_unused_visual)
     attempt = user_root / "documents" / "doc-2" / "runs" / "attempt"
 
     await audit_service._run_document_audit(context, store, document, attempt)
@@ -159,6 +173,7 @@ async def test_configured_report_storage_runs_pipeline_and_publishes_external_pa
     assert updated["status"] == "completed"
     assert Path(updated["report_path"]) == attempt / "audit-report.pdf"
     assert Path(updated["desensitized_path"]).is_relative_to(user_root)
+    assert metadata_inputs == ["published normalized report"]
 
 
 @pytest.mark.asyncio
@@ -183,7 +198,7 @@ async def test_incomplete_skill_run_cannot_publish_report_but_keeps_prepared_pdf
     async def unused_text(**_kwargs) -> str:
         return ""
 
-    host = SimpleNamespace(data_dir=tmp_path, agent=object(), run_text=unused_text)
+    host = SimpleNamespace(data_dir=tmp_path, agent=object(), run_text=unused_text, run_visual=_unused_visual)
     prepare_outputs: list[Path] = []
 
     def prepare(source_path: str, output_dir: Path) -> dict:
@@ -195,6 +210,10 @@ async def test_incomplete_skill_run_cannot_publish_report_but_keeps_prepared_pdf
         return {"pdf": str(prepared_path)}
 
     monkeypatch.setattr(audit_preparation, "prepare_report", prepare)
+    visual_source = doc_dir / "visual-source.pdf"
+    monkeypatch.setattr(audit_preparation, "prepare_visual_pdf", lambda _source, _output: {
+        "pdf": str(visual_source),
+    })
     monkeypatch.setattr(audit_service.standards_service, "snapshot_audit_library", lambda *_args: {
         "material_paths": [], "rules_dir": tmp_path / "rules",
     })
@@ -217,7 +236,7 @@ async def test_incomplete_skill_run_cannot_publish_report_but_keeps_prepared_pdf
 
 
 @pytest.mark.asyncio
-async def test_skill_pipeline_uses_only_core_text_bridge_without_host_selector(
+async def test_skill_pipeline_uses_core_model_bridges_without_host_selector(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import audit_service
@@ -248,13 +267,19 @@ async def test_skill_pipeline_uses_only_core_text_bridge_without_host_selector(
         text_calls.append(kwargs)
         return "synthetic response"
 
-    context = SimpleNamespace(host=host, run_text=run_text)
+    context = SimpleNamespace(host=host, run_text=run_text, run_visual=_unused_visual)
 
     def prepare(*_args):
         prepare_calls.append(True)
         return {"pdf": str(prepared)}
 
     monkeypatch.setattr(audit_preparation, "prepare_report", prepare)
+    visual_source = doc_dir / "runs" / "visual-source.pdf"
+    visual_source.parent.mkdir(parents=True, exist_ok=True)
+    visual_source.write_bytes(b"%PDF visual source")
+    monkeypatch.setattr(audit_preparation, "prepare_visual_pdf", lambda _source, _output: {
+        "pdf": str(visual_source),
+    })
     monkeypatch.setattr(audit_service.standards_service, "snapshot_audit_library", lambda *_args: {
         "material_paths": [], "rules_dir": tmp_path / "rules",
     })
@@ -268,7 +293,13 @@ async def test_skill_pipeline_uses_only_core_text_bridge_without_host_selector(
     monkeypatch.setattr(audit_service, "_progress", capture_progress)
 
     async def call_submit(_pdf, _materials, _out, submit, **kwargs):
-        assert set(kwargs) == {"on_progress", "rules_dir"}
+        assert set(kwargs) == {
+            "on_progress", "rules_dir", "visual_pdf", "submit_visual", "require_visual",
+            "visual_prepare_error", "source_metadata",
+        }
+        assert kwargs["source_metadata"]["file_name"] == "source.pdf"
+        assert Path(kwargs["visual_pdf"]) == visual_source
+        assert callable(kwargs["submit_visual"]) and kwargs["require_visual"] is True
         await kwargs["on_progress"]({"stage": "projects", "completed": 1, "total": 2})
         await kwargs["on_progress"]({"stage": "project-review", "completed": 1, "total": 1})
         for stage in ("index", "project-review", "summary"):
@@ -281,7 +312,8 @@ async def test_skill_pipeline_uses_only_core_text_bridge_without_host_selector(
     system_prompt = (ROOT / "skills" / "audit-report" / "references" / "audit-system.md").read_text(encoding="utf-8")
     assert len(text_calls) == 3
     assert all(call["system_prompt"] == system_prompt for call in text_calls)
-    assert all(set(call) == {"prompt", "system_prompt"} for call in text_calls)
+    assert all(set(call) == {"prompt", "system_prompt", "skill_id"} for call in text_calls)
+    assert all(call["skill_id"] == "audit-report:audit-report" for call in text_calls)
     stage_progress = [(value, text) for value, text in progress_updates if "准备逐项目审核" in text or "审核检测项目" in text]
     assert stage_progress[0][0] == 61
     assert stage_progress[1][0] is None
@@ -291,8 +323,9 @@ async def test_skill_pipeline_uses_only_core_text_bridge_without_host_selector(
 
 
 @pytest.mark.asyncio
-async def test_start_document_audit_requires_text_bridge_before_claiming_run(tmp_path: Path) -> None:
+async def test_start_document_audit_without_model_bridges_still_claims_a_report_run(tmp_path: Path, monkeypatch) -> None:
     import audit_service
+    import asyncio
 
     source = tmp_path / "source.pdf"
     source.write_bytes(b"%PDF synthetic")
@@ -302,11 +335,15 @@ async def test_start_document_audit_requires_text_bridge_before_claiming_run(tmp
         "file_path": str(source), "extension": ".pdf", "sha256": "",
     })
     context = SimpleNamespace(host=SimpleNamespace(data_dir=tmp_path))
+    started = asyncio.Event()
 
-    with pytest.raises(ProviderError) as exc_info:
-        await audit_service.start_document_audit(context, store, document)
-    assert exc_info.value.code == "text_model_unavailable"
-    assert store.get(document["id"], "alice")["status"] == "uploaded"
+    async def record_run(*_args, **_kwargs) -> None:
+        started.set()
+
+    monkeypatch.setattr(audit_service, "_run_document_audit", record_run)
+    await audit_service.start_document_audit(context, store, document)
+    await asyncio.wait_for(started.wait(), timeout=1)
+    assert store.get(document["id"], "alice")["status"] == "running"
 
 
 @pytest.mark.asyncio
@@ -314,7 +351,9 @@ async def test_different_documents_for_same_user_run_independently(tmp_path: Pat
     import audit_service
 
     store = DocumentStore(tmp_path)
-    context = SimpleNamespace(host=SimpleNamespace(data_dir=tmp_path), run_text=lambda **_kwargs: None)
+    context = SimpleNamespace(
+        host=SimpleNamespace(data_dir=tmp_path), run_text=lambda **_kwargs: None, run_visual=_unused_visual,
+    )
     documents = []
     for document_id in ("doc-a", "doc-b"):
         source = tmp_path / f"{document_id}.pdf"
@@ -370,7 +409,9 @@ async def test_reconcile_only_fails_observed_orphan_not_other_active_document(
     import audit_service
 
     store = DocumentStore(tmp_path)
-    context = SimpleNamespace(host=SimpleNamespace(data_dir=tmp_path), run_text=lambda **_kwargs: None)
+    context = SimpleNamespace(
+        host=SimpleNamespace(data_dir=tmp_path), run_text=lambda **_kwargs: None, run_visual=_unused_visual,
+    )
     active_source = tmp_path / "active.pdf"
     orphan_source = tmp_path / "orphan.pdf"
     active_source.write_bytes(b"%PDF-1.4 active")
@@ -433,7 +474,7 @@ async def test_start_does_not_recover_other_documents_until_they_are_observed(tm
 
     context = SimpleNamespace(user_id="alice", provider_type="audit-report", provider_instance="default",
                               path_params={"document_id": new["id"]}, host=SimpleNamespace(data_dir=tmp_path, agent=object()),
-                              run_text=unused_text)
+                              run_text=unused_text, run_visual=_unused_visual)
     release = asyncio.Event()
 
     async def run(*args):
@@ -879,7 +920,7 @@ async def test_other_user_cannot_download_audit_artifacts(
 
 
 @pytest.mark.asyncio
-async def test_results_are_contained_and_new_pdf_requires_explicit_llm_verdict(tmp_path: Path) -> None:
+async def test_results_are_contained_and_pdf_without_llm_verdict_is_pending(tmp_path: Path) -> None:
     report = tmp_path / "documents" / "doc-pdf" / "runs" / "attempt" / "audit-report.pdf"
     report.parent.mkdir(parents=True)
     report.write_bytes(b"%PDF")
@@ -891,9 +932,9 @@ async def test_results_are_contained_and_new_pdf_requires_explicit_llm_verdict(t
         "report_path": str(report), "report_name": "audit-report.pdf"})
     context = SimpleNamespace(user_id="alice", path_params={"document_id": "doc-pdf"},
                               host=SimpleNamespace(data_dir=tmp_path))
-    with pytest.raises(ProviderError) as exc:
-        await handlers.document_results(None, context)
-    assert exc.value.code == "results_unreadable"
+    result = await handlers.document_results(None, context)
+    assert result["completion_status"] == "needs_review"
+    assert result["verdict"] == "待复核（模型未给出结论）"
 
     outside = tmp_path.parent / "outside.html"
     outside.write_text("legacy", encoding="utf-8")
@@ -904,6 +945,60 @@ async def test_results_are_contained_and_new_pdf_requires_explicit_llm_verdict(t
     with pytest.raises(ProviderError) as exc:
         await handlers.document_results(None, context)
     assert exc.value.code == "file_forbidden"
+
+
+@pytest.mark.asyncio
+async def test_document_results_refreshes_from_published_markdown_and_keeps_r20_evidence(tmp_path: Path) -> None:
+    report = tmp_path / "documents" / "doc-r20" / "runs" / "attempt" / "audit-report.pdf"
+    report.parent.mkdir(parents=True)
+    report.write_bytes(b"%PDF")
+    raw = (
+        "# 审核报告\n\n**总评：通过**\n\n## 检查覆盖表\n"
+        "| # | 模块 | 检查项 | 等级 | 结果 | 证据位置/说明 |\n"
+        "| --- | --- | --- | --- | --- | --- |\n"
+        "| R20 | 设备信息 | 外来设备信息一致性 | B | 待复核 | 模型覆盖行缺失、重复或格式不完整 |\n"
+    )
+    published = (
+        "# 审核报告\n\n**总评：通过**\n\n## 检查覆盖表\n"
+        "| # | 模块 | 检查项 | 等级 | 结果 | 证据位置/说明 |\n"
+        "| --- | --- | --- | --- | --- | --- |\n"
+        "| R20 | 设备信息 | 外来设备信息一致性 | B | 待复核 | 模型原始覆盖记录（保留原结论与依据）："
+        "&#124; R20 &#124; 设备信息 &#124; 外来设备信息一致性 &#124; B &#124; 通过/待复核 &#124; "
+        "S41 是否外来无法确认 &#124;。模型未给出可规范化的单一结论，相关规则列为待复核。 |\n"
+    )
+    (report.parent / "audit-raw.md").write_text(raw, encoding="utf-8")
+    (report.parent / "audit.md").write_text(published, encoding="utf-8")
+    (report.parent / "completion.json").write_text(json.dumps({
+        "completion_status": "needs_review", "warnings": ["coverage_row_missing:R20"],
+    }), encoding="utf-8")
+    verification_path = report.parent / "verification.json"
+    verification_path.write_text(json.dumps({
+        "verdict": "通过", "results": [{"rule": "R20", "verdict": "PASS"}], "findings": [],
+    }), encoding="utf-8")
+    store = DocumentStore(tmp_path)
+    store.create({
+        "id": "doc-r20", "user_id": "alice", "file_name": "source.pdf",
+        "file_path": str(tmp_path / "source.pdf"), "extension": ".pdf", "sha256": "",
+        "status": "completed", "report_path": str(report), "report_name": report.name,
+    })
+    context = SimpleNamespace(
+        user_id="alice", path_params={"document_id": "doc-r20"}, host=SimpleNamespace(data_dir=tmp_path),
+    )
+
+    first = await handlers.document_results(None, context)
+    first_rule = next(item for item in first["results"] if item["rule"] == "R20")
+    assert first_rule["verdict"] == "REVIEW"
+    assert "通过/待复核" in first_rule["reason"]
+    assert "S41 是否外来无法确认" in first_rule["reason"]
+    assert "&#124;" not in first_rule["reason"]
+    assert first["completion_status"] == "needs_review"
+
+    second = await handlers.document_results(None, context)
+    second_rule = next(item for item in second["results"] if item["rule"] == "R20")
+    assert second_rule["verdict"] == "REVIEW"
+    assert "通过/待复核" in second_rule["reason"]
+    assert "S41 是否外来无法确认" in second_rule["reason"]
+    assert second["completion_status"] == "needs_review"
 
 
 def test_build_verification_includes_evidence_image() -> None:
@@ -980,15 +1075,15 @@ def test_chunk_document_splits_on_pages_and_reports_overflow() -> None:
     assert note == ""
 
 
-def test_load_rules_parses_all_nineteen_rules() -> None:
+def test_load_rules_parses_official_rule_set() -> None:
     rules_path = ROOT / "skills" / "audit-report" / "references" / "audit-rules.md"
     rules = batch_audit.load_rules(rules_path)
 
-    assert len(rules) == 19
+    assert len(rules) == 46
     assert rules[0].rule_id == "R01"
-    assert rules[0].severity == "B"
-    assert rules[-1].rule_id == "R19"
-    assert rules[-1].module == "照片有效性"
+    assert rules[0].severity == "C"
+    assert rules[-1].rule_id == "R46"
+    assert rules[-1].title == "多份文档交叉验证"
 
 
 def test_load_rules_keeps_guidance_after_old_character_cutoff(tmp_path: Path) -> None:
@@ -1048,8 +1143,8 @@ def test_load_rule_set_merges_active_packs_and_skips_drafts(tmp_path: Path) -> N
 
     rules, packs = batch_audit.load_rule_set(skill)
 
-    assert packs == ["builtin@1.0.0", "active-pack@1.2.3"]
-    assert len(rules) == 20
+    assert packs == ["builtin@2.0.0", "active-pack@1.2.3"]
+    assert len(rules) == 47
     assert rules[-1].rule_id == "X01"
     assert rules[-1].severity == "A"
     assert rules[-1].module == "客户要求"
@@ -1098,8 +1193,8 @@ def test_rule_set_includes_builtin_and_active_packs(tmp_path: Path) -> None:
 
     ids = [rule.rule_id for rule in rules]
     assert "R01" in ids and "R19" in ids and "X01" in ids
-    assert len(ids) == 20
-    assert packs == ["builtin@1.0.0", "customer-xy@1.2.0"]
+    assert len(ids) == 47
+    assert packs == ["builtin@2.0.0", "customer-xy@1.2.0"]
     extra = next(rule for rule in rules if rule.rule_id == "X01")
     assert "未附试验箱温度曲线原始记录" in extra.guidance
     assert extra.module == "客户要求"
@@ -1144,7 +1239,7 @@ def test_markdown_report_contains_required_sections() -> None:
         finished_at=datetime.now().astimezone(),
     )
 
-    for heading in ("## 1. 审核对象", "## 2. 总评", "## 3. 问题清单", "## 5. 检查覆盖表（内置 19 项 + 已启用规则包）"):
+    for heading in ("## 1. 审核对象", "## 2. 总评", "## 3. 问题清单", "## 5. 检查覆盖表（全部已启用规则）"):
         assert heading in markdown
     assert "**总评：不通过**" in markdown
     assert "### F-01 [A]" in markdown

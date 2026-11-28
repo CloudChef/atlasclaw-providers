@@ -1,1 +1,69 @@
-$font_css .page {padding:0; margin:0; background:#fff; box-shadow:none;} body {background:#fff; font-size:10pt; line-height:1.5;} table {font-size:9pt;} th, td {padding:6pt 7pt; border:0.6pt solid #b8c6d6;} th {background:#f3f6fa;} .field-table th {width:22%;} .field-table td {width:78%;} footer {display:none;}
+$font_css
+
+.page {
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* MuPDF Story repeats fills from fragmented blocks on later pages. */
+* {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+body {
+  background: #fff !important;
+  font-size: 10pt;
+  line-height: 1.5;
+}
+
+table {
+  font-size: 9pt;
+}
+
+.audit-object-table {
+  width: 510pt !important;
+}
+
+.audit-object-table th:first-child,
+.audit-object-table td:first-child {
+  width: 98.2pt !important;
+}
+
+.audit-object-table th:last-child,
+.audit-object-table td:last-child {
+  width: 383.8pt !important;
+}
+
+th,
+td {
+  padding: 6pt 7pt;
+  border: 0.6pt solid #b8c6d6;
+}
+
+.field-table {
+  table-layout: fixed;
+  width: 510pt !important;
+}
+
+.field-table col:first-child {
+  width: 98.2pt !important;
+}
+
+.field-table th {
+  width: 98.2pt !important;
+}
+
+.field-table col:last-child {
+  width: 383.8pt !important;
+}
+
+.field-table td {
+  width: 383.8pt !important;
+}
+
+footer {
+  display: none;
+}

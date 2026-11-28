@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from audit_project_prompts import render_prompt_template
+from audit_project_prompts import render_prompt_template, render_report_template
 
 Submit = Callable[[str], Awaitable[str]]
 Progress = Callable[[dict[str, Any]], Awaitable[None]]
@@ -544,46 +544,209 @@ def _check_project(markdown: str, project_index: int, materials: list[dict[str, 
     return identifiers
 
 
+def normalize_project_rule_table(markdown: str, ruleset: Any,
+                                 materials: list[dict[str, Any]] | None = None) -> tuple[str, list[str]]:
+    """Add pending display rows for structurally missing or input-blocked rule answers."""
+    from audit_materials import material_availability
+
+    section = re.search(r"(?m)^###[ \t]+核查依据[ \t]*$", markdown)
+    if not section:
+        return markdown, []
+    following = re.search(r"(?m)^###[ \t]+", markdown[section.end():])
+    end = section.end() + following.start() if following else len(markdown)
+    body = markdown[section.end():end]
+    availability = material_availability(materials)
+    rows: dict[str, list[tuple[str, list[str]]]] = {}
+    for line in body.splitlines():
+        match = re.match(r"^\|\s*([A-Z]\d{2,})\s*\|", line)
+        if match:
+            cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+            rows.setdefault(match.group(1), []).append((line, cells))
+    warnings: list[str] = []
+    rendered: dict[str, str] = {}
+    for rule_id, rule in ruleset.rules.items():
+        supplied = rows.get(rule_id, [])
+        valid = (len(supplied) == 1 and len(supplied[0][1]) == 3
+                 and supplied[0][1][1] in {"通过", "不通过", "不适用", "待复核"}
+                 and bool(supplied[0][1][2]))
+        raw_requires = rule.get("requires") or []
+        required = {raw_requires} if isinstance(raw_requires, str) else set(raw_requires)
+        missing = (sorted(required & {"standard", "ledger", "materials"} - availability["kinds"])
+                   if materials is not None else [])
+        input_blocked = valid and supplied[0][1][1] == "通过" and bool(missing)
+        if valid and not input_blocked:
+            rendered[rule_id] = supplied[0][0]
+            continue
+        if not supplied:
+            warnings.append(f"project_rule_missing:{rule_id}")
+        elif not input_blocked:
+            warnings.append(f"project_rule_malformed:{rule_id}")
+        if input_blocked:
+            warnings.append(f"project_rule_input_missing:{rule_id}:{','.join(missing)}")
+            input_labels = {"standard": "检测标准", "ledger": "设备台账", "materials": "配套材料"}
+            basis = _project_rule_reason(
+                "input", BASIS=supplied[0][1][2],
+                INPUTS=", ".join(input_labels.get(kind, kind) for kind in missing),
+            )
+        elif supplied:
+            originals = " / ".join(" / ".join(cells).replace("|", "&#124;") for _line, cells in supplied)
+            basis = _project_rule_reason("malformed", SOURCE_ROWS=originals)
+        else:
+            basis = _project_rule_reason("missing")
+        rendered[rule_id] = _project_rule_row(rule_id, "待复核", basis)
+
+    body_lines = body.splitlines()
+    header_index = next((i for i, line in enumerate(body_lines)
+                         if "规则号" in line and "结果" in line and "依据/限制" in line), None)
+    rule_indices = [i for i, line in enumerate(body_lines)
+                    if (match := re.match(r"^\|\s*([A-Z]\d{2,})\s*\|", line))
+                    and match.group(1) in ruleset.rules]
+    remove_indices = set(rule_indices)
+    if header_index is not None:
+        remove_indices.add(header_index)
+        if header_index + 1 < len(body_lines) and re.fullmatch(r"\|?\s*[:|\-\s]+\|?", body_lines[header_index + 1]):
+            remove_indices.add(header_index + 1)
+    anchor = min([i for i in (header_index, *rule_indices) if i is not None], default=len(body_lines))
+    remaining = [line for i, line in enumerate(body_lines) if i not in remove_indices]
+    insertion = sum(1 for i in range(min(anchor, len(body_lines))) if i not in remove_indices)
+    table_rows = [rendered[rule_id] for rule_id in ruleset.rules]
+    table_lines = [*_project_rule_table_header().splitlines(), *table_rows]
+    remaining[insertion:insertion] = table_lines
+    normalized_body = "\n" + "\n".join(remaining).strip() + "\n\n"
+    return markdown[:section.end()] + normalized_body + markdown[end:], warnings
+
+
+def _project_rule_table_header() -> str:
+    return render_report_template("project-rule-table-header.md").strip()
+
+
+def _project_rule_row(rule_id: str, result: str, basis: str) -> str:
+    return render_report_template(
+        "project-rule-table-row.md", RULE_ID=rule_id, RESULT=result,
+        BASIS=basis.replace("|", "&#124;"),
+    )
+
+
+def _project_rule_reason(kind: str, **values: str) -> str:
+    return render_report_template(
+        f"project-rule-reason-{kind}.md",
+        **{key: value.replace("|", "&#124;") for key, value in values.items()},
+    )
+
+
 def _check_global(markdown: str, rule_ids: list[str] | None,
                   rule_severities: dict[str, str] | None = None,
-                  project_finding_ids: set[str] | None = None) -> str:
-    """Use the existing coverage validator, then check global finding namespaces."""
+                  project_finding_ids: set[str] | None = None,
+                  ruleset: Any = None) -> str:
+    """Normalize incomplete dispositions as pending, then check global namespaces."""
     _check_finding_heading_levels(markdown)
     expected_details = (project_finding_ids or set()) | {match.group(1) for match in FINDING.finditer(markdown)}
-    table_ids: set[str] = set()
+    rows: dict[str, tuple[int, str, str]] = {}
+    valid_dispositions: set[str] = set()
     table_seen = False
-    identity_column: int | None = None
-    for line in markdown.splitlines():
+    lines = markdown.splitlines()
+    header: list[str] | None = None
+    identity_column = 0
+    disposition_column: int | None = None
+    table_end: int | None = None
+    in_disposition_table = False
+
+    for index, line in enumerate(lines):
         if not line.lstrip().startswith("|"):
-            identity_column = None
+            in_disposition_table = False
             continue
         cells = [cell.strip().strip("`* ") for cell in line.strip().strip("|").split("|")]
         if any(re.fullmatch(r"复核结果(?:[（(][^）)]*[）)])?", cell) for cell in cells):
             table_seen = True
-            identity_column = next((cells.index(label) for label in ("序号/FID", "FID", "问题编号", "问题ID", "候选编号", "序号") if label in cells), 0)
+            in_disposition_table = True
+            if header is None:
+                header = cells
+                identity_column = next(
+                    (cells.index(label) for label in ("序号/FID", "FID", "问题编号", "问题ID", "候选编号", "序号") if label in cells), 0,
+                )
+                disposition_column = next(
+                    (i for i, cell in enumerate(cells) if re.fullmatch(r"复核结果(?:[（(][^）)]*[）)])?", cell)), None,
+                )
+            table_end = index
             continue
-        if identity_column is not None and identity_column < len(cells):
-            match = re.search(r"\b(F-(?:\d+-\d+|\d{2,}))\b", cells[identity_column])
-            if match:
-                if match.group(1) in table_ids:
-                    raise ValueError(f"Duplicate final disposition: {match.group(1)}")
-                table_ids.add(match.group(1))
-    if table_seen:
-        missing = sorted(expected_details - table_ids)
-        if missing:
-            raise ValueError("Global report is missing final dispositions: " + ", ".join(missing))
-        unknown = sorted(table_ids - expected_details)
-        if unknown:
-            raise ValueError("Global report has final dispositions without detailed evidence: " + ", ".join(unknown))
+        if in_disposition_table:
+            table_end = index
+            if identity_column < len(cells):
+                match = re.search(r"\b(F-(?:\d+-\d+|\d{2,}))\b", cells[identity_column])
+                if match:
+                    finding_id = match.group(1)
+                    if finding_id in rows:
+                        raise ValueError(f"Duplicate final disposition: {finding_id}")
+                    disposition = cells[disposition_column] if disposition_column is not None and disposition_column < len(cells) else ""
+                    rows[finding_id] = (index, line, disposition)
+                    if re.match(r"^(?:成立|待复核|撤回)(?:$|[（(:：,，\s])", disposition):
+                        valid_dispositions.add(finding_id)
+
+    unresolved = sorted(expected_details - valid_dispositions)
+    if unresolved:
+        resource = Path(__file__).resolve().parent.parent / "references" / "prompts" / "missing-dispositions.md"
+        resource_lines = resource.read_text(encoding="utf-8").splitlines()
+        incomplete_notice = next(line for line in resource_lines if line.startswith(">"))
+        template_lines = [line for line in resource_lines if line.startswith("|")]
+        fallback_header = [cell.strip() for cell in template_lines[0].strip("|").split("|")]
+        fallback_cells = [cell.strip() for cell in template_lines[2].replace("{{FID}}", "").strip("|").split("|")]
+        fallback_values = dict(zip(fallback_header, fallback_cells))
+
+        def pending_row(finding_id: str, columns: list[str], id_col: int, result_col: int,
+                        existing: str | None = None) -> str:
+            values = ([cell.strip().strip("`* ") for cell in existing.strip().strip("|").split("|")]
+                      if existing is not None else [""] * len(columns))
+            values.extend([""] * max(0, len(columns) - len(values)))
+            values[id_col] = finding_id
+            values[result_col] = fallback_values["复核结果"]
+            for col, name in enumerate(columns):
+                if name == "最终等级":
+                    values[col] = fallback_values["最终等级"]
+                elif name in {"理由/依据", "复核依据", "理由"}:
+                    values[col] = fallback_values["理由/依据"]
+            return "| " + " | ".join(values[:len(columns)]) + " |"
+
+        if not table_seen or header is None or disposition_column is None:
+            # The prompt/resource owns the wording. Missing or malformed
+            # dispositions become visible uncertainty, never an inferred pass.
+            separator = "\n\n" if markdown.strip() else ""
+            markdown = markdown.rstrip() + separator + "\n".join(
+                template_lines[:2] + [template_lines[2].replace("{{FID}}", fid) for fid in unresolved]
+            ) + "\n"
+        else:
+            id_col = next(
+                (header.index(label) for label in ("序号/FID", "FID", "问题编号", "问题ID", "候选编号", "序号") if label in header), 0,
+            )
+            additions: list[str] = []
+            for finding_id in unresolved:
+                existing = rows.get(finding_id)
+                if existing:
+                    row_index, old_line, _ = existing
+                    lines[row_index] = pending_row(finding_id, header, id_col, disposition_column, old_line)
+                else:
+                    additions.append(pending_row(finding_id, header, id_col, disposition_column))
+            if additions:
+                insert_at = (table_end + 1) if table_end is not None else len(lines)
+                lines[insert_at:insert_at] = additions
+            markdown = "\n".join(lines) + ("\n" if markdown.endswith("\n") else "")
+        if "模型未提供部分候选处置结论" not in markdown:
+            markdown = incomplete_notice + "\n\n" + markdown.lstrip()
+
+    disposition_ids = {fid for fid in rows} | set(unresolved)
+    unknown = sorted(disposition_ids - expected_details)
+    if unknown:
+        raise ValueError("Global report has final dispositions without detailed evidence: " + ", ".join(unknown))
     if project_finding_ids:
         # Keep repeated review prose without creating a second finding heading
-        # for the same source candidate preserved in the project appendix.
+        # for the same source candidate in the project appendix.
         markdown = FINDING.sub(
             lambda match: "**分项问题复核：" + match.group(0).removeprefix("### ") + "**"
             if match.group(1) in project_finding_ids else match.group(0), markdown,
         )
-    from run_document_audit import validate_markdown
-    normalized = validate_markdown(markdown, required_rule_ids=rule_ids)
+    from run_document_audit import normalize_publishable_report
+    normalized = normalize_publishable_report(
+        markdown, required_rule_ids=rule_ids, ruleset=ruleset,
+    )
     identifiers = [match.group(1) for match in FINDING.finditer(normalized)]
     numbers: list[int] = []
     for value in identifiers:
@@ -615,6 +778,28 @@ def _materials_state(materials: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
+def _materials_for_project(
+    materials: list[dict[str, Any]], page_start: int, page_end: int,
+) -> list[dict[str, Any]]:
+    """Keep the full visual record only for pages owned by the current project."""
+    selected: list[dict[str, Any]] = []
+    for item in materials:
+        if item.get("kind") != "visual":
+            selected.append(item)
+            continue
+        content = str(item.get("content") or "")
+        parts = re.split(r"(?m)^### Page (\d+)\s*$", content)
+        header = parts[0].strip()
+        sections: list[str] = []
+        for index in range(1, len(parts) - 1, 2):
+            page = int(parts[index])
+            if page_start <= page <= page_end:
+                sections.append(f"### Page {page}\n{parts[index + 1].strip()}")
+        if sections:
+            selected.append({**item, "content": header + "\n\n" + "\n\n".join(sections)})
+    return selected
+
+
 async def execute_audit(
     report_text: str,
     materials: list[dict[str, Any]],
@@ -624,6 +809,7 @@ async def execute_audit(
     on_progress: Progress | None = None,
     *,
     rules_dir: Path | None = None,
+    ruleset: Any = None,
 ) -> str:
     """Identify projects, review them concurrently, and request global synthesis.
 
@@ -643,10 +829,14 @@ async def execute_audit(
         for index, item in enumerate(materials, 1)
     ]
     material_state = _materials_state(materials)
+    from audit_materials import material_availability
+    availability = material_availability(materials)
     for item, state in zip(llm_materials, material_state):
         item["reference_id"] = state["reference_id"]
     manifest: dict[str, Any] = {
         "status": "running", "page_count": page_count, "materials": material_state,
+        "material_availability": {"kinds": sorted(availability["kinds"]),
+                                  "supports_materials": availability["supports_materials"]},
         "index": {"status": "pending", "attempts": []},
         "projects": [], "summary": {"status": "pending", "attempts": []}, "requests": [],
     }
@@ -711,14 +901,17 @@ async def execute_audit(
     try:
         page_map = _pages(report_text, page_count)
         from _rules import load_rules
-        active_rules = load_rules(Path(rules_dir) if rules_dir is not None else None)
+        active_rules = ruleset or load_rules(Path(rules_dir) if rules_dir is not None else None)
         rule_ids = active_rules.ids
         rule_severities = active_rules.severity
         manifest["rule_ids"] = rule_ids
         await _emit(on_progress, "index", 0, 1, "识别报告项目目录")
         index: dict[str, Any] | None = None
         if page_count <= 32:
-            base_index_prompt = index_builder(report_text, page_count)
+            base_index_prompt = index_builder(
+                report_text, page_count, ruleset=active_rules,
+                **({"rules_dir": rules_dir} if rules_dir is not None else {}),
+            )
             index_error: ValueError | None = None
             for attempt in range(2):
                 name = "index-raw.txt" if attempt == 0 else "index-retry-raw.txt"
@@ -787,11 +980,15 @@ async def execute_audit(
             nonlocal completed
             project_pages = list(range(project["page_start"], project["page_end"] + 1))
             selected_text = "\n\n".join(page_map[number] for number in project_pages)
+            project_materials = _materials_for_project(
+                llm_materials, project["page_start"], project["page_end"],
+            )
             prompt = project_builder(
-                project, selected_text, frontmatter, llm_materials, project_index,
+                project, selected_text, frontmatter, project_materials, project_index,
+                ruleset=active_rules,
                 **({"rules_dir": rules_dir} if rules_dir is not None else {}),
             )
-            record["source_materials"] = [item["reference_id"] for item in llm_materials]
+            record["source_materials"] = [item["reference_id"] for item in project_materials]
             last_error: ValueError | None = None
             previous_raw: str | None = None
             normalized: str | None = None
@@ -810,12 +1007,15 @@ async def execute_audit(
                     raw = await send(
                         f"project-review:{project['id']}", request_prompt, project_dir / name,
                         sorted(set(range(1, first_project_page)) | set(project_pages)),
-                        [item["reference_id"] for item in llm_materials],
+                        [item["reference_id"] for item in project_materials],
                     )
                     entry["status"] = "received"
                     try:
                         normalized = _markdown(raw, f"Project {project['id']}")
-                        identifiers = _check_project(normalized, project_index, llm_materials, rule_severities)
+                        normalized, rule_warnings = normalize_project_rule_table(
+                            normalized, active_rules, project_materials,
+                        )
+                        identifiers = _check_project(normalized, project_index, project_materials, rule_severities)
                         entry["status"] = "complete"
                         record.update(
                             status="complete",
@@ -824,6 +1024,7 @@ async def execute_audit(
                             final_sha256=hashlib.sha256(raw.encode("utf-8")).hexdigest(),
                             issue_ids=identifiers,
                             markdown=normalized,
+                            rule_warnings=rule_warnings,
                         )
                         _save_json(manifest_path, manifest)
                         await _emit(on_progress, "project-review", 1, 1,
@@ -922,8 +1123,15 @@ async def execute_audit(
         reviews = [result for result in results if isinstance(result, dict)]
 
         await _emit(on_progress, "summary", 0, 1, "汇总全局审核")
+        project_rule_warnings = [
+            {"project_id": record["id"], "warnings": record.get("rule_warnings", [])}
+            for record in records if record.get("rule_warnings")
+        ]
+        manifest["project_rule_warnings"] = project_rule_warnings
+        manifest["warnings"] = [warning for item in project_rule_warnings for warning in item["warnings"]]
         summary_prompt = summary_builder(
             report_text, llm_materials, page_count, reviews,
+            ruleset=active_rules,
             **({"rules_dir": rules_dir} if rules_dir is not None else {}),
         )
         if not projects:
@@ -959,6 +1167,7 @@ async def execute_audit(
                 main_markdown = _check_global(
                     _markdown(raw, "Global summary"), rule_ids, rule_severities,
                     project_finding_ids={match.group(1) for review in reviews for match in FINDING.finditer(review["markdown"])},
+                    ruleset=active_rules,
                 )
                 entry["status"] = "complete"
                 manifest["summary"]["status"] = "complete"
@@ -978,6 +1187,17 @@ async def execute_audit(
         await _emit(on_progress, "summary", 1, 1, "全局审核已校验")
 
         appendix = ["# 附录：分项目审核原文"]
+        if project_rule_warnings:
+            from audit_project_prompts import render_report_template
+            warning_lines = [render_report_template("project-rule-warnings-heading.md").strip()]
+            for item in project_rule_warnings:
+                identifiers = [match.group(1) for warning in item["warnings"]
+                               if (match := re.search(r"project_rule_(?:missing|malformed|input_missing):([A-Z]\d+)", warning))]
+                warning_lines.append(render_report_template(
+                    "project-rule-warning-row.md", PROJECT_ID=str(item["project_id"]),
+                    RULE_IDS=", ".join(dict.fromkeys(identifiers)),
+                ).strip())
+            main_markdown = main_markdown.rstrip() + "\n\n" + "\n".join(warning_lines)
         appendix.extend(_markdown(item["markdown"], "Project") for item in reviews)
         combined = main_markdown.rstrip() + "\n\n" + "\n\n---\n\n".join(appendix) + "\n"
         issue_ids = [match.group(1) for match in FINDING.finditer(combined)]

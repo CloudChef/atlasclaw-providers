@@ -32,6 +32,8 @@ const MESSAGES = {
     delete: '删除',
     noFindings: '未发现问题',
     findings: '{total} 条问题 · {review} 条待复核',
+    incompleteFindings: '0 条已确认问题 · {review} 条待复核',
+    incompleteNoFindings: '报告已生成，部分结论未明确，请核查待复核项',
     uploadTitle: '上传文档',
     dropzone: '拖拽 PDF / Word 到此处',
     dropzoneHint: '或点击选择文件',
@@ -129,6 +131,8 @@ const MESSAGES = {
     delete: 'Delete',
     noFindings: 'No findings',
     findings: '{total} finding(s) · {review} to review',
+    incompleteFindings: '0 confirmed findings · {review} to review',
+    incompleteNoFindings: 'Report generated; some conclusions are unclear. Review the pending items.',
     uploadTitle: 'Upload documents',
     dropzone: 'Drop PDF / Word files here',
     dropzoneHint: 'or click to choose files',
@@ -331,6 +335,15 @@ function statusLabel(status) {
 
 function resultText(document) {
   if (document.status === 'completed') {
+    // Document-list DTOs expose findings_review but may not expose the detailed
+    // completion metadata returned by the results endpoint.
+    if (!document.findings_total && document.findings_review) {
+      return t('incompleteFindings', { review: document.findings_review });
+    }
+    if (document.completion_status === 'needs_review') {
+      if (!document.findings_total) return t('incompleteNoFindings');
+      return t('findings', { total: document.findings_total, review: document.findings_review });
+    }
     if (!document.findings_total) return t('noFindings');
     return t('findings', { total: document.findings_total, review: document.findings_review });
   }
@@ -734,6 +747,7 @@ function evidenceUrl(documentId, image) {
 }
 
 function renderResults(payload) {
+  const incomplete = payload.completion_status === 'needs_review';
   const counts = payload.counts || {};
   const rows = (payload.results || []).map(item => {
     const verdict = String(item.verdict || '').toUpperCase();
@@ -760,8 +774,10 @@ function renderResults(payload) {
     review: counts.REVIEW || 0,
     na: counts.NA || 0,
   });
+  const isPass = payload.verdict === '通过' && !incomplete;
   return `
-    <p class="result-overview ${payload.verdict === '通过' ? 'ok' : 'bad'}">${escapeHtml(overview)}</p>
+    <p class="result-overview ${isPass ? 'ok' : 'bad'}">${escapeHtml(overview)}</p>
+    ${incomplete ? `<p class="result-incomplete-note">${escapeHtml(t('incompleteNoFindings'))}</p>` : ''}
     <table class="result-table">
       <thead>
         <tr>

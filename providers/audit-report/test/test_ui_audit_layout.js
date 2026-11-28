@@ -95,3 +95,49 @@ test('small screens retain the Result column and table links remain delegated', 
   assert.doesNotMatch(css, /\.document-table th:nth-child\(4\),\s*\.document-table td:nth-child\(4\)\s*\{\s*display:\s*none;/);
   assert.match(source, /els\.rows\.addEventListener\('click',[\s\S]*?data-action[\s\S]*?download-desensitized[\s\S]*?download-report/);
 });
+
+test('zero confirmed findings with pending findings shows the review count', () => {
+  const locale = {
+    noFindings: 'No findings',
+    findings: '{total} finding(s) · {review} to review',
+    incompleteFindings: '0 confirmed findings · {review} to review',
+    incompleteNoFindings: 'Report generated; some conclusions are unclear. Review the pending items.',
+  };
+  const t = (key, values = {}) => Object.entries(values).reduce(
+    (text, [name, value]) => text.replaceAll(`{${name}}`, value), locale[key] || key,
+  );
+  const resultText = extractFunction('resultText', { t });
+
+  assert.equal(resultText({ status: 'completed', findings_total: 0, findings_review: 46 }), '0 confirmed findings · 46 to review');
+  assert.equal(resultText({ status: 'completed', completion_status: 'needs_review', findings_total: 3, findings_review: 1 }), '3 finding(s) · 1 to review');
+  assert.notEqual(resultText({ status: 'completed', findings_total: 0, findings_review: 0 }), '0 confirmed findings · 0 to review');
+});
+
+test('incomplete result cannot render green on a Pass verdict and keeps result table', () => {
+  const locale = {
+    resultsOverview: 'Overall: {verdict} · Pass {pass} · Fail {fail} · Review {review} · N/A {na}',
+    incompleteNoFindings: 'Report generated; some conclusions are unclear. Review the pending items.',
+    colRule: 'Rule', colCheck: 'Check', colVerdict: 'Verdict', colPage: 'Page',
+    colDetail: 'Issue and remediation', colEvidence: 'Evidence', evidenceMissing: 'None',
+    verdictPass: 'Pass', verdictFail: 'Fail', verdictReview: 'Review', verdictNA: 'N/A',
+    pageValue: 'Page {page}',
+  };
+  const t = (key, values = {}) => Object.entries(values).reduce(
+    (text, [name, value]) => text.replaceAll(`{${name}}`, value), locale[key] || key,
+  );
+  const renderResults = extractFunction('renderResults', {
+    t, escapeHtml: extractFunction('escapeHtml'), evidenceUrl: () => '',
+    verdictLabel: extractFunction('verdictLabel', { t }),
+  });
+  const html = renderResults({
+    document_id: 'doc-1', verdict: '通过', completion_status: 'needs_review',
+    counts: { PASS: 0, FAIL: 0, REVIEW: 46, NA: 0 },
+    results: [{ rule: 'R01', title: 'Coverage', verdict: 'REVIEW', reason: 'No conclusion' }],
+  });
+
+  assert.match(html, /class="result-overview bad"/);
+  assert.match(html, /Report generated; some conclusions are unclear/);
+  assert.match(html, /class="result-table"/);
+  assert.match(html, /No conclusion/);
+  assert.match(css, /\.result-incomplete-note/);
+});

@@ -1,380 +1,1226 @@
 {
   "pack": "builtin",
-  "version": "1.0.0",
-  "title": "内置 19 项检测报告审核规则",
+  "version": "2.0.0",
+  "title": "AI 报告审核规则（2026-11-27）",
   "status": "active",
-  "extends": null,
+  "compiled_from": {
+    "source": "source/AI报告审核规则_final.xlsx",
+    "sheet": "Sheet1",
+    "sha256": "a760af10fc50698979e00c7f3c4f3d43266abdd677c89559bfa081af6300d0df",
+    "imported_at": "2026-11-28 13:40:25",
+    "importer": "import_builtin_rules.py"
+  },
   "rules": [
     {
       "id": "R01",
-      "module": "文件合规",
+      "module": "页码",
       "title": "页码连续完整",
-      "severity": "B",
-      "fail_when": "存在缺页、乱码",
+      "severity": "C",
+      "severity_source": "低",
+      "fail_when": "页码不连续，页码不完整，页眉或页脚处的当前页码/总页码与实际情况不一致。",
       "evidence": [
-        "每页页脚",
-        "PDF 页序",
-        "扫描页"
+        "页眉/页脚",
+        "PDF 页序"
       ],
       "scope": "single",
+      "stage": "global",
       "applies_when": "始终适用",
       "na_when": "",
+      "requires": [
+        "text"
+      ],
       "check": {
         "type": "page_sequence",
         "params": {}
       },
-      "doc": "references/audit-rules.md#R01"
+      "source_row": 3,
+      "doc": "rules/builtin/rules.md#R01",
+      "note": ""
     },
     {
       "id": "R02",
-      "module": "文件合规",
-      "title": "三方签章（编制/审核/批准）",
-      "severity": "A",
-      "fail_when": "签署不齐全，或三者为同一人",
+      "module": "页码",
+      "title": "“目录”部分各标题所在页码与正文中实际的页码保持一致",
+      "severity": "C",
+      "severity_source": "低",
+      "fail_when": "“目录”部分各标题所在页码与正文中实际的页码不一致",
       "evidence": [
-        "封面",
-        "签署页",
-        "批准页"
+        "目录",
+        "正文标题与页码"
       ],
       "scope": "single",
+      "stage": "global",
       "applies_when": "始终适用",
       "na_when": "",
+      "requires": [
+        "text"
+      ],
       "check": {
-        "type": "visual",
+        "type": "page_sequence",
         "params": {}
       },
-      "doc": "references/audit-rules.md#R02"
+      "source_row": 4,
+      "doc": "rules/builtin/rules.md#R02",
+      "note": ""
     },
     {
       "id": "R03",
-      "module": "文件合规",
-      "title": "报告专用章/骑缝章",
-      "severity": "B",
-      "fail_when": "未加盖专用章或骑缝章",
-      "evidence": [
-        "盖章页",
-        "每页装订边"
-      ],
-      "scope": "single",
-      "applies_when": "始终适用",
-      "na_when": "",
-      "check": {
-        "type": "visual",
-        "params": {}
-      },
-      "doc": "references/audit-rules.md#R03"
-    },
-    {
-      "id": "R04",
-      "module": "身份唯一性",
-      "title": "主编号前后缀规则",
-      "severity": "B",
-      "fail_when": "同批主编号前后缀未 100% 统一",
-      "evidence": [
-        "同批全部报告封面",
-        "同批全部报告页眉"
-      ],
-      "scope": "batch",
-      "applies_when": "同批审核且提供同批全部文件",
-      "na_when": "单份报告且未提供同批文件",
-      "check": {
-        "type": "cross_file",
-        "params": {}
-      },
-      "doc": "references/audit-rules.md#R04"
-    },
-    {
-      "id": "R05",
-      "module": "身份唯一性",
+      "module": "报告编号",
       "title": "报告编号唯一性",
-      "severity": "A",
-      "fail_when": "同一份报告内报告编号不一致",
+      "severity": "B",
+      "severity_source": "中",
+      "fail_when": "同一份报告中页眉、正文各部分报告编号不一致，如出现字母代号不一致，报告编号字符数不一致，内容不一致等",
       "evidence": [
-        "封面",
         "页眉",
+        "正文",
         "声明",
-        "结论",
-        "附件"
+        "结论"
       ],
       "scope": "single",
+      "stage": "global",
       "applies_when": "始终适用",
       "na_when": "",
+      "requires": [
+        "text"
+      ],
       "check": {
         "type": "text_consistency",
         "params": {}
       },
-      "doc": "references/audit-rules.md#R05"
+      "source_row": 5,
+      "doc": "rules/builtin/rules.md#R03",
+      "note": ""
     },
     {
-      "id": "R06",
-      "module": "身份唯一性",
-      "title": "报告编号与样品编号关联",
-      "severity": "A",
-      "fail_when": "报告编号中 7 位数字与样品编号前 7 位不一致",
+      "id": "R04",
+      "module": "样品编号",
+      "title": "样品编号与报告编号的相关性",
+      "severity": "B",
+      "severity_source": "中",
+      "fail_when": "样品编号前7位数字与报告编号前7位数字不一致",
       "evidence": [
         "封面",
         "样品信息表"
       ],
       "scope": "single",
+      "stage": "project",
       "applies_when": "始终适用",
       "na_when": "",
-      "check": {
-        "type": "text_consistency",
-        "params": {}
-      },
-      "doc": "references/audit-rules.md#R06"
-    },
-    {
-      "id": "R07",
-      "module": "标准与方法",
-      "title": "标准号（含年份）有效性",
-      "severity": "B",
-      "fail_when": "同一标准年代号写法不一致，或标准缺年代号",
-      "evidence": [
-        "封面",
-        "方法表",
-        "结论表",
-        "页眉"
+      "requires": [
+        "text"
       ],
-      "scope": "single",
-      "applies_when": "始终适用",
-      "na_when": "",
       "check": {
         "type": "text_consistency",
         "params": {}
       },
-      "doc": "references/audit-rules.md#R07"
+      "source_row": 6,
+      "doc": "rules/builtin/rules.md#R04",
+      "note": ""
     },
     {
-      "id": "R08",
-      "module": "标准与方法",
-      "title": "方法条件与照片一致",
-      "severity": "B",
-      "fail_when": "方法描述的温度、电压值与检测照片显示值不一致",
+      "id": "R05",
+      "module": "样品编号",
+      "title": "单项测试中检测结果部分的样品编号与检测照片下标的样品编号一致性",
+      "severity": "A",
+      "severity_source": "高",
+      "fail_when": "单项测试中检测结果部分的样品编号与检测照片下标的样品编号不一致，照片中拍到的样品编号与下方备注的样品编号信息不一致",
       "evidence": [
-        "方法描述",
+        "检测结果",
+        "照片下标",
         "检测照片"
       ],
       "scope": "single",
-      "applies_when": "报告含检测照片且方法描述含温度/电压等条件",
-      "na_when": "报告无检测照片或无方法条件描述",
+      "stage": "project",
+      "applies_when": "报告含检测照片和样品编号",
+      "na_when": "报告无检测照片",
+      "requires": [
+        "text",
+        "image"
+      ],
       "check": {
-        "type": "visual",
+        "type": "text_consistency",
         "params": {}
       },
-      "doc": "references/audit-rules.md#R08"
+      "source_row": 7,
+      "doc": "rules/builtin/rules.md#R05",
+      "note": ""
+    },
+    {
+      "id": "R06",
+      "module": "样品编号",
+      "title": "登记的样品数量与样品编号所述一致",
+      "severity": "B",
+      "severity_source": "中",
+      "fail_when": "样品编号显示的样品个数 = 样品数量（赛力斯报告有样品数量汇总要求项）",
+      "evidence": [
+        "样品清单",
+        "样品数量字段"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "报告有样品数量字段或汇总",
+      "na_when": "报告无样品数量信息",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "text_consistency",
+        "params": {}
+      },
+      "source_row": 8,
+      "doc": "rules/builtin/rules.md#R06",
+      "note": ""
+    },
+    {
+      "id": "R07",
+      "module": "检测标准",
+      "title": "检测标准与标准库登记的内容不一致",
+      "severity": "B",
+      "severity_source": "中",
+      "fail_when": "查询标准库，检测标准不是最新版；检测标准字符数与标准库中登记的字符数不一致，如缺少尾标①，多或少字符、缺少\"/\",\":\"或\"-\"等符号或符号位置不对。",
+      "evidence": [
+        "检测标准",
+        "标准库"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "报告引用检测标准号",
+      "na_when": "报告全部为客户要求或无标准号",
+      "requires": [
+        "text",
+        "standard"
+      ],
+      "check": {
+        "type": "text_consistency",
+        "params": {}
+      },
+      "source_row": 9,
+      "doc": "rules/builtin/rules.md#R07",
+      "note": ""
+    },
+    {
+      "id": "R08",
+      "module": "检测标准",
+      "title": "检测标准的一致性",
+      "severity": "B",
+      "severity_source": "中",
+      "fail_when": "相同检测标准在正文不同位置写法不一致，如缺少年代号，字符数量不一致",
+      "evidence": [
+        "全文标准号出现位置"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "报告引用检测标准号",
+      "na_when": "报告无标准号",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "text_consistency",
+        "params": {}
+      },
+      "source_row": 10,
+      "doc": "rules/builtin/rules.md#R08",
+      "note": ""
     },
     {
       "id": "R09",
-      "module": "数据与结论",
-      "title": "评判要求完整性",
+      "module": "时间逻辑",
+      "title": "日期的逻辑性",
       "severity": "B",
-      "fail_when": "要求项数与数据表行数不一致，存在缺项",
+      "severity_source": "中",
+      "fail_when": "报告中日期有笔误，如2026年的检测，误写成2024，2027等明显的错误",
       "evidence": [
-        "判定依据",
-        "数据表"
+        "生产日期",
+        "送样日期",
+        "检测日期",
+        "签发日期"
       ],
       "scope": "single",
+      "stage": "project",
       "applies_when": "始终适用",
       "na_when": "",
+      "requires": [
+        "text"
+      ],
       "check": {
-        "type": "text_consistency",
+        "type": "date_chain",
         "params": {}
       },
-      "doc": "references/audit-rules.md#R09"
+      "source_row": 11,
+      "doc": "rules/builtin/rules.md#R09",
+      "note": ""
     },
     {
       "id": "R10",
-      "module": "数据与结论",
-      "title": "极限值代入验证",
-      "severity": "A",
-      "fail_when": "最大值大于上限，或最小值小于下限",
-      "evidence": [
-        "数据表",
-        "判定列"
-      ],
-      "scope": "single",
-      "applies_when": "始终适用",
-      "na_when": "",
-      "check": {
-        "type": "numeric_range",
-        "params": {}
-      },
-      "doc": "references/audit-rules.md#R10"
-    },
-    {
-      "id": "R11",
-      "module": "数据与结论",
-      "title": "结论一致性",
-      "severity": "A",
-      "fail_when": "结论汇总表的“结果评判”与正文同一项目结论不一致",
-      "evidence": [
-        "结论汇总",
-        "试验项目信息",
-        "正文"
-      ],
-      "scope": "single",
-      "applies_when": "始终适用",
-      "na_when": "",
-      "check": {
-        "type": "text_consistency",
-        "params": {}
-      },
-      "doc": "references/audit-rules.md#R11"
-    },
-    {
-      "id": "R12",
-      "module": "数据与结论",
-      "title": "结论与数据逻辑",
-      "severity": "A",
-      "fail_when": "存在未达标数据仍判“合格”",
-      "evidence": [
-        "结论页",
-        "数据表",
-        "技术要求"
-      ],
-      "scope": "single",
-      "applies_when": "始终适用",
-      "na_when": "",
-      "check": {
-        "type": "manual",
-        "params": {}
-      },
-      "doc": "references/audit-rules.md#R12"
-    },
-    {
-      "id": "R13",
       "module": "时间逻辑",
-      "title": "日期链递增",
+      "title": "日期的逻辑性",
       "severity": "A",
-      "fail_when": "生产/来样/检测/签发日期不满足递增链",
+      "severity_source": "高",
+      "fail_when": "日期规则：生产日期（批次号）≤包装日期≤送样日期≤到样日期≤预处理日期≤检测日期≤分析日期≤报告日期≤报告签发日期",
       "evidence": [
         "样品信息",
         "检测记录",
         "签发页"
       ],
       "scope": "single",
+      "stage": "project",
       "applies_when": "始终适用",
       "na_when": "",
+      "requires": [
+        "text"
+      ],
       "check": {
         "type": "date_chain",
         "params": {}
       },
-      "doc": "references/audit-rules.md#R13"
+      "source_row": 12,
+      "doc": "rules/builtin/rules.md#R10",
+      "note": ""
+    },
+    {
+      "id": "R11",
+      "module": "时间逻辑",
+      "title": "日期的有效性",
+      "severity": "A",
+      "severity_source": "高",
+      "fail_when": "气味、雾化、总碳、袋子法、甲醛、VOC等散发类测试中，样品检测完成日期-样品生产日期大于15天",
+      "evidence": [
+        "生产日期",
+        "检测完成日期"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "报告含气味、雾化、总碳、甲醛、VOC 等散发类项目",
+      "na_when": "报告无散发类项目",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "date_chain",
+        "params": {}
+      },
+      "source_row": 13,
+      "doc": "rules/builtin/rules.md#R11",
+      "note": ""
+    },
+    {
+      "id": "R12",
+      "module": "时间逻辑",
+      "title": "日期冲突",
+      "severity": "A",
+      "severity_source": "高",
+      "fail_when": "顺序试验中，相同测试序列中的各项试验的检测日期出现了一天以上的重合",
+      "evidence": [
+        "各项目检测日期",
+        "试验顺序"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "报告含顺序试验且可识别项目检测日期",
+      "na_when": "无顺序试验或日期不可识别",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "date_chain",
+        "params": {}
+      },
+      "source_row": 14,
+      "doc": "rules/builtin/rules.md#R12",
+      "note": ""
+    },
+    {
+      "id": "R13",
+      "module": "时间逻辑",
+      "title": "时间的有效性",
+      "severity": "A",
+      "severity_source": "高",
+      "fail_when": "检测日期段的总时长＜检测方法描述中的要求时长。如稳态湿热要求测试21天，报告中检测日期2026.11.01~2026.11.20，实际区间只有20天，且无任何偏离说明。",
+      "evidence": [
+        "检测方法",
+        "检测日期段"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "date_chain",
+        "params": {}
+      },
+      "source_row": 15,
+      "doc": "rules/builtin/rules.md#R13",
+      "note": ""
     },
     {
       "id": "R14",
       "module": "时间逻辑",
-      "title": "检测日期在设备有效期内",
+      "title": "照片中时间戳的一致性和有效性",
       "severity": "A",
-      "fail_when": "任一检测日期超出参与设备使用有效期",
+      "severity_source": "高",
+      "fail_when": "单项试验中，检测照片中时间戳水印的日期位于检测检测日期范围外；",
       "evidence": [
-        "设备表",
+        "检测照片时间戳",
         "检测日期"
       ],
       "scope": "single",
-      "applies_when": "报告含设备表或可识别检测设备",
-      "na_when": "报告未提供任何设备信息",
-      "check": {
-        "type": "date_chain",
-        "params": {}
-      },
-      "doc": "references/audit-rules.md#R14"
-    },
-    {
-      "id": "R15",
-      "module": "时间逻辑",
-      "title": "检测日期在校准有效期内",
-      "severity": "A",
-      "fail_when": "任一检测日期超出设备校准有效期",
-      "evidence": [
-        "设备表",
-        "检测日期"
+      "stage": "project",
+      "applies_when": "报告含带时间戳的检测照片",
+      "na_when": "报告无带时间戳照片",
+      "requires": [
+        "text",
+        "image",
+        "visual_model"
       ],
-      "scope": "single",
-      "applies_when": "报告含设备表或可识别检测设备",
-      "na_when": "报告未提供任何设备信息",
-      "check": {
-        "type": "date_chain",
-        "params": {}
-      },
-      "doc": "references/audit-rules.md#R15"
-    },
-    {
-      "id": "R16",
-      "module": "资质声明",
-      "title": "分包/认可状态声明",
-      "severity": "B",
-      "fail_when": "分包声明既非“无”，也未注明分包实验室名称",
-      "evidence": [
-        "声明页",
-        "资质页"
-      ],
-      "scope": "single",
-      "applies_when": "始终适用",
-      "na_when": "",
-      "check": {
-        "type": "manual",
-        "params": {}
-      },
-      "doc": "references/audit-rules.md#R16"
-    },
-    {
-      "id": "R17",
-      "module": "语法规范性",
-      "title": "中文错别字",
-      "severity": "C",
-      "fail_when": "存在错别字，或语句不通顺、不完整",
-      "evidence": [
-        "全文"
-      ],
-      "scope": "single",
-      "applies_when": "始终适用",
-      "na_when": "",
-      "check": {
-        "type": "manual",
-        "params": {}
-      },
-      "doc": "references/audit-rules.md#R17"
-    },
-    {
-      "id": "R18",
-      "module": "语法规范性",
-      "title": "英文语法",
-      "severity": "C",
-      "fail_when": "英文拼写/语法错误，或句子不完整",
-      "evidence": [
-        "英文摘要",
-        "项目名",
-        "结论",
-        "图注"
-      ],
-      "scope": "single",
-      "applies_when": "始终适用",
-      "na_when": "",
-      "check": {
-        "type": "manual",
-        "params": {}
-      },
-      "doc": "references/audit-rules.md#R18"
-    },
-    {
-      "id": "R19",
-      "module": "照片有效性",
-      "title": "照片 AI 生成标记",
-      "severity": "B",
-      "fail_when": "出现 AI 生成类水印或生成痕迹",
-      "evidence": [
-        "所有检测照片及附件"
-      ],
-      "scope": "single",
-      "applies_when": "报告含检测照片",
-      "na_when": "报告无检测照片",
       "check": {
         "type": "visual",
         "params": {}
       },
-      "doc": "references/audit-rules.md#R19"
+      "source_row": 16,
+      "doc": "rules/builtin/rules.md#R14",
+      "note": ""
+    },
+    {
+      "id": "R15",
+      "module": "时间逻辑",
+      "title": "照片中时间戳与时钟所示时间的一致性",
+      "severity": "A",
+      "severity_source": "高",
+      "fail_when": "同一张检测照片中时间戳水印的时间与照片中时钟所示的时间差异超过2分钟",
+      "evidence": [
+        "照片时间戳",
+        "照片内时钟"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "报告含带时间戳和时钟的检测照片",
+      "na_when": "报告无对应照片",
+      "requires": [
+        "text",
+        "image",
+        "visual_model"
+      ],
+      "check": {
+        "type": "visual",
+        "params": {}
+      },
+      "source_row": 17,
+      "doc": "rules/builtin/rules.md#R15",
+      "note": ""
+    },
+    {
+      "id": "R16",
+      "module": "时间逻辑",
+      "title": "检测照片中环境箱的时间的有效性",
+      "severity": "A",
+      "severity_source": "高",
+      "fail_when": "检测照片中设备面板上显示的日期位于检测日期范围外",
+      "evidence": [
+        "照片内设备面板",
+        "检测日期"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "报告含设备面板照片",
+      "na_when": "报告无设备面板照片",
+      "requires": [
+        "text",
+        "image",
+        "visual_model"
+      ],
+      "check": {
+        "type": "visual",
+        "params": {}
+      },
+      "source_row": 18,
+      "doc": "rules/builtin/rules.md#R16",
+      "note": ""
+    },
+    {
+      "id": "R17",
+      "module": "目录信息",
+      "title": "目录与实际标题的一致性",
+      "severity": "B",
+      "severity_source": "中",
+      "fail_when": "目录章节信息和页码与正文中实际章节和所在页码不一致，目录信息未更新",
+      "evidence": [
+        "目录",
+        "正文标题"
+      ],
+      "scope": "single",
+      "stage": "global",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "text_consistency",
+        "params": {}
+      },
+      "source_row": 19,
+      "doc": "rules/builtin/rules.md#R17",
+      "note": ""
+    },
+    {
+      "id": "R18",
+      "module": "目录信息",
+      "title": "章节号验证",
+      "severity": "B",
+      "severity_source": "",
+      "fail_when": "章节序号不符合顺延逻辑，有跳号现象",
+      "evidence": [
+        "章节号"
+      ],
+      "scope": "single",
+      "stage": "global",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "page_sequence",
+        "params": {}
+      },
+      "source_row": 20,
+      "doc": "rules/builtin/rules.md#R18",
+      "note": ""
+    },
+    {
+      "id": "R19",
+      "module": "设备信息",
+      "title": "设备信息与设备台账的一致性",
+      "severity": "B",
+      "severity_source": "中",
+      "fail_when": "报告中设备名称（或英文设备名称）、编号、型号规格、校准有效期与提供的设备台账信息一致，外来设备不进行查询",
+      "evidence": [
+        "报告设备表",
+        "设备台账"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "提供了设备台账",
+      "na_when": "未提供设备台账（按待复核处理）",
+      "requires": [
+        "text",
+        "ledger"
+      ],
+      "check": {
+        "type": "text_consistency",
+        "params": {}
+      },
+      "source_row": 21,
+      "doc": "rules/builtin/rules.md#R19",
+      "note": ""
+    },
+    {
+      "id": "R20",
+      "module": "设备信息",
+      "title": "外来设备信息的一致性",
+      "severity": "B",
+      "severity_source": "中",
+      "fail_when": "当前报告中使用的外来设备名称、编号等相同的信息，在报告不同页面中由于笔误填写的不一致",
+      "evidence": [
+        "设备表跨页",
+        "设备信息"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "text_consistency",
+        "params": {}
+      },
+      "source_row": 22,
+      "doc": "rules/builtin/rules.md#R20",
+      "note": ""
+    },
+    {
+      "id": "R21",
+      "module": "设备信息",
+      "title": "设备校准有效期核查",
+      "severity": "A",
+      "severity_source": "高",
+      "fail_when": "单项测试中的设备校准有效期不能覆盖到检测日期范围，如检测日期为2026-11-01~2026-11-20，设备校准有效期为2026-11-10",
+      "evidence": [
+        "设备表",
+        "检测日期"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "提供了设备表或设备台账",
+      "na_when": "未提供设备表/台账（按待复核处理）",
+      "requires": [
+        "text",
+        "ledger"
+      ],
+      "check": {
+        "type": "date_chain",
+        "params": {}
+      },
+      "source_row": 23,
+      "doc": "rules/builtin/rules.md#R21",
+      "note": ""
+    },
+    {
+      "id": "R22",
+      "module": "设备信息",
+      "title": "设备信息的重复性检查",
+      "severity": "A",
+      "severity_source": "高",
+      "fail_when": "不同测试序列的检测项目，在有重合的检测日期时段内使用了相同编号的设备，如环境箱、振动台、电源、数采等设备",
+      "evidence": [
+        "设备表",
+        "各项目检测日期"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "报告含多个项目且可识别设备使用时间",
+      "na_when": "无法识别设备使用时间",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "text_consistency",
+        "params": {}
+      },
+      "source_row": 24,
+      "doc": "rules/builtin/rules.md#R22",
+      "note": ""
+    },
+    {
+      "id": "R23",
+      "module": "设备信息",
+      "title": "设备遗漏",
+      "severity": "B",
+      "severity_source": "中",
+      "fail_when": "检测方法和检测结果描述需要用到的设备，在检测设备栏里的填写有遗漏，只有主要设备，遗漏了如测量pH、电导率、盐度、尺寸、重量、温度、风速等专用的仪器设备。",
+      "evidence": [
+        "检测方法",
+        "设备表"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "text_consistency",
+        "params": {}
+      },
+      "source_row": 25,
+      "doc": "rules/builtin/rules.md#R23",
+      "note": ""
+    },
+    {
+      "id": "R24",
+      "module": "资质声明",
+      "title": "结果分包声明验证",
+      "severity": "A",
+      "severity_source": "高",
+      "fail_when": "如“结果分包声明”为“无”，则全文不应出现分包方名称，如有分包方名称，则分包声明不可以为“无”",
+      "evidence": [
+        "分包声明",
+        "全文分包方名称"
+      ],
+      "scope": "single",
+      "stage": "global",
+      "applies_when": "报告含分包声明",
+      "na_when": "报告无分包声明",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "text_regex",
+        "params": {}
+      },
+      "source_row": 26,
+      "doc": "rules/builtin/rules.md#R24",
+      "note": ""
+    },
+    {
+      "id": "R25",
+      "module": "资质声明",
+      "title": "认可状态声明",
+      "severity": "A",
+      "severity_source": "高",
+      "fail_when": "如报告中有分包方名称，则不可以出现“报告中所有项目均在OEM认可范围内”的声明文字。",
+      "evidence": [
+        "认可状态声明",
+        "全文分包方名称"
+      ],
+      "scope": "single",
+      "stage": "global",
+      "applies_when": "报告含认可状态声明",
+      "na_when": "报告无认可状态声明",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "text_regex",
+        "params": {}
+      },
+      "source_row": 27,
+      "doc": "rules/builtin/rules.md#R25",
+      "note": ""
+    },
+    {
+      "id": "R26",
+      "module": "语法规范性",
+      "title": "结果单位验证",
+      "severity": "B",
+      "severity_source": "中",
+      "fail_when": "常用单位书写不规范，特别是大小写，比如压力单位kPa，k应小写P应大写，扭矩单位N·m不规范写成Nm，℃写成°C等",
+      "evidence": [
+        "全文单位"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "text_regex",
+        "params": {}
+      },
+      "source_row": 28,
+      "doc": "rules/builtin/rules.md#R26",
+      "note": ""
+    },
+    {
+      "id": "R27",
+      "module": "语法规范性",
+      "title": "中文语法验证",
+      "severity": "B",
+      "severity_source": "中",
+      "fail_when": "中文有乱码，错别字，语句不通顺，无效空格，字体不一致，同一段落内容重复等",
+      "evidence": [
+        "全文"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "manual",
+        "params": {}
+      },
+      "source_row": 29,
+      "doc": "rules/builtin/rules.md#R27",
+      "note": ""
+    },
+    {
+      "id": "R28",
+      "module": "语法规范性",
+      "title": "英文语法验证",
+      "severity": "B",
+      "severity_source": "中",
+      "fail_when": "英文有乱码，单词拼写错误，语法错误，语句不通顺，无效空格，字体不一致，同一段落内容重复等",
+      "evidence": [
+        "英文摘要",
+        "英文项目名",
+        "英文结论"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "manual",
+        "params": {}
+      },
+      "source_row": 30,
+      "doc": "rules/builtin/rules.md#R28",
+      "note": ""
+    },
+    {
+      "id": "R29",
+      "module": "语法规范性",
+      "title": "中英文内容对照验证",
+      "severity": "A",
+      "severity_source": "高",
+      "fail_when": "中英文内容冲突，内容翻译后有明显差异",
+      "evidence": [
+        "中英文对照段落"
+      ],
+      "scope": "single",
+      "stage": "global",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "manual",
+        "params": {}
+      },
+      "source_row": 31,
+      "doc": "rules/builtin/rules.md#R29",
+      "note": ""
+    },
+    {
+      "id": "R30",
+      "module": "检测照片",
+      "title": "照片比例",
+      "severity": "C",
+      "severity_source": "低",
+      "fail_when": "检测照片部分长宽比例不一致，照片大小差异明显",
+      "evidence": [
+        "检测照片"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "报告含检测照片",
+      "na_when": "报告无检测照片",
+      "requires": [
+        "text",
+        "image"
+      ],
+      "check": {
+        "type": "visual",
+        "params": {}
+      },
+      "source_row": 32,
+      "doc": "rules/builtin/rules.md#R30",
+      "note": ""
+    },
+    {
+      "id": "R31",
+      "module": "检测照片",
+      "title": "照片AI生成核查",
+      "severity": "A",
+      "severity_source": "高",
+      "fail_when": "照片中有“AI生成”水印痕迹残留，或明显的AI生成特征",
+      "evidence": [
+        "检测照片"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "报告含检测照片",
+      "na_when": "报告无检测照片",
+      "requires": [
+        "text",
+        "image",
+        "visual_model"
+      ],
+      "check": {
+        "type": "visual",
+        "params": {}
+      },
+      "source_row": 33,
+      "doc": "rules/builtin/rules.md#R31",
+      "note": ""
+    },
+    {
+      "id": "R32",
+      "module": "检测照片",
+      "title": "照片复用/误用",
+      "severity": "A",
+      "severity_source": "高",
+      "fail_when": "同一份报告中不同位置出现了完全相同的复用照片，或者外观、颜色差异较大的误用照片",
+      "evidence": [
+        "检测照片"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "报告含检测照片",
+      "na_when": "报告无检测照片",
+      "requires": [
+        "text",
+        "image"
+      ],
+      "check": {
+        "type": "visual",
+        "params": {}
+      },
+      "source_row": 34,
+      "doc": "rules/builtin/rules.md#R32",
+      "note": ""
+    },
+    {
+      "id": "R33",
+      "module": "检测照片",
+      "title": "照片内容与测试条件的符合性",
+      "severity": "A",
+      "severity_source": "高",
+      "fail_when": "检测方法描述要求的温度、电压等测试条件与检测照片内容呈现的不一致，如测试方法要求23℃，检测照片放置的是80℃",
+      "evidence": [
+        "检测方法",
+        "检测照片"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "报告含检测照片",
+      "na_when": "报告无检测照片",
+      "requires": [
+        "text",
+        "image",
+        "visual_model"
+      ],
+      "check": {
+        "type": "visual",
+        "params": {}
+      },
+      "source_row": 35,
+      "doc": "rules/builtin/rules.md#R33",
+      "note": ""
+    },
+    {
+      "id": "R34",
+      "module": "曲线图谱",
+      "title": "曲线时间的有效性",
+      "severity": "A",
+      "severity_source": "高",
+      "fail_when": "生成的曲线时间轴上的时段未包含在检测日期范围内，或测试条件要求168h的时长，生成的曲线上时间段不足168h",
+      "evidence": [
+        "曲线图",
+        "检测日期"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "报告含曲线图",
+      "na_when": "报告无曲线图",
+      "requires": [
+        "text",
+        "image",
+        "visual_model"
+      ],
+      "check": {
+        "type": "visual",
+        "params": {}
+      },
+      "source_row": 36,
+      "doc": "rules/builtin/rules.md#R34",
+      "note": ""
+    },
+    {
+      "id": "R35",
+      "module": "内容一致性",
+      "title": "相同信息一致性核查",
+      "severity": "C",
+      "severity_source": "低",
+      "fail_when": "报告中重复出现的内容信息需一致，如实验室名称、地址、零件名称、零件号、试验项目名称等",
+      "evidence": [
+        "全文重复信息"
+      ],
+      "scope": "single",
+      "stage": "global",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "text_consistency",
+        "params": {}
+      },
+      "source_row": 37,
+      "doc": "rules/builtin/rules.md#R35",
+      "note": ""
+    },
+    {
+      "id": "R36",
+      "module": "内容有效性",
+      "title": "温度、湿度范围符合性检查",
+      "severity": "A",
+      "severity_source": "高",
+      "fail_when": "正文中检测环境的温度和湿度结果超过了方法描述中的温度和湿度环境限值要求，如要求在23±2℃，50±5%RH 下进行，检测环境写成了25.2℃或湿度写成了49% RH.",
+      "evidence": [
+        "检测环境",
+        "方法温湿度限值"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "检测方法给出温湿度限值",
+      "na_when": "方法未给温湿度限值",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "numeric_range",
+        "params": {}
+      },
+      "source_row": 38,
+      "doc": "rules/builtin/rules.md#R36",
+      "note": ""
+    },
+    {
+      "id": "R37",
+      "module": "内容有效性",
+      "title": "温度、湿度内容符合性检查",
+      "severity": "B",
+      "severity_source": "中",
+      "fail_when": "“检测环境”栏内容填写不符合规则要求。规则为：温度：填写到小数点后一位，湿度结果取整。",
+      "evidence": [
+        "检测环境"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "text_regex",
+        "params": {}
+      },
+      "source_row": 39,
+      "doc": "rules/builtin/rules.md#R37",
+      "note": ""
+    },
+    {
+      "id": "R38",
+      "module": "检测结论",
+      "title": "结果评价验证",
+      "severity": "A",
+      "severity_source": "高",
+      "fail_when": "目录部分的结果评价与正文对应检测项目的结果评价不一致：目录为合格/pass，正文部分对应试验项目的所有样品的检测结果出现了一个结果判定为不合格/fail/不判定；目录为FAIL/不合格，正文部分对应试验项目的所有样品的检测结果判定均为pass/合格/不判定；目录中的结论为不判定,正文部分对应试验项目的所有样品的检测结果出现了一个合格/不合格的判定描述。",
+      "evidence": [
+        "目录结果评价",
+        "正文结果评价"
+      ],
+      "scope": "single",
+      "stage": "global",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "text_consistency",
+        "params": {}
+      },
+      "source_row": 40,
+      "doc": "rules/builtin/rules.md#R38",
+      "note": ""
+    },
+    {
+      "id": "R39",
+      "module": "数据验证",
+      "title": "结果单位验证",
+      "severity": "A",
+      "severity_source": "高",
+      "fail_when": "检测结果缺少单位信息，如电流、电压、电阻、尺寸、电导率、功率、温度、湿度、流量等结果描述部分只有数字，无单位",
+      "evidence": [
+        "检测结果"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "text_regex",
+        "params": {}
+      },
+      "source_row": 41,
+      "doc": "rules/builtin/rules.md#R39",
+      "note": ""
+    },
+    {
+      "id": "R40",
+      "module": "数据验证",
+      "title": "结果验证",
+      "severity": "A",
+      "severity_source": "高",
+      "fail_when": "相同检测项目的样品间结果差异过大，如小数点点错位置，数值修约的小数位数不一致，结果单位不一致",
+      "evidence": [
+        "检测结果",
+        "修约规则"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "numeric_range",
+        "params": {}
+      },
+      "source_row": 42,
+      "doc": "rules/builtin/rules.md#R40",
+      "note": ""
+    },
+    {
+      "id": "R41",
+      "module": "数据验证",
+      "title": "结论与数据逻辑性验证",
+      "severity": "A",
+      "severity_source": "高",
+      "fail_when": "存在未达标数据仍判\"合格\"，合格数据判定为“不合格”或不评判",
+      "evidence": [
+        "检测结果",
+        "结论"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "manual",
+        "params": {}
+      },
+      "source_row": 43,
+      "doc": "rules/builtin/rules.md#R41",
+      "note": ""
+    },
+    {
+      "id": "R42",
+      "module": "数据验证",
+      "title": "数据计算结果验证",
+      "severity": "A",
+      "severity_source": "高",
+      "fail_when": "平均值、最大值、最小值、中值、百分比、变化率、差值（试验后-试验前）计算错误",
+      "evidence": [
+        "数据表",
+        "计算字段"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "numeric_range",
+        "params": {}
+      },
+      "source_row": 44,
+      "doc": "rules/builtin/rules.md#R42",
+      "note": ""
+    },
+    {
+      "id": "R43",
+      "module": "数据验证",
+      "title": "数据计算结果验证",
+      "severity": "A",
+      "severity_source": "高",
+      "fail_when": "色差计算错误",
+      "evidence": [
+        "色差数据",
+        "ΔL 公式"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "报告含色差/颜色数据",
+      "na_when": "报告无色差数据",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "numeric_range",
+        "params": {}
+      },
+      "source_row": 45,
+      "doc": "rules/builtin/rules.md#R43",
+      "note": ""
+    },
+    {
+      "id": "R44",
+      "module": "数据验证",
+      "title": "结果判定验证",
+      "severity": "A",
+      "severity_source": "高",
+      "fail_when": "检测结果极限值代入验证后判定结论错误：最大值 > 上限要求，或最小值 < 下限要求（实测值超出规定区间）",
+      "evidence": [
+        "数据表",
+        "上下限"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "numeric_range",
+        "params": {}
+      },
+      "source_row": 46,
+      "doc": "rules/builtin/rules.md#R44",
+      "note": ""
+    },
+    {
+      "id": "R45",
+      "module": "数据验证",
+      "title": "结果的完整性验证",
+      "severity": "A",
+      "severity_source": "高",
+      "fail_when": "如评判要求 5 项而检测结果少于 5 项（要求项数 ≠ 数据表行数",
+      "evidence": [
+        "判定依据",
+        "数据表"
+      ],
+      "scope": "single",
+      "stage": "project",
+      "applies_when": "始终适用",
+      "na_when": "",
+      "requires": [
+        "text"
+      ],
+      "check": {
+        "type": "text_consistency",
+        "params": {}
+      },
+      "source_row": 47,
+      "doc": "rules/builtin/rules.md#R45",
+      "note": ""
+    },
+    {
+      "id": "R46",
+      "module": "交叉验证",
+      "title": "多份文档交叉验证",
+      "severity": "A",
+      "severity_source": "高",
+      "fail_when": "同时上传的试验大纲、测试计划、原始记录、委托单等文档中的信息与检测报告相关内容进行交叉比对，核对信息的一致性：检测方法描述是否一致，评判要求是否一致，样品信息是否一致，客户信息是否一致等",
+      "evidence": [
+        "报告",
+        "试验大纲/测试计划/原始记录/委托单"
+      ],
+      "scope": "batch",
+      "stage": "global",
+      "applies_when": "上传了试验大纲、测试计划、原始记录或委托单",
+      "na_when": "未上传其他材料",
+      "requires": [
+        "text",
+        "materials"
+      ],
+      "check": {
+        "type": "cross_file",
+        "params": {}
+      },
+      "source_row": 48,
+      "doc": "rules/builtin/rules.md#R46",
+      "note": ""
     }
   ]
 }

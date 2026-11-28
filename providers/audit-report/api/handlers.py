@@ -22,7 +22,10 @@ _API_DIR = Path(__file__).resolve().parent
 if str(_API_DIR) not in sys.path:
     sys.path.insert(0, str(_API_DIR))
 
-from audit_service import _llm_report_metadata, reconcile_document, start_document_audit
+from audit_service import (
+    _llm_report_metadata, reconcile_document, start_document_audit,
+    start_report_regeneration,
+)
 from errors import ProviderError
 from report_no import extract_report_no
 import standards_service
@@ -158,7 +161,18 @@ def _document_response(context: Any, document: dict[str, Any]) -> dict[str, Any]
     report_available = _owned_file_exists(context, report_path)
     desensitized_available = _owned_file_exists(context, desensitized_path)
     report_format = Path(report_path).suffix.lstrip(".").lower() if report_available else ""
-    return {
+    completion_status = None
+    if document.get("status") == "completed" and report_path:
+        verification_path = str(Path(report_path).parent / "verification.json")
+        if _owned_file_exists(context, verification_path):
+            try:
+                verification_data, _ = _read_owned_file(context, verification_path)
+                verification = json.loads(verification_data.decode("utf-8"))
+            except (ProviderError, OSError, UnicodeDecodeError, ValueError):
+                verification = None
+            if isinstance(verification, dict) and verification.get("completion_status") in {"complete", "needs_review"}:
+                completion_status = verification["completion_status"]
+    response = {
         "id": document["id"],
         "file_name": document["file_name"],
         "report_no": document.get("report_no") or "",
@@ -189,6 +203,9 @@ def _document_response(context: Any, document: dict[str, Any]) -> dict[str, Any]
             "audit": f"{base}/audit",
         },
     }
+    if completion_status is not None:
+        response["completion_status"] = completion_status
+    return response
 
 
 def _require_document(context: Any, store: DocumentStore) -> dict[str, Any]:
@@ -303,6 +320,15 @@ async def start_audit(request: Any, context: Any) -> dict[str, Any]:
     return _document_response(context, updated)
 
 
+async def regenerate_report(request: Any, context: Any) -> dict[str, Any]:
+    """Regenerate the PDF from an owned document's saved model output."""
+    store = _store(context)
+    document = _require_document(context, store)
+    await start_report_regeneration(context, store, document)
+    updated = await asyncio.to_thread(store.get, document["id"], _user_id(context)) or document
+    return _document_response(context, updated)
+
+
 async def download_document(request: Any, context: Any) -> Response:
     """Return the original report file."""
     document = _require_document(context, _store(context))
@@ -373,13 +399,51 @@ async def document_results(request: Any, context: Any) -> dict[str, Any]:
         raise ProviderError(f"Audit results are unreadable: {exc}", status_code=500, code="results_unreadable") from exc
     if not isinstance(payload, dict):
         raise ProviderError("Audit results are unreadable", status_code=500, code="results_unreadable")
+    published_path = report_path.parent / "audit.md" if report_path is not None else None
     raw_path = report_path.parent / "audit-raw.md" if report_path is not None else None
-    if report_path is not None and report_path.suffix.lower() == ".pdf" and payload.get("results") and _owned_file_exists(context, str(raw_path)):
-        # Rebuild display metadata after parser fixes from the saved LLM output;
-        # do not rerun the audit or alter its Markdown/PDF.
-        raw_data, _ = _read_owned_file(context, str(raw_path))
-        required_ids = [item["rule"] for item in payload["results"] if isinstance(item, dict) and item.get("rule")]
-        refreshed, summary = _llm_report_metadata(raw_data.decode("utf-8"), required_ids)
+    metadata_path = None
+    if report_path is not None and report_path.suffix.lower() == ".pdf":
+        if _owned_file_exists(context, str(published_path)):
+            metadata_path = published_path
+        elif _owned_file_exists(context, str(raw_path)):
+            metadata_path = raw_path
+    if metadata_path is not None:
+        # Refresh display metadata from the published normalized report so
+        # preserved evidence and pending reasons remain visible in the results.
+        raw_data, _ = _read_owned_file(context, str(metadata_path))
+        required_ids = [item["rule"] for item in payload.get("results") or [] if isinstance(item, dict) and item.get("rule")]
+        refreshed, summary = _llm_report_metadata(raw_data.decode("utf-8"), required_ids, allow_incomplete=True)
+        completion: dict[str, Any] | None = None
+        completion_path = report_path.parent / "completion.json"
+        if _owned_file_exists(context, str(completion_path)):
+            try:
+                completion_data, _ = _read_owned_file(context, str(completion_path))
+                parsed_completion = json.loads(completion_data.decode("utf-8"))
+                if isinstance(parsed_completion, dict):
+                    completion = parsed_completion
+            except (UnicodeDecodeError, ValueError):
+                completion = None
+        previous_completeness = payload.get("completeness")
+        if not isinstance(previous_completeness, dict):
+            previous_completeness = {}
+        pipeline_status = previous_completeness.get("pipeline_status")
+        pipeline_warnings = previous_completeness.get("pipeline_warnings")
+        if not isinstance(pipeline_warnings, list):
+            pipeline_warnings = []
+        if completion is not None and completion.get("completion_status") in {"complete", "needs_review"}:
+            pipeline_status = completion["completion_status"]
+            completion_warnings = completion.get("warnings")
+            pipeline_warnings = [item for item in completion_warnings if isinstance(item, str)] if isinstance(completion_warnings, list) else []
+        if pipeline_status == "needs_review":
+            refreshed["completion_status"] = "needs_review"
+            refreshed["warnings"] = list(dict.fromkeys([
+                *refreshed.get("warnings", []), *pipeline_warnings,
+            ]))
+            refreshed["completeness"] = {
+                **refreshed.get("completeness", {}),
+                "pipeline_status": "needs_review",
+                "pipeline_warnings": pipeline_warnings,
+            }
         if refreshed != payload:
             temporary = _verification_path.with_name(f"{_verification_path.name}.{uuid.uuid4().hex}.tmp")
             try:
@@ -401,10 +465,11 @@ async def document_results(request: Any, context: Any) -> dict[str, Any]:
             counts[verdict] += 1
     overall_verdict = payload.get("verdict")
     if not overall_verdict:
-        if report_path is not None and report_path.suffix.lower() == ".pdf":
-            raise ProviderError("PDF audit results are missing the LLM verdict", status_code=500, code="results_unreadable")
-        overall_verdict = "不通过" if counts["FAIL"] or counts["REVIEW"] else "通过"
-    return {
+        if report_path is not None and report_path.suffix.lower() != ".pdf" and (counts["FAIL"] or counts["REVIEW"]):
+            overall_verdict = "不通过"
+        else:
+            overall_verdict = "待复核（模型未给出结论）"
+    response = {
         "document_id": document["id"],
         "file_name": document.get("file_name") or "",
         "verdict": overall_verdict,
@@ -413,6 +478,22 @@ async def document_results(request: Any, context: Any) -> dict[str, Any]:
         "findings": findings,
         "report_available": _owned_file_exists(context, str(document.get("report_path") or "")),
     }
+    for key in ("completion_status", "warnings", "completeness"):
+        if key in payload:
+            response[key] = payload[key]
+    if "completion_status" not in response:
+        response["completion_status"] = "needs_review"
+        existing_warnings = payload.get("warnings")
+        response["warnings"] = list(existing_warnings) if isinstance(existing_warnings, list) else []
+        if not payload.get("verdict") and "overall_verdict_missing" not in response["warnings"]:
+            response["warnings"].append("overall_verdict_missing")
+        if "coverage_metadata_unavailable" not in response["warnings"]:
+            response["warnings"].append("coverage_metadata_unavailable")
+        response["completeness"] = {
+            "overall_verdict": bool(payload.get("verdict")),
+            "coverage_table": None,
+        }
+    return response
 
 
 async def document_evidence(request: Any, context: Any) -> Response:

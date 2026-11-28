@@ -6,15 +6,16 @@ Directory contract (under the skill root)::
 
     rules/
     |-- config.json              enabled packs + override policy
-    |-- builtin/rules.json       19 built-in rules (single source of truth)
+    |-- builtin/rules.json       built-in rules (single source of truth)
+    |-- builtin/source/          source workbook/document for the builtin rules
     |-- packs/<pack>/pack.json   compiled rule pack (data, never code)
     |-- packs/<pack>/source/     original rule document(s)
     `-- _inbox/                  rule documents waiting to be compiled
 
-`check_coverage.py` and `verify_findings.py` read rule ids and severities
-from here, so adding a rule never requires editing Python. When the builtin
-JSON is missing the hard-coded fallback keeps the skill usable, but tests
-assert that the JSON and the fallback agree.
+`check_coverage.py`, `verify_findings.py` and the prompt builders read rule ids
+and severities from here, so adding or replacing rules never requires editing
+Python. The built-in JSON is mandatory: a missing file is an error, never a
+silent fallback to an older rule set.
 """
 
 from __future__ import annotations
@@ -36,6 +37,8 @@ PACK_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
 SEVERITIES = {"A", "B", "C"}
 SCOPES = {"single", "batch"}
+STAGES = {"global", "project"}
+REQUIRES = {"text", "image", "standard", "ledger", "materials", "visual_model"}
 CHECK_TYPES = {
     "page_sequence",
     "text_regex",
@@ -47,15 +50,6 @@ CHECK_TYPES = {
     "visual",
     "manual",
     "python",
-}
-BUILTIN_IDS = [f"R{i:02d}" for i in range(1, 20)]
-
-# Kept in sync with rules/builtin/rules.json; used only if that file is missing.
-FALLBACK_SEVERITY = {
-    "R01": "B", "R02": "A", "R03": "B", "R04": "B", "R05": "A",
-    "R06": "A", "R07": "B", "R08": "B", "R09": "B", "R10": "A",
-    "R11": "A", "R12": "A", "R13": "A", "R14": "A", "R15": "A",
-    "R16": "B", "R17": "C", "R18": "C", "R19": "B",
 }
 
 
@@ -70,18 +64,16 @@ class RuleSet:
     rules: dict[str, dict[str, Any]] = field(default_factory=dict)
     packs: list[dict[str, Any]] = field(default_factory=list)
     skipped_drafts: list[str] = field(default_factory=list)
+    builtin_ids: list[str] = field(default_factory=list)
 
     @property
     def ids(self) -> list[str]:
         return list(self.rules)
 
     @property
-    def builtin_ids(self) -> list[str]:
-        return [rule_id for rule_id in self.rules if rule_id in BUILTIN_IDS]
-
-    @property
     def extra_ids(self) -> list[str]:
-        return [rule_id for rule_id in self.rules if rule_id not in BUILTIN_IDS]
+        builtin = set(self.builtin_ids)
+        return [rule_id for rule_id in self.rules if rule_id not in builtin]
 
     @property
     def severity(self) -> dict[str, str]:
@@ -89,7 +81,7 @@ class RuleSet:
 
     def summary(self) -> str:
         parts = [f"{pack['pack']}@{pack['version']}" for pack in self.packs]
-        return " + ".join(parts) if parts else "builtin(内置兜底)"
+        return " + ".join(parts) if parts else "builtin"
 
 
 def default_rules_dir() -> Path:
@@ -117,19 +109,6 @@ def load_pack(path: Path) -> dict[str, Any]:
     return pack
 
 
-def fallback_builtin() -> dict[str, Any]:
-    return {
-        "pack": "builtin",
-        "version": "0.0.0-fallback",
-        "title": "内置 19 项（兜底）",
-        "status": "active",
-        "rules": [
-            {"id": rule_id, "severity": severity, "title": rule_id, "module": "内置", "fail_when": ""}
-            for rule_id, severity in FALLBACK_SEVERITY.items()
-        ],
-    }
-
-
 def load_config(root: Path) -> dict[str, Any]:
     path = root / "config.json"
     if not path.is_file():
@@ -154,18 +133,24 @@ def load_rules(
 ) -> RuleSet:
     """Load builtin plus configured/extra packs.
 
-    Pack order is builtin, then config.json order, then extra paths. Later
-    packs may override an id only when the pack lists it in ``overrides`` and
-    config has ``allow_overrides: true``.
+    The builtin JSON is required. Pack order is builtin, then config.json order,
+    then extra paths. Later packs may override an id only when the pack lists it
+    in ``overrides`` and config has ``allow_overrides: true``.
     """
     root = Path(root) if root else default_rules_dir()
     config = load_config(root)
     allow_overrides = bool(config.get("allow_overrides", False))
 
-    pack_paths: list[tuple[Path, bool]] = []
     builtin_path = resolve_pack_path(root, config.get("builtin", "builtin/rules.json"))
-    if builtin_path.is_file():
-        pack_paths.append((builtin_path, False))
+    if not builtin_path.is_file() and str(config.get("builtin", "builtin/rules.json")) == "builtin/rules.json":
+        # Packs may be snapshotted into a temporary library root without copying
+        # the builtin JSON; use the skill's authoritative builtin in that case.
+        fallback = default_rules_dir() / "builtin" / "rules.json"
+        if fallback.is_file():
+            builtin_path = fallback
+    if not builtin_path.is_file():
+        raise RulesError(f"内置规则 JSON 不存在: {builtin_path}")
+    pack_paths: list[tuple[Path, bool]] = [(builtin_path, False)]
     for entry in config.get("packs", []):
         path = resolve_pack_path(root, str(entry))
         if not path.is_file():
@@ -182,9 +167,10 @@ def load_rules(
     for path, explicit in pack_paths:
         pack = load_pack(path)
         status = pack.get("status", "active")
+        is_builtin = path.resolve() == builtin_path.resolve()
         # Explicit --rules means the caller deliberately chose this pack, so a
         # draft is allowed there; config packs still require activation.
-        if not explicit and status != "active" and not include_drafts:
+        if not explicit and not is_builtin and status != "active" and not include_drafts:
             ruleset.skipped_drafts.append(f"{pack.get('pack', path.parent.name)} ({status})")
             continue
         rules = pack.get("rules")
@@ -206,6 +192,8 @@ def load_rules(
                 )
             ruleset.rules[rule_id] = dict(rule)
 
+        if is_builtin:
+            ruleset.builtin_ids = [str(rule.get("id", "")).strip() for rule in rules]
         ruleset.packs.append(
             {
                 "pack": pack.get("pack", path.parent.name),
@@ -215,17 +203,16 @@ def load_rules(
             }
         )
 
-    if not ruleset.rules:
-        builtin = fallback_builtin()
-        for rule in builtin["rules"]:
-            ruleset.rules[rule["id"]] = rule
-        ruleset.packs.append(
-            {"pack": "builtin", "version": builtin["version"], "status": "active", "path": "(fallback)"}
-        )
+    if not ruleset.rules or not ruleset.builtin_ids:
+        raise RulesError("内置规则集为空")
     return ruleset
 
 
-def validate_pack(pack: dict[str, Any], pack_path: Path) -> tuple[list[str], list[str]]:
+def validate_pack(
+    pack: dict[str, Any],
+    pack_path: Path,
+    builtin_ids: Iterable[str] | None = None,
+) -> tuple[list[str], list[str]]:
     """Validate one pack. Returns (errors, warnings)."""
     errors: list[str] = []
     warnings: list[str] = []
@@ -251,6 +238,7 @@ def validate_pack(pack: dict[str, Any], pack_path: Path) -> tuple[list[str], lis
         errors.append("rules 必须是非空数组")
         return errors, warnings
 
+    builtin = set(builtin_ids or [])
     seen: set[str] = set()
     for index, rule in enumerate(rules, start=1):
         if not isinstance(rule, dict):
@@ -258,15 +246,13 @@ def validate_pack(pack: dict[str, Any], pack_path: Path) -> tuple[list[str], lis
             continue
         rule_id = str(rule.get("id", "")).strip()
         if not RULE_ID_RE.match(rule_id):
-            errors.append(f"第 {index} 条规则号非法: {rule_id!r}（应为字母+至少两位数字，如 X01）")
+            errors.append(f"第 {index} 条规则号非法: {rule_id!r}（应为字母+至少两位数字，如 R01）")
         elif rule_id in seen:
             errors.append(f"规则号重复: {rule_id}")
         seen.add(rule_id)
 
-        if name != "builtin" and rule_id in BUILTIN_IDS:
+        if name != "builtin" and builtin and rule_id in builtin:
             errors.append(f"附加规则不得占用内置规则号: {rule_id}")
-        if name == "builtin" and rule_id not in BUILTIN_IDS:
-            errors.append(f"内置规则包只能包含 R01–R19: {rule_id}")
 
         if rule.get("severity") not in SEVERITIES:
             errors.append(f"{rule_id}: severity 必须是 A/B/C")
@@ -278,6 +264,8 @@ def validate_pack(pack: dict[str, Any], pack_path: Path) -> tuple[list[str], lis
             warnings.append(f"{rule_id}: 缺少 module，按“客户要求”处理")
         if rule.get("scope", "single") not in SCOPES:
             errors.append(f"{rule_id}: scope 只能是 single/batch")
+        if rule.get("stage", "project") not in STAGES:
+            errors.append(f"{rule_id}: stage 只能是 global/project")
         check = rule.get("check")
         if not isinstance(check, dict) or check.get("type") not in CHECK_TYPES:
             errors.append(f"{rule_id}: check.type 必须是 {sorted(CHECK_TYPES)} 之一")
@@ -286,11 +274,12 @@ def validate_pack(pack: dict[str, Any], pack_path: Path) -> tuple[list[str], lis
             evidence = [evidence]
         if not evidence:
             warnings.append(f"{rule_id}: 缺少 evidence（取证位置）")
-
-    if name == "builtin":
-        missing = [rule_id for rule_id in BUILTIN_IDS if rule_id not in seen]
-        if missing:
-            errors.append("内置规则缺少: " + ", ".join(missing))
+        requires = rule.get("requires", [])
+        if isinstance(requires, str):
+            requires = [requires]
+        unknown = sorted(set(requires) - REQUIRES)
+        if unknown:
+            errors.append(f"{rule_id}: requires 含未知项 {unknown}")
 
     source = pack.get("compiled_from") or {}
     if source.get("source"):

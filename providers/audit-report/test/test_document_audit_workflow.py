@@ -379,7 +379,7 @@ async def test_audit_prepared_uses_text_only_workflow_and_keeps_full_materials(
     assert execution["report"] == report_text_value
     assert execution["count"] == 1
     assert execution["materials"][0]["content"] == "full workbook body"
-    assert set(execution["kwargs"]) == {"on_progress", "rules_dir"}
+    assert set(execution["kwargs"]) == {"on_progress", "rules_dir", "ruleset"}
     submission = json.loads((tmp_path / "submission.json").read_text(encoding="utf-8"))
     assert submission["materials"][0]["characters"] == len("full workbook body")
     assert not any(key.startswith("visual_") or "image" in key for key in submission)
@@ -398,7 +398,7 @@ async def test_audit_prepared_uses_text_only_workflow_and_keeps_full_materials(
                        "reference": "evidence/missing.png"}]}], [], [], False),
     ],
 )
-async def test_audit_prepared_rejects_incomplete_evidence_delivery(
+async def test_audit_prepared_publishes_pdf_for_incomplete_evidence_delivery(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     findings: list[dict], errors: list[str], evidence_errors: list[str], should_complete: bool,
 ) -> None:
@@ -408,9 +408,12 @@ async def test_audit_prepared_rejects_incomplete_evidence_delivery(
 
     async def execute(*_args, **_kwargs):
         rows = "\n".join(
-            f"| {rule} | 模块 | 检查项 | B | 通过 | 来源依据 |" for rule in load_rules().ids
+            (f"| {rule_id} | 模块 | 检查项 | B | 不适用 | 没有对应输入 |"
+             if set(rule.get("requires") or []) & {"standard", "ledger", "materials"}
+             else f"| {rule_id} | 模块 | 检查项 | B | 通过 | 来源依据 |")
+            for rule_id, rule in load_rules().rules.items()
         )
-        return f"# 报告\n\n## 5. 检查覆盖表\n{rows}\n"
+        return f"# 报告\n\n**总评：通过**\n\n## 5. 检查覆盖表\n{rows}\n"
 
     def fake_delivery(_markdown: Path, _source_pdf: Path, output_pdf: Path) -> dict:
         output_pdf.parent.mkdir(parents=True, exist_ok=True)
@@ -426,12 +429,15 @@ async def test_audit_prepared_rejects_incomplete_evidence_delivery(
     async def submit(_prompt: str) -> str:
         raise AssertionError("mocked workflow should not submit model requests")
 
-    if should_complete:
-        result = await run_document_audit.audit_prepared(Path("prepared.pdf"), [], tmp_path, submit)
-        assert result["report_pdf"] == str(tmp_path / "audit-report.pdf")
-    else:
-        with pytest.raises(RuntimeError, match="delivery is incomplete"):
-            await run_document_audit.audit_prepared(Path("prepared.pdf"), [], tmp_path, submit)
+    result = await run_document_audit.audit_prepared(Path("prepared.pdf"), [], tmp_path, submit)
+    assert result["report_pdf"] == str(tmp_path / "audit-report.pdf")
+    assert result["completion_status"] == ("complete" if should_complete else "needs_review")
+    if not should_complete:
+        assert "delivery_evidence_incomplete" in result["warnings"]
+        assert "证据截图未完整生成" in (tmp_path / "audit.md").read_text(encoding="utf-8")
+        import pymupdf
+        with pymupdf.open(result["report_pdf"]) as report_pdf:
+            assert report_pdf.page_count > 0
 
     saved = json.loads((tmp_path / "delivery.json").read_text(encoding="utf-8"))
     assert saved["findings"] == findings
@@ -499,7 +505,7 @@ async def test_cli_records_stage_usage_and_explicit_token_limit(tmp_path: Path, 
 
     monkeypatch.setattr(run_document_audit, "request_markdown", fake_request)
 
-    async def fake_audit_prepared(_pdf, _materials, _out, submit, *, on_progress):
+    async def fake_audit_prepared(_pdf, _materials, _out, submit, *, on_progress, **_kwargs):
         await submit("# 本次任务：识别报告项目目录")
         await submit("# 本次任务：一个项目的完整审核")
         await submit("# 本次任务：全局审核与汇总")
@@ -507,7 +513,7 @@ async def test_cli_records_stage_usage_and_explicit_token_limit(tmp_path: Path, 
     monkeypatch.setattr(run_document_audit, "audit_prepared", fake_audit_prepared)
     args = argparse.Namespace(
         out=tmp_path, report=Path("report.pdf"), core_config=Path("config.json"),
-        model_token_id=None, max_output_tokens=8192, materials=[],
+        model_token_id=None, max_output_tokens=8192, materials=[], no_visual=True, visual_dpi=144,
     )
     await run_document_audit.run_cli(args)
 
@@ -520,7 +526,7 @@ async def test_cli_records_stage_usage_and_explicit_token_limit(tmp_path: Path, 
 
 
 def test_incomplete_rule_container_cannot_be_published() -> None:
-    md = "# 审核报告\n\n" + "\n".join(f"| R{i:02d} | 模块 | 检查项 | A | 通过 | 模型说明 |" for i in range(1, 20))
+    md = "# 审核报告\n\n" + "\n".join(f"| R{i:02d} | 模块 | 检查项 | A | 通过 | 模型说明 |" for i in range(1, 47))
     assert validate_markdown(md) == md
     with pytest.raises(ValueError, match="R19"):
         validate_markdown(md.replace("| R19 |", "| missing |"))

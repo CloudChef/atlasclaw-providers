@@ -6,8 +6,8 @@
   "extends": "builtin",
   "compiled_from": {
     "source": "source/rules.md",
-    "sha256": "d7efa51dfa0ce0cc3269d7784a8bbf933f90ccea934d468bfbbd24c9740fed87",
-    "compiled_at": "2026-11-24 16:38:13",
+    "sha256": "a4f4bccd5e92528b04712e24d0b913f4c97f8e01f086f5d31b7221e7456cf218",
+    "compiled_at": "2026-11-27 18:58:17",
     "compiler": "rules_compile.py"
   },
   "compile_warnings": [],

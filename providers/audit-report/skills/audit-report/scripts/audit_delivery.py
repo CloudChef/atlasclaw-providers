@@ -184,6 +184,43 @@ def _missing_local_evidence_refs(markdown: str, report_dir: Path) -> list[str]:
     return missing
 
 
+def _mark_pdf_object_table(html: str) -> str:
+    """Give the source metadata table a readable PDF-only column split."""
+    table_re = re.compile(r"(<table\b[^>]*>)(.*?</table>)", re.I | re.S)
+
+    def mark(match: re.Match[str]) -> str:
+        opening, body = match.groups()
+        if not (
+            re.search(r"<th\b[^>]*>\s*项目\s*</th>", body, re.I | re.S)
+            and re.search(r"<th\b[^>]*>\s*内容\s*</th>", body, re.I | re.S)
+            and "SHA-256" in body
+        ):
+            return match.group(0)
+        class_match = re.search(r'\bclass\s*=\s*(["\'])(.*?)\1', opening, re.I | re.S)
+        if class_match:
+            classes = class_match.group(2).split()
+            if "audit-object-table" not in classes:
+                classes.append("audit-object-table")
+                opening = opening[:class_match.start(2)] + " ".join(classes) + opening[class_match.end(2):]
+        else:
+            opening = opening[:-1] + ' class="audit-object-table">'
+        sha_row_re = re.compile(r"<tr\b[^>]*>.*?SHA-256.*?</tr>", re.I | re.S)
+
+        def split_hash(row_match: re.Match[str]) -> str:
+            row = row_match.group(0)
+            return re.sub(
+                r"(<code\b[^>]*>)([0-9a-fA-F]{32})([0-9a-fA-F]{32})(</code>)",
+                r"\1\2<br>\3\4",
+                row,
+                count=1,
+            )
+
+        body = sha_row_re.sub(split_hash, body, count=1)
+        return opening + body
+
+    return table_re.sub(mark, html)
+
+
 def _render_pdf(html_path: Path, output_pdf: Path) -> None:
     font = _font_file()
     font_css = (
@@ -191,9 +228,9 @@ def _render_pdf(html_path: Path, output_pdf: Path) -> None:
         if font else "body {font-family: china-s;}"
     )
     css = _pdf_css(font_css)
-    # The HTML is the canonical visual artifact; PDF-only adjustments avoid a
-    # clipped flowing footer and broken table row backgrounds in Story layout.
-    html = html_path.read_text(encoding="utf-8")
+    # The HTML keeps its color styling; PDF-only layout rules prevent Story's
+    # repeated backgrounds and intrinsic table widths from clipping report text.
+    html = _mark_pdf_object_table(html_path.read_text(encoding="utf-8"))
     html = re.sub(r"<footer\b[^>]*>.*?</footer>", "", html, flags=re.I | re.S)
     story = pymupdf.Story(html=html, user_css=css)
     page = pymupdf.Rect(0, 0, 595.28, 841.89)

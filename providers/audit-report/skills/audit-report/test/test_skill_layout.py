@@ -30,12 +30,13 @@ def test_skill_frontmatter_and_layout():
     metadata = _frontmatter(text)
     assert metadata.get("name") == "audit-report"
     assert len(metadata.get("description", "")) > 20
-    for name in ("extract_report.py", "selfcheck.py", "render_report.py", "rules_compile.py", "rules_sync.py", "rules_validate.py"):
+    for name in ("extract_report.py", "selfcheck.py", "render_report.py", "rules_compile.py", "rules_sync.py", "rules_validate.py", "import_builtin_rules.py", "audit_visual.py", "image_facts.py"):
         assert (SCRIPTS / name).is_file()
-    for name in ("audit-rules.md", "report-template.md"):
+    for name in ("audit-rules.md", "report-template.md", "audit-visual-review.md"):
         assert (SKILL_ROOT / "references" / name).is_file()
-    for name in ("config.json", "builtin/rules.json", "README.md"):
+    for name in ("config.json", "builtin/rules.json", "README.md", "builtin/rules.md"):
         assert (SKILL_ROOT / "rules" / name).is_file()
+    assert (SKILL_ROOT / "rules" / "builtin" / "source" / "AI报告审核规则_final.xlsx").is_file()
 
 
 def test_skill_commands_use_runtime_variables():
